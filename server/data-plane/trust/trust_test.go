@@ -77,11 +77,15 @@ func TestNonceSingleUse(t *testing.T) {
 	if err != nil || len(nonce) != crypto.NonceSize || exp == 0 {
 		t.Fatalf("issue: %v len=%d", err, len(nonce))
 	}
-	ok, err := store.Consume(ctx, "t1", nonce)
+	// A nonce issued for app a1 must not be redeemable for a different app.
+	if ok, err := store.Consume(ctx, "t1", nonce, "a2"); err != nil || ok {
+		t.Fatalf("cross-app consume should fail: ok=%v err=%v", ok, err)
+	}
+	ok, err := store.Consume(ctx, "t1", nonce, "a1")
 	if err != nil || !ok {
 		t.Fatalf("first consume should succeed: %v %v", ok, err)
 	}
-	ok, _ = store.Consume(ctx, "t1", nonce)
+	ok, _ = store.Consume(ctx, "t1", nonce, "a1")
 	if ok {
 		t.Fatal("nonce reused")
 	}

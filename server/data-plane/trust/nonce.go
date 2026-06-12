@@ -10,11 +10,13 @@ import (
 	"github.com/kennguy3n/kseal/server/shared/crypto"
 )
 
-// consumeScript atomically reads and deletes a nonce, returning 1 if it existed.
-// Single-use consumption is the anti-replay guard for the attestation step.
+// consumeScript atomically reads and deletes a nonce, returning 1 only when it
+// existed AND was issued for the same app (ARGV[1]). Single-use consumption is
+// the anti-replay guard for the attestation step; the app check stops a nonce
+// issued for app A from being redeemed for app B under the same tenant.
 var consumeScript = redis.NewScript(`
 local v = redis.call('get', KEYS[1])
-if v then
+if v and v == ARGV[1] then
   redis.call('del', KEYS[1])
   return 1
 end
@@ -55,11 +57,12 @@ func (n *NonceStore) Issue(ctx context.Context, tenantID, appID string) ([]byte,
 	return nonce, time.Now().Add(n.ttl).Unix(), nil
 }
 
-// Consume atomically validates and removes a nonce, returning true if it was
-// present (and therefore valid and unused). A second attempt returns false.
-func (n *NonceStore) Consume(ctx context.Context, tenantID string, nonce []byte) (bool, error) {
+// Consume atomically validates and removes a nonce, returning true only if it
+// was present, unused, and bound to appID. A second attempt, or a mismatched
+// app, returns false.
+func (n *NonceStore) Consume(ctx context.Context, tenantID string, nonce []byte, appID string) (bool, error) {
 	key := nonceKey(tenantID, nonce)
-	res, err := consumeScript.Run(ctx, n.client, []string{key}).Int()
+	res, err := consumeScript.Run(ctx, n.client, []string{key}, appID).Int()
 	if err != nil {
 		return false, fmt.Errorf("consume nonce: %w", err)
 	}

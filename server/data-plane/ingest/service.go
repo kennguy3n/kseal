@@ -10,9 +10,9 @@ import (
 	"github.com/klauspost/compress/zstd"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/kennguy3n/kseal/server/control-plane/registry"
 	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
 	"github.com/kennguy3n/kseal/server/gen/kseal/v1/ksealv1connect"
-	"github.com/kennguy3n/kseal/server/control-plane/registry"
 )
 
 const maxDecompressedBytes = 16 << 20 // 16 MiB ceiling guards against zip bombs.
@@ -24,44 +24,65 @@ type AppValidator interface {
 	Valid(ctx context.Context, tenantID, appID string) (bool, error)
 }
 
-// CachedAppValidator caches positive registry lookups for a short TTL.
-type CachedAppValidator struct {
-	store registry.Store
-	ttl   time.Duration
-
-	mu    sync.Mutex
-	cache map[string]time.Time
+type cacheEntry struct {
+	valid   bool
+	expires time.Time
 }
 
-// NewCachedAppValidator builds a validator with the given cache TTL.
+// CachedAppValidator caches both positive and negative registry lookups for a
+// short TTL. The negative cache bounds DB load when a high-volume stream targets
+// an unknown or deleted app (misconfiguration or abuse), capping it at one DB
+// hit per (tenant, app) per negTTL.
+type CachedAppValidator struct {
+	store  registry.Store
+	ttl    time.Duration
+	negTTL time.Duration
+
+	mu    sync.Mutex
+	cache map[string]cacheEntry
+}
+
+// NewCachedAppValidator builds a validator with the given positive cache TTL.
+// Negative results are cached for a shorter window (min(ttl, 5s)) so a newly
+// registered app becomes visible quickly.
 func NewCachedAppValidator(store registry.Store, ttl time.Duration) *CachedAppValidator {
 	if ttl <= 0 {
 		ttl = 30 * time.Second
 	}
-	return &CachedAppValidator{store: store, ttl: ttl, cache: map[string]time.Time{}}
+	negTTL := 5 * time.Second
+	if ttl < negTTL {
+		negTTL = ttl
+	}
+	return &CachedAppValidator{store: store, ttl: ttl, negTTL: negTTL, cache: map[string]cacheEntry{}}
 }
 
 // Valid returns whether the app exists for the tenant.
 func (v *CachedAppValidator) Valid(ctx context.Context, tenantID, appID string) (bool, error) {
 	key := tenantID + "/" + appID
 	v.mu.Lock()
-	if exp, ok := v.cache[key]; ok && time.Now().Before(exp) {
+	if e, ok := v.cache[key]; ok && time.Now().Before(e.expires) {
 		v.mu.Unlock()
-		return true, nil
+		return e.valid, nil
 	}
 	v.mu.Unlock()
 
 	_, err := v.store.GetApp(ctx, tenantID, appID)
-	if errors.Is(err, registry.ErrNotFound) {
+	switch {
+	case errors.Is(err, registry.ErrNotFound):
+		v.put(key, cacheEntry{valid: false, expires: time.Now().Add(v.negTTL)})
 		return false, nil
-	}
-	if err != nil {
+	case err != nil:
 		return false, err
+	default:
+		v.put(key, cacheEntry{valid: true, expires: time.Now().Add(v.ttl)})
+		return true, nil
 	}
+}
+
+func (v *CachedAppValidator) put(key string, e cacheEntry) {
 	v.mu.Lock()
-	v.cache[key] = time.Now().Add(v.ttl)
+	v.cache[key] = e
 	v.mu.Unlock()
-	return true, nil
 }
 
 // Service implements the Connect IngestService.
@@ -124,8 +145,8 @@ func (s *Service) SubmitTelemetry(ctx context.Context, req *connect.Request[ksea
 	allowed, _, err := s.quota.Allow(ctx, m.TenantId, len(batch.Events))
 	if err == nil && !allowed {
 		return connect.NewResponse(&ksealv1.SubmitTelemetryResponse{
-			Rejected:      int32(len(batch.Events)),
-			QuotaExceeded: true,
+			Rejected:        int32(len(batch.Events)),
+			QuotaExceeded:   true,
 			RejectionReason: "per-tenant quota exceeded",
 		}), nil
 	}

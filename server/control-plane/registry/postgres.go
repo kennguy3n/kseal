@@ -521,7 +521,6 @@ func (s *PostgresStore) ValidateAPIKey(ctx context.Context, plaintext string) (*
 		if status != "active" {
 			return ErrNotFound
 		}
-		_, _ = tx.Exec(ctx, `UPDATE api_keys SET last_used_at = now() WHERE key_id = $1`, keyID)
 		return nil
 	})
 	if err != nil {
@@ -534,6 +533,13 @@ func (s *PostgresStore) ValidateAPIKey(ctx context.Context, plaintext string) (*
 	if !ok {
 		return nil, ErrNotFound
 	}
+	// Best-effort bookkeeping, only after the secret is verified so failed auth
+	// attempts with a valid key_id don't pollute last_used_at. Runs in its own
+	// admin tx so the RLS-bypass GUC is set (api_keys forces RLS).
+	_ = s.db.WithAdminTx(ctx, func(tx pgx.Tx) error {
+		_, _ = tx.Exec(ctx, `UPDATE api_keys SET last_used_at = now() WHERE key_id = $1`, keyID)
+		return nil
+	})
 	return &auth.Principal{TenantID: tenantID, APIKeyID: keyID, Scopes: scopes}, nil
 }
 

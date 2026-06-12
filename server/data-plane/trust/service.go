@@ -9,13 +9,13 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"github.com/google/uuid"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 
-	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
-	"github.com/kennguy3n/kseal/server/gen/kseal/v1/ksealv1connect"
 	"github.com/kennguy3n/kseal/server/control-plane/registry"
 	"github.com/kennguy3n/kseal/server/data-plane/attestation"
+	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
+	"github.com/kennguy3n/kseal/server/gen/kseal/v1/ksealv1connect"
 	"github.com/kennguy3n/kseal/server/shared/crypto"
 	"github.com/kennguy3n/kseal/server/shared/risk"
 )
@@ -58,7 +58,8 @@ func (s *Service) VerifyAttestation(ctx context.Context, req *connect.Request[ks
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("tenant_id and app_id required"))
 	}
 
-	ok, err := s.nonces.Consume(ctx, m.TenantId, m.Nonce)
+	// The nonce must have been issued for this exact app (anti cross-app replay).
+	ok, err := s.nonces.Consume(ctx, m.TenantId, m.Nonce, m.AppId)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeUnavailable, err)
 	}

@@ -7,10 +7,11 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
-	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
 	"github.com/kennguy3n/kseal/server/control-plane/registry"
+	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
 	"github.com/kennguy3n/kseal/server/shared/crypto"
 	"github.com/kennguy3n/kseal/server/shared/telemetry"
 )
@@ -68,14 +69,17 @@ type job struct {
 // Dispatcher fans out events to registered webhooks with signing, retries, and
 // per-endpoint circuit breaking via a bounded worker pool.
 type Dispatcher struct {
-	store    registry.Store
-	client   *http.Client
-	cfg      DispatcherConfig
-	metrics  *telemetry.Metrics
-	queue    chan job
-	breakers sync.Map // webhook id -> *breaker
-	wg       sync.WaitGroup
-	stopOnce sync.Once
+	store      registry.Store
+	client     *http.Client
+	cfg        DispatcherConfig
+	metrics    *telemetry.Metrics
+	queue      chan job
+	events     chan Event // raw events awaiting subscriber fan-out
+	breakers   sync.Map   // webhook id -> *breaker
+	wg         sync.WaitGroup
+	dispatchWG sync.WaitGroup
+	stopOnce   sync.Once
+	stopped    atomic.Bool // set before channels are closed; gates further sends
 }
 
 // NewDispatcher builds and starts a dispatcher.
@@ -87,17 +91,49 @@ func NewDispatcher(store registry.Store, cfg DispatcherConfig, metrics *telemetr
 		cfg:     cfg,
 		metrics: metrics,
 		queue:   make(chan job, cfg.QueueSize),
+		events:  make(chan Event, cfg.QueueSize),
 	}
 	for i := 0; i < cfg.Workers; i++ {
 		d.wg.Add(1)
 		go d.worker()
 	}
+	d.dispatchWG.Add(1)
+	go d.dispatchLoop()
 	return d
 }
 
-// Dispatch enqueues an event for delivery to every matching active webhook. It
-// is non-blocking; if the queue is saturated the event is dropped and counted.
+// Submit hands a raw event to the dispatcher for asynchronous subscriber
+// resolution and delivery. It is non-blocking: the (potentially DB-backed)
+// webhook lookup runs off the caller's goroutine, so hot producers (e.g. the
+// ingest writer) are never blocked. A saturated buffer drops and counts.
+func (d *Dispatcher) Submit(e Event) {
+	if d.stopped.Load() {
+		d.record("dropped")
+		return
+	}
+	select {
+	case d.events <- e:
+	default:
+		d.record("dropped")
+	}
+}
+
+func (d *Dispatcher) dispatchLoop() {
+	defer d.dispatchWG.Done()
+	for e := range d.events {
+		if err := d.fanout(context.Background(), e); err != nil {
+			d.record("lookup_error")
+		}
+	}
+}
+
+// Dispatch synchronously resolves subscribers and enqueues deliveries. Delivery
+// itself is async; if the worker queue is saturated jobs are dropped and counted.
 func (d *Dispatcher) Dispatch(ctx context.Context, e Event) error {
+	return d.fanout(ctx, e)
+}
+
+func (d *Dispatcher) fanout(ctx context.Context, e Event) error {
 	targets, err := d.store.ListWebhooksForEvent(ctx, e.TenantID, e.Type)
 	if err != nil {
 		return err
@@ -109,12 +145,16 @@ func (d *Dispatcher) Dispatch(ctx context.Context, e Event) error {
 }
 
 func (d *Dispatcher) enqueue(j job) {
+	// A retry timer can fire after Stop() has closed the queue; sending on a
+	// closed channel panics even under select/default, so gate on the flag.
+	if d.stopped.Load() {
+		d.record("dropped")
+		return
+	}
 	select {
 	case d.queue <- j:
 	default:
-		if d.metrics != nil {
-			d.metrics.WebhookDispatch.WithLabelValues("dropped").Inc()
-		}
+		d.record("dropped")
 	}
 }
 
@@ -181,9 +221,15 @@ func (d *Dispatcher) breakerFor(id string) *breaker {
 	return b.(*breaker)
 }
 
-// Stop drains and waits for in-flight deliveries.
+// Stop drains and waits for in-flight deliveries. It sets the stopped flag
+// before closing channels so late-firing retry timers and producers drop instead
+// of panicking on a send to a closed channel. The event channel is closed and
+// drained first so all pending fan-out completes before the worker queue closes.
 func (d *Dispatcher) Stop() {
 	d.stopOnce.Do(func() {
+		d.stopped.Store(true)
+		close(d.events)
+		d.dispatchWG.Wait()
 		close(d.queue)
 		d.wg.Wait()
 	})

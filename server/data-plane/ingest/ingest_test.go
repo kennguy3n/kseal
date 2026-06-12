@@ -11,8 +11,8 @@ import (
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/protobuf/proto"
 
-	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
 	"github.com/kennguy3n/kseal/server/control-plane/registry"
+	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
 )
 
 func newRedis(t *testing.T) *redis.Client {
@@ -57,6 +57,36 @@ func setupIngest(t *testing.T, perMinute int) (*Service, *registry.MemStore, *ks
 		t.Fatal(err)
 	}
 	return svc, store, tn, app, broker
+}
+
+// countingStore embeds the registry.Store interface (nil underlying) and only
+// implements GetApp so we can count DB lookups; the validator calls nothing else.
+type countingStore struct {
+	registry.Store
+	calls int
+	err   error
+}
+
+func (c *countingStore) GetApp(_ context.Context, _, _ string) (*ksealv1.App, error) {
+	c.calls++
+	return nil, c.err
+}
+
+func TestCachedAppValidatorNegativeCache(t *testing.T) {
+	cs := &countingStore{err: registry.ErrNotFound}
+	v := NewCachedAppValidator(cs, time.Minute)
+	ctx := context.Background()
+	for i := 0; i < 5; i++ {
+		ok, err := v.Valid(ctx, "t1", "missing")
+		if err != nil || ok {
+			t.Fatalf("expected (false,nil), got (%v,%v)", ok, err)
+		}
+	}
+	// The negative result must be cached so repeated unknown-app traffic does
+	// not amplify into one DB hit per request.
+	if cs.calls != 1 {
+		t.Fatalf("expected 1 DB lookup, got %d", cs.calls)
+	}
 }
 
 func TestSubmitTelemetryAcceptsCompressedBatch(t *testing.T) {

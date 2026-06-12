@@ -127,12 +127,20 @@ func (s *InMemoryAnalyticsStore) Count(_ context.Context, q Query) (int, error) 
 	return n, nil
 }
 
+// EventSink receives each validated event as it is drained, for fan-out to
+// secondary consumers (e.g. webhook delivery). Emit must be non-blocking so it
+// never stalls the write path.
+type EventSink interface {
+	Emit(e StoredEvent)
+}
+
 // Writer drains the broker and flushes events to the analytics store in batches.
 type Writer struct {
 	broker    Broker
 	store     AnalyticsStore
 	batchSize int
 	interval  time.Duration
+	sink      EventSink
 }
 
 // NewWriter builds a writer with batching parameters.
@@ -146,6 +154,9 @@ func NewWriter(broker Broker, store AnalyticsStore, batchSize int, interval time
 	return &Writer{broker: broker, store: store, batchSize: batchSize, interval: interval}
 }
 
+// SetEventSink registers a non-blocking sink notified of every drained event.
+func (w *Writer) SetEventSink(s EventSink) { w.sink = s }
+
 // Run consumes until the context is cancelled, flushing on batch-size or tick.
 // Remaining buffered events are flushed on shutdown.
 func (w *Writer) Run(ctx context.Context) {
@@ -157,7 +168,10 @@ func (w *Writer) Run(ctx context.Context) {
 			return
 		}
 		_ = w.store.Write(ctx, batch)
-		batch = batch[:0]
+		// Allocate a fresh buffer rather than reusing the backing array: the
+		// AnalyticsStore interface does not promise to copy its input, so a
+		// future async-batching backend could otherwise read corrupted data.
+		batch = make([]StoredEvent, 0, w.batchSize)
 	}
 	ch := w.broker.Consume()
 	for {
@@ -171,6 +185,9 @@ func (w *Writer) Run(ctx context.Context) {
 			if !ok {
 				flush()
 				return
+			}
+			if w.sink != nil {
+				w.sink.Emit(e)
 			}
 			batch = append(batch, e)
 			if len(batch) >= w.batchSize {

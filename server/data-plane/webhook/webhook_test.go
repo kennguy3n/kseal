@@ -12,8 +12,8 @@ import (
 
 	"connectrpc.com/connect"
 
-	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
 	"github.com/kennguy3n/kseal/server/control-plane/registry"
+	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
 	"github.com/kennguy3n/kseal/server/shared/auth"
 	"github.com/kennguy3n/kseal/server/shared/crypto"
 )
@@ -104,6 +104,57 @@ func TestDispatcherSignsAndDelivers(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("webhook not delivered")
 	}
+}
+
+func TestDispatcherSubmitDelivers(t *testing.T) {
+	store, tn := newStore(t)
+	got := make(chan string, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		got <- string(b)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	if _, err := store.CreateWebhook(context.Background(), tn.Id, srv.URL, []ksealv1.EventType{ksealv1.EventType_EVENT_TYPE_ROOT_RISK}); err != nil {
+		t.Fatal(err)
+	}
+	d := NewDispatcher(store, DispatcherConfig{Workers: 1, MaxAttempts: 1, BaseBackoff: time.Millisecond}, nil)
+	defer d.Stop()
+
+	// Submit is the async, non-blocking entry point used by the ingest writer:
+	// subscriber resolution happens off the caller's goroutine.
+	d.Submit(Event{TenantID: tn.Id, Type: ksealv1.EventType_EVENT_TYPE_ROOT_RISK, Payload: `{"k":"v"}`})
+
+	select {
+	case b := <-got:
+		if b != `{"k":"v"}` {
+			t.Fatalf("body mismatch: %s", b)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("submitted event not delivered")
+	}
+}
+
+// TestDispatcherStopWithPendingRetryNoPanic exercises the shutdown race: a retry
+// timer can fire after Stop() has closed the worker queue. The stopped flag must
+// make the late enqueue a no-op instead of panicking on a closed channel.
+func TestDispatcherStopWithPendingRetryNoPanic(t *testing.T) {
+	store, tn := newStore(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError) // always fail -> schedules a retry
+	}))
+	defer srv.Close()
+
+	if _, err := store.CreateWebhook(context.Background(), tn.Id, srv.URL, []ksealv1.EventType{ksealv1.EventType_EVENT_TYPE_DEBUGGER}); err != nil {
+		t.Fatal(err)
+	}
+	d := NewDispatcher(store, DispatcherConfig{Workers: 1, MaxAttempts: 5, BaseBackoff: 50 * time.Millisecond}, nil)
+	_ = d.Dispatch(context.Background(), Event{TenantID: tn.Id, Type: ksealv1.EventType_EVENT_TYPE_DEBUGGER, Payload: "{}"})
+	time.Sleep(10 * time.Millisecond) // let the first attempt fail and schedule a retry
+	d.Stop()
+	// Give the pending retry timer time to fire against the stopped dispatcher.
+	time.Sleep(100 * time.Millisecond)
 }
 
 func TestDispatcherRetriesThenSucceeds(t *testing.T) {

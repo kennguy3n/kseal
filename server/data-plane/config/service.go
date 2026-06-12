@@ -10,9 +10,9 @@ import (
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/kennguy3n/kseal/server/control-plane/registry"
 	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
 	"github.com/kennguy3n/kseal/server/gen/kseal/v1/ksealv1connect"
-	"github.com/kennguy3n/kseal/server/control-plane/registry"
 )
 
 // Service implements the Connect ConfigService.
@@ -47,6 +47,16 @@ func (s *Service) GetConfig(ctx context.Context, req *connect.Request[ksealv1.Co
 	}
 
 	pc := buildPolicyConfig(policy)
+	etag := fmt.Sprintf("%q", pc.PolicyHash)
+	// If the client already holds this exact policy, advertise a cache hit by
+	// returning the same ETag before doing any marshal/sign work; the SDK/CDN
+	// compares against If-None-Match.
+	if inm := req.Header().Get("If-None-Match"); inm != "" && inm == etag {
+		resp := connect.NewResponse(&ksealv1.ConfigResponse{Etag: etag, LastModified: policy.UpdatedAt})
+		resp.Header().Set("ETag", etag)
+		return resp, nil
+	}
+
 	bytes, err := proto.Marshal(pc)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
@@ -54,15 +64,6 @@ func (s *Service) GetConfig(ctx context.Context, req *connect.Request[ksealv1.Co
 	sig, keyID, err := s.signer.Sign(ctx, m.TenantId, bytes)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
-	}
-
-	etag := fmt.Sprintf("%q", pc.PolicyHash)
-	// If the client already holds this exact policy, advertise a cache hit by
-	// returning the same ETag; the SDK/CDN compares against If-None-Match.
-	if inm := req.Header().Get("If-None-Match"); inm != "" && inm == etag {
-		resp := connect.NewResponse(&ksealv1.ConfigResponse{Etag: etag, LastModified: policy.UpdatedAt})
-		resp.Header().Set("ETag", etag)
-		return resp, nil
 	}
 
 	resp := connect.NewResponse(&ksealv1.ConfigResponse{

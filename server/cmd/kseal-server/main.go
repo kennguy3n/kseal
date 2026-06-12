@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"os"
@@ -27,8 +28,8 @@ import (
 	"github.com/kennguy3n/kseal/server/control-plane/migrations"
 	"github.com/kennguy3n/kseal/server/control-plane/registry"
 
-	cfgsvc "github.com/kennguy3n/kseal/server/data-plane/config"
 	"github.com/kennguy3n/kseal/server/data-plane/attestation"
+	cfgsvc "github.com/kennguy3n/kseal/server/data-plane/config"
 	"github.com/kennguy3n/kseal/server/data-plane/ingest"
 	"github.com/kennguy3n/kseal/server/data-plane/trust"
 	"github.com/kennguy3n/kseal/server/data-plane/webhook"
@@ -96,19 +97,21 @@ func run() error {
 
 	configSvc := cfgsvc.NewService(store, cfgsvc.NewSigner(store), cfg.ConfigTTL)
 
+	dispatcher := webhook.NewDispatcher(store, webhook.DispatcherConfig{}, tel.Metrics)
+	defer dispatcher.Stop()
+
 	validator := ingest.NewCachedAppValidator(store, 30*time.Second)
 	quota := ingest.NewQuota(rdb, cfg.IngestQuotaPerMinute)
 	broker := ingest.NewChannelBroker(0)
 	analytics := ingest.NewInMemoryAnalyticsStore()
 	writer := ingest.NewWriter(broker, analytics, 0, 0)
+	// Fan validated telemetry out to registered webhook subscribers.
+	writer.SetEventSink(webhookSink{dispatcher})
 	go writer.Run(rootCtx)
 	ingestSvc, err := ingest.NewService(validator, quota, broker)
 	if err != nil {
 		return err
 	}
-
-	dispatcher := webhook.NewDispatcher(store, webhook.DispatcherConfig{}, tel.Metrics)
-	defer dispatcher.Stop()
 
 	// Interceptors.
 	limiter := middleware.NewRedisRateLimiter(rdb, cfg.RateLimitPerSecond, cfg.RateLimitBurst, "rl")
@@ -161,6 +164,43 @@ func run() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return srv.Shutdown(shutdownCtx)
+}
+
+// webhookSink adapts the ingest write path to the webhook dispatcher, fanning
+// each validated telemetry event out to subscribers. It carries only coarse,
+// non-PII fields.
+type webhookSink struct{ d *webhook.Dispatcher }
+
+func (s webhookSink) Emit(e ingest.StoredEvent) {
+	payload, err := json.Marshal(struct {
+		TenantID   string `json:"tenant_id"`
+		AppID      string `json:"app_id"`
+		EventType  string `json:"event_type"`
+		RiskBits   uint64 `json:"risk_bits"`
+		Confidence string `json:"confidence"`
+		PolicyHash string `json:"policy_hash"`
+		Platform   string `json:"platform"`
+		TimeBucket int64  `json:"time_bucket"`
+	}{
+		TenantID:   e.TenantID,
+		AppID:      e.AppID,
+		EventType:  e.EventType.String(),
+		RiskBits:   e.RiskBits,
+		Confidence: e.Confidence.String(),
+		PolicyHash: e.PolicyHash,
+		Platform:   e.Platform.String(),
+		TimeBucket: e.TimeBucket,
+	})
+	if err != nil {
+		return
+	}
+	s.d.Submit(webhook.Event{
+		TenantID:  e.TenantID,
+		AppID:     e.AppID,
+		Type:      e.EventType,
+		Payload:   string(payload),
+		Timestamp: e.ReceivedAt,
+	})
 }
 
 // controlPlaneProcedures lists procedures that require a valid API key. Device
