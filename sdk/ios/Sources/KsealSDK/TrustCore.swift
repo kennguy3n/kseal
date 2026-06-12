@@ -1,4 +1,5 @@
 import Foundation
+import Dispatch
 import CKseal
 
 /// Weighted risk score plus the confidence the core derived for it.
@@ -58,10 +59,18 @@ func verifyConfigSignature(config: Data, signature: Data, publicKey: Data) -> Bo
 
 /// Real trust core backed by the Rust `kseal-ffi` C ABI.
 ///
-/// Owns an opaque core handle for its lifetime; `deinit` releases it.
+/// Owns an opaque core handle for its lifetime; `deinit` releases it (the last
+/// strong reference is dropped only when no call is in flight).
+///
+/// Thread-safety mirrors the Rust borrow semantics of the C ABI: config mutation
+/// (`kseal_load_config` takes `&mut`) runs as a barrier on `coreQueue`, while the
+/// read paths (`&self`: risk evaluation, event/proof creation) run as concurrent
+/// syncs and may proceed in parallel. `generateNonce`/`compress`/`decompress`
+/// are stateless (no core handle) and bypass the queue.
 final class NativeTrustCore: TrustCore {
 
     private let handle: OpaquePointer
+    private let coreQueue = DispatchQueue(label: "io.kseal.core", attributes: .concurrent)
 
     private init(handle: OpaquePointer) {
         self.handle = handle
@@ -109,32 +118,40 @@ final class NativeTrustCore: TrustCore {
     }
 
     func loadConfig(_ signedConfigBytes: Data) throws {
-        let status = signedConfigBytes.withUnsafeBytes { b in
-            kseal_load_config(handle, b.bindMemory(to: UInt8.self).baseAddress, UInt(b.count))
-        }
-        if status != 0 {
-            throw TrustCoreError(message: "loadConfig failed: status=\(status)")
+        try coreQueue.sync(flags: .barrier) {
+            let status = signedConfigBytes.withUnsafeBytes { b in
+                kseal_load_config(handle, b.bindMemory(to: UInt8.self).baseAddress, UInt(b.count))
+            }
+            if status != 0 {
+                throw TrustCoreError(message: "loadConfig failed: status=\(status)")
+            }
         }
     }
 
     func tryLoadConfig(_ signedConfigBytes: Data) -> Bool {
-        signedConfigBytes.withUnsafeBytes { b in
-            kseal_load_config(handle, b.bindMemory(to: UInt8.self).baseAddress, UInt(b.count)) == 0
+        coreQueue.sync(flags: .barrier) {
+            signedConfigBytes.withUnsafeBytes { b in
+                kseal_load_config(handle, b.bindMemory(to: UInt8.self).baseAddress, UInt(b.count)) == 0
+            }
         }
     }
 
     func evaluateRisk(_ riskBits: UInt64) throws -> CoreRiskScore {
-        var score: UInt32 = 0
-        var confidence: Int32 = 0
-        let status = kseal_evaluate_risk(handle, riskBits, &score, &confidence)
-        if status != 0 {
-            throw TrustCoreError(message: "evaluateRisk failed: status=\(status)")
+        try coreQueue.sync {
+            var score: UInt32 = 0
+            var confidence: Int32 = 0
+            let status = kseal_evaluate_risk(handle, riskBits, &score, &confidence)
+            if status != 0 {
+                throw TrustCoreError(message: "evaluateRisk failed: status=\(status)")
+            }
+            return CoreRiskScore(score: score, confidence: Confidence(code: confidence))
         }
-        return CoreRiskScore(score: score, confidence: Confidence(code: confidence))
     }
 
     func computeRiskLevel(_ riskBits: UInt64) -> TrustLevel {
-        TrustLevel(code: kseal_compute_risk_level(handle, riskBits))
+        coreQueue.sync {
+            TrustLevel(code: kseal_compute_risk_level(handle, riskBits))
+        }
     }
 
     func createEvent(
@@ -147,65 +164,71 @@ final class NativeTrustCore: TrustCore {
         coarseTimeBucket: Int64,
         country: String?
     ) throws -> Data {
-        var out = KsealBuffer()
-        let status = buildHash.withCString { build in
-            policyHash.withCString { policy in
-                installKeyHash.withCString { install in
-                    withOptionalCString(country) { countryPtr in
-                        kseal_create_event(
+        try coreQueue.sync {
+            var out = KsealBuffer()
+            let status = buildHash.withCString { build in
+                policyHash.withCString { policy in
+                    installKeyHash.withCString { install in
+                        withOptionalCString(country) { countryPtr in
+                            kseal_create_event(
+                                handle,
+                                eventType.rawValue,
+                                riskBits,
+                                confidence.rawValue,
+                                build, policy, install,
+                                coarseTimeBucket,
+                                countryPtr,
+                                &out
+                            )
+                        }
+                    }
+                }
+            }
+            if status != 0 {
+                kseal_buffer_free(out)
+                throw TrustCoreError(message: "createEvent failed: status=\(status)")
+            }
+            return Self.consume(&out)
+        }
+    }
+
+    func batchAndCompress(_ events: [Data]) throws -> Data {
+        try coreQueue.sync {
+            var out = KsealBuffer()
+            let status = withBytesViews(events) { views in
+                kseal_batch_and_compress(handle, views.baseAddress, UInt(views.count), &out)
+            }
+            if status != 0 {
+                kseal_buffer_free(out)
+                throw TrustCoreError(message: "batchAndCompress failed: status=\(status)")
+            }
+            return Self.consume(&out)
+        }
+    }
+
+    func generateRequestProof(tokenId: String, requestHash: Data, nonce: Data, sequence: Int64) throws -> Data {
+        try coreQueue.sync {
+            var out = KsealBuffer()
+            let status = tokenId.withCString { tok in
+                requestHash.withUnsafeBytes { rh in
+                    nonce.withUnsafeBytes { nc in
+                        kseal_generate_request_proof(
                             handle,
-                            eventType.rawValue,
-                            riskBits,
-                            confidence.rawValue,
-                            build, policy, install,
-                            coarseTimeBucket,
-                            countryPtr,
+                            tok,
+                            rh.bindMemory(to: UInt8.self).baseAddress, UInt(rh.count),
+                            nc.bindMemory(to: UInt8.self).baseAddress, UInt(nc.count),
+                            sequence,
                             &out
                         )
                     }
                 }
             }
-        }
-        if status != 0 {
-            kseal_buffer_free(out)
-            throw TrustCoreError(message: "createEvent failed: status=\(status)")
-        }
-        return Self.consume(&out)
-    }
-
-    func batchAndCompress(_ events: [Data]) throws -> Data {
-        var out = KsealBuffer()
-        let status = withBytesViews(events) { views in
-            kseal_batch_and_compress(handle, views.baseAddress, UInt(views.count), &out)
-        }
-        if status != 0 {
-            kseal_buffer_free(out)
-            throw TrustCoreError(message: "batchAndCompress failed: status=\(status)")
-        }
-        return Self.consume(&out)
-    }
-
-    func generateRequestProof(tokenId: String, requestHash: Data, nonce: Data, sequence: Int64) throws -> Data {
-        var out = KsealBuffer()
-        let status = tokenId.withCString { tok in
-            requestHash.withUnsafeBytes { rh in
-                nonce.withUnsafeBytes { nc in
-                    kseal_generate_request_proof(
-                        handle,
-                        tok,
-                        rh.bindMemory(to: UInt8.self).baseAddress, UInt(rh.count),
-                        nc.bindMemory(to: UInt8.self).baseAddress, UInt(nc.count),
-                        sequence,
-                        &out
-                    )
-                }
+            if status != 0 {
+                kseal_buffer_free(out)
+                throw TrustCoreError(message: "generateRequestProof failed: status=\(status)")
             }
+            return Self.consume(&out)
         }
-        if status != 0 {
-            kseal_buffer_free(out)
-            throw TrustCoreError(message: "generateRequestProof failed: status=\(status)")
-        }
-        return Self.consume(&out)
     }
 
     func generateNonce(_ length: Int) throws -> Data {

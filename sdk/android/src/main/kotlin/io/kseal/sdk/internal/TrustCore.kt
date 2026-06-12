@@ -4,6 +4,9 @@ import io.kseal.sdk.Confidence
 import io.kseal.sdk.EventType
 import io.kseal.sdk.Platform
 import io.kseal.sdk.TrustLevel
+import java.util.concurrent.locks.ReentrantReadWriteLock
+import kotlin.concurrent.read
+import kotlin.concurrent.write
 
 /** Weighted risk score plus the confidence the core derived for it. */
 internal data class CoreRiskScore(val score: Int, val confidence: Confidence)
@@ -70,13 +73,21 @@ internal class TrustCoreException(message: String) : RuntimeException(message)
 /**
  * Real trust core backed by the Rust `kseal-ffi` C ABI over JNI.
  *
- * Owns an opaque core handle for its lifetime; [close] releases it. Instances
- * are safe to share across threads (the underlying core is immutable after
- * config load and the FFI takes a shared reference for read paths).
+ * Owns an opaque core handle for its lifetime; [close] releases it.
+ *
+ * Thread-safety mirrors the Rust borrow semantics of the C ABI: config mutation
+ * (`kseal_load_config` takes `&mut`) is serialized under the write lock, while
+ * the read paths (`&self`: risk evaluation, event/proof creation) run under the
+ * shared read lock and may proceed concurrently. [close] takes the write lock
+ * and frees the handle exactly once, so concurrent closes cannot double-free.
+ * `generateNonce`/`compress`/`decompress` are stateless (no core handle) and
+ * need no locking.
  */
 internal class NativeTrustCore private constructor(
     private val handle: Long,
 ) : TrustCore {
+
+    private val coreLock = ReentrantReadWriteLock()
 
     @Volatile
     private var closed = false
@@ -84,7 +95,7 @@ internal class NativeTrustCore private constructor(
     override val version: String
         get() = NativeBridge.nativeVersion()
 
-    override fun loadConfig(signedConfigBytes: ByteArray) {
+    override fun loadConfig(signedConfigBytes: ByteArray): Unit = coreLock.write {
         check(!closed) { "core is closed" }
         val status = NativeBridge.nativeLoadConfig(handle, signedConfigBytes)
         if (status != STATUS_OK) {
@@ -92,23 +103,24 @@ internal class NativeTrustCore private constructor(
         }
     }
 
-    override fun tryLoadConfig(signedConfigBytes: ByteArray): Boolean {
+    override fun tryLoadConfig(signedConfigBytes: ByteArray): Boolean = coreLock.write {
         check(!closed) { "core is closed" }
-        return NativeBridge.nativeLoadConfig(handle, signedConfigBytes) == STATUS_OK
+        NativeBridge.nativeLoadConfig(handle, signedConfigBytes) == STATUS_OK
     }
 
-    override fun evaluateRisk(riskBits: Long): CoreRiskScore {
+    override fun evaluateRisk(riskBits: Long): CoreRiskScore = coreLock.read {
         check(!closed) { "core is closed" }
         val out = NativeBridge.nativeEvaluateRisk(handle, riskBits)
+            ?: throw TrustCoreException("evaluateRisk failed")
         if (out.size != 2) throw TrustCoreException("evaluateRisk returned malformed result")
-        return CoreRiskScore(out[0], Confidence.fromCode(out[1]))
+        CoreRiskScore(out[0], Confidence.fromCode(out[1]))
     }
 
-    override fun computeRiskLevel(riskBits: Long): TrustLevel {
+    override fun computeRiskLevel(riskBits: Long): TrustLevel = coreLock.read {
         check(!closed) { "core is closed" }
         val code = NativeBridge.nativeComputeRiskLevel(handle, riskBits)
         if (code < 0) throw TrustCoreException("computeRiskLevel failed: status=$code")
-        return TrustLevel.fromCode(code)
+        TrustLevel.fromCode(code)
     }
 
     override fun createEvent(
@@ -120,9 +132,9 @@ internal class NativeTrustCore private constructor(
         installKeyHash: String,
         coarseTimeBucket: Long,
         country: String?,
-    ): ByteArray {
+    ): ByteArray = coreLock.read {
         check(!closed) { "core is closed" }
-        return NativeBridge.nativeCreateEvent(
+        NativeBridge.nativeCreateEvent(
             handle,
             eventType.code,
             riskBits,
@@ -135,9 +147,9 @@ internal class NativeTrustCore private constructor(
         ) ?: throw TrustCoreException("createEvent failed")
     }
 
-    override fun batchAndCompress(events: List<ByteArray>): ByteArray {
+    override fun batchAndCompress(events: List<ByteArray>): ByteArray = coreLock.read {
         check(!closed) { "core is closed" }
-        return NativeBridge.nativeBatchAndCompress(handle, events.toTypedArray())
+        NativeBridge.nativeBatchAndCompress(handle, events.toTypedArray())
             ?: throw TrustCoreException("batchAndCompress failed")
     }
 
@@ -146,9 +158,9 @@ internal class NativeTrustCore private constructor(
         requestHash: ByteArray,
         nonce: ByteArray,
         sequence: Long,
-    ): ByteArray {
+    ): ByteArray = coreLock.read {
         check(!closed) { "core is closed" }
-        return NativeBridge.nativeGenerateRequestProof(handle, tokenId, requestHash, nonce, sequence)
+        NativeBridge.nativeGenerateRequestProof(handle, tokenId, requestHash, nonce, sequence)
             ?: throw TrustCoreException("generateRequestProof failed")
     }
 
@@ -167,7 +179,7 @@ internal class NativeTrustCore private constructor(
             ?: throw TrustCoreException("decompress failed")
     }
 
-    override fun close() {
+    override fun close() = coreLock.write {
         if (!closed) {
             closed = true
             NativeBridge.nativeCoreFree(handle)

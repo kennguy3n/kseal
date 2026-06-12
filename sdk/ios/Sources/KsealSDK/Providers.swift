@@ -119,25 +119,33 @@ struct InstallIdentity {
         return id
     }
 
-    /// Lowercase-hex tenant-scoped hash of the install id (never the raw id).
+    /// Lowercase-hex tenant-scoped HMAC of the install id (never the raw id).
+    ///
+    /// Mirrors Android exactly — `HMAC-SHA256(key=installId, message="tenant\0app")`
+    /// — so both platforms share one keyed construction (HMAC also avoids the
+    /// length-extension weakness of a plain `SHA256(id || ctx)` concatenation).
     func tenantScopedHash(tenantId: String, appId: String) -> String {
-        var input = installId()
-        input.append(Data("\(tenantId)\u{0}\(appId)".utf8))
-        return Self.sha256Hex(input)
+        let message = Data("\(tenantId)\u{0}\(appId)".utf8)
+        return Self.hmacSha256Hex(key: installId(), message: message)
     }
 
-    static func sha256Hex(_ data: Data) -> String {
+    static func hmacSha256Hex(key: Data, message: Data) -> String {
         #if canImport(CryptoKit)
-        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        let mac = HMAC<SHA256>.authenticationCode(for: message, using: SymmetricKey(data: key))
+        return mac.map { String(format: "%02x", $0) }.joined()
         #else
         // Non-Apple host (test/CI) fallback: a deterministic, non-cryptographic
-        // digest. Production runs on Apple platforms and uses SHA-256 above.
-        var hash: UInt64 = 0xcbf29ce484222325
-        for byte in data {
-            hash ^= UInt64(byte)
-            hash = hash &* 0x100000001b3
+        // keyed digest. Production runs on Apple platforms and uses HMAC-SHA256.
+        func fnv(_ seed: UInt64, _ bytes: Data) -> UInt64 {
+            var hash = seed
+            for byte in bytes {
+                hash ^= UInt64(byte)
+                hash = hash &* 0x100000001b3
+            }
+            return hash
         }
-        return String(format: "%016llx", hash)
+        let keyed = fnv(0xcbf29ce484222325, key) ^ 0x5c5c5c5c5c5c5c5c
+        return String(format: "%016llx", fnv(keyed, message))
         #endif
     }
 }

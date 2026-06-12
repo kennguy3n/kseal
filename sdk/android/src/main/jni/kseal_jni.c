@@ -23,14 +23,14 @@ static inline KsealCoreHandle *as_handle(jlong h) {
 }
 
 /* Copies a Rust-owned KsealBuffer into a fresh Java byte[] and frees it.
- * Returns NULL for an empty buffer. */
+ *
+ * Callers invoke this only after the core returned an Ok status, so an empty
+ * buffer here is a valid empty result (not an error) and is returned as a
+ * zero-length array. NULL is reserved for a genuine JVM allocation failure, so
+ * the Kotlin side can keep treating null strictly as an error. */
 static jbyteArray buffer_to_jbytes(JNIEnv *env, KsealBuffer buf) {
-    if (buf.data == NULL || buf.len == 0) {
-        kseal_buffer_free(buf);
-        return NULL;
-    }
     jbyteArray out = (*env)->NewByteArray(env, (jsize)buf.len);
-    if (out != NULL) {
+    if (out != NULL && buf.len > 0 && buf.data != NULL) {
         (*env)->SetByteArrayRegion(env, out, 0, (jsize)buf.len, (const jbyte *)buf.data);
     }
     kseal_buffer_free(buf);
