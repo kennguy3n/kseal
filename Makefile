@@ -18,9 +18,9 @@ help: ## Show this help.
 
 .PHONY: proto-tools
 proto-tools: ## Install protobuf codegen plugins (buf, protoc-gen-go, connect).
-	go install github.com/bufbuild/buf/cmd/buf@latest
-	go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-	go install connectrpc.com/connect/cmd/protoc-gen-connect-go@v1.16.2
+	GOTOOLCHAIN=auto go install github.com/bufbuild/buf/cmd/buf@v1.55.1
+	GOTOOLCHAIN=auto go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.34.2
+	GOTOOLCHAIN=auto go install connectrpc.com/connect/cmd/protoc-gen-connect-go@v1.16.2
 
 .PHONY: proto
 proto: ## Generate Go + Connect bindings from proto schemas.
@@ -78,5 +78,9 @@ docker-up: ## Start the full stack (server, postgres, redis, console).
 	docker compose up --build -d
 
 .PHONY: docker-down
-docker-down: ## Stop the stack.
+docker-down: ## Stop the stack (keeps the Postgres volume).
+	docker compose down
+
+.PHONY: docker-clean
+docker-clean: ## Stop the stack AND delete volumes (destroys Postgres data).
 	docker compose down -v
