@@ -10,9 +10,9 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/redis/go-redis/v9"
 
-	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
 	"github.com/kennguy3n/kseal/server/control-plane/registry"
 	"github.com/kennguy3n/kseal/server/data-plane/attestation"
+	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
 	"github.com/kennguy3n/kseal/server/shared/crypto"
 )
 
@@ -175,5 +175,28 @@ func TestVerifyAttestationRejectsConsumedNonce(t *testing.T) {
 	}
 	if resp.Msg.Accepted {
 		t.Fatal("attestation accepted with invalid nonce")
+	}
+}
+
+// A cryptographically failed attestation (verifier returns Accepted:false, nil)
+// must not mint a token even though there is no transport error.
+func TestVerifyAttestationRejectsFailedAttestation(t *testing.T) {
+	svc, _, tn, app := setupService(t, &attestation.Result{Accepted: false, Reason: "bad signature"})
+	ctx := context.Background()
+	nonceResp, err := svc.GetNonce(ctx, connect.NewRequest(&ksealv1.NonceRequest{TenantId: tn.Id, AppId: app.Id, Platform: ksealv1.Platform_PLATFORM_ANDROID}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := svc.VerifyAttestation(ctx, connect.NewRequest(&ksealv1.AttestationRequest{
+		TenantId: tn.Id, AppId: app.Id, Platform: ksealv1.Platform_PLATFORM_ANDROID, Nonce: nonceResp.Msg.Nonce,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Msg.Accepted || resp.Msg.SignedToken != nil || resp.Msg.TrustToken != nil {
+		t.Fatalf("failed attestation minted a token: %+v", resp.Msg)
+	}
+	if resp.Msg.RejectionReason == "" {
+		t.Fatal("expected rejection reason")
 	}
 }

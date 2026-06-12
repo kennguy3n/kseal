@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -86,6 +87,25 @@ func TestCachedAppValidatorNegativeCache(t *testing.T) {
 	// not amplify into one DB hit per request.
 	if cs.calls != 1 {
 		t.Fatalf("expected 1 DB lookup, got %d", cs.calls)
+	}
+}
+
+func TestCachedAppValidatorBoundsCache(t *testing.T) {
+	cs := &countingStore{err: registry.ErrNotFound}
+	v := NewCachedAppValidator(cs, time.Minute)
+	v.maxEntries = 100
+	ctx := context.Background()
+	// Spray many distinct unknown (tenant, app) pairs as an attacker would.
+	for i := 0; i < 5000; i++ {
+		if _, err := v.Valid(ctx, "t", fmt.Sprintf("app-%d", i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	v.mu.Lock()
+	n := len(v.cache)
+	v.mu.Unlock()
+	if n > v.maxEntries {
+		t.Fatalf("cache grew unbounded: %d entries (cap %d)", n, v.maxEntries)
 	}
 }
 

@@ -87,6 +87,14 @@ func (s *Service) VerifyAttestation(ctx context.Context, req *connect.Request[ks
 		}
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
+	if !res.Accepted {
+		// Attestation parsed but failed cryptographic verification; do not mint.
+		reason := res.Reason
+		if reason == "" {
+			reason = "attestation rejected"
+		}
+		return reject(reason), nil
+	}
 
 	// Fuse device-reported risk with attestation-derived risk and score against
 	// the active policy.

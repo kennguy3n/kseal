@@ -17,6 +17,10 @@ import (
 
 const maxDecompressedBytes = 16 << 20 // 16 MiB ceiling guards against zip bombs.
 
+// maxAppCacheEntries caps the validator cache so adversarial traffic spraying
+// distinct (tenant, app) pairs cannot grow it without bound.
+const maxAppCacheEntries = 50_000
+
 // AppValidator reports whether a (tenant, app) pair is registered. It is backed
 // by a short-TTL cache over the registry so the hot ingest path avoids a DB hit
 // per request.
@@ -34,9 +38,10 @@ type cacheEntry struct {
 // an unknown or deleted app (misconfiguration or abuse), capping it at one DB
 // hit per (tenant, app) per negTTL.
 type CachedAppValidator struct {
-	store  registry.Store
-	ttl    time.Duration
-	negTTL time.Duration
+	store      registry.Store
+	ttl        time.Duration
+	negTTL     time.Duration
+	maxEntries int
 
 	mu    sync.Mutex
 	cache map[string]cacheEntry
@@ -53,7 +58,7 @@ func NewCachedAppValidator(store registry.Store, ttl time.Duration) *CachedAppVa
 	if ttl < negTTL {
 		negTTL = ttl
 	}
-	return &CachedAppValidator{store: store, ttl: ttl, negTTL: negTTL, cache: map[string]cacheEntry{}}
+	return &CachedAppValidator{store: store, ttl: ttl, negTTL: negTTL, maxEntries: maxAppCacheEntries, cache: map[string]cacheEntry{}}
 }
 
 // Valid returns whether the app exists for the tenant.
@@ -81,8 +86,28 @@ func (v *CachedAppValidator) Valid(ctx context.Context, tenantID, appID string) 
 
 func (v *CachedAppValidator) put(key string, e cacheEntry) {
 	v.mu.Lock()
+	defer v.mu.Unlock()
 	v.cache[key] = e
-	v.mu.Unlock()
+	if len(v.cache) <= v.maxEntries {
+		return
+	}
+	// Over the cap: drop expired entries first, then evict arbitrary live ones
+	// (map iteration order is randomized) until back under the cap.
+	now := time.Now()
+	for k, c := range v.cache {
+		if !now.Before(c.expires) {
+			delete(v.cache, k)
+		}
+	}
+	for k := range v.cache {
+		if len(v.cache) <= v.maxEntries {
+			break
+		}
+		if k == key {
+			continue
+		}
+		delete(v.cache, k)
+	}
 }
 
 // Service implements the Connect IngestService.

@@ -822,7 +822,7 @@ func (s *PostgresStore) ConsumeSequence(ctx context.Context, tokenID string, seq
 		// replay (ErrReplay) so the contract matches MemStore.
 		var lastSeq int64
 		if err := tx.QueryRow(ctx,
-			`SELECT last_sequence FROM trust_sessions WHERE token_id = $1 AND status = 'active'`,
+			`SELECT last_sequence FROM trust_sessions WHERE token_id = $1 AND status = 'active' FOR UPDATE`,
 			tokenID).Scan(&lastSeq); err != nil {
 			return err // pgx.ErrNoRows -> ErrNotFound via wrapPgErr
 		}

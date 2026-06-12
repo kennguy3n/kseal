@@ -3,6 +3,7 @@ package registry
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
@@ -165,6 +166,43 @@ func runStoreSuite(t *testing.T, store Store) {
 		// Unknown/inactive sessions are reported as not-found, distinct from replay.
 		if err := store.ConsumeSequence(ctx, uuid.NewString(), 1); !errors.Is(err, ErrNotFound) {
 			t.Fatalf("expected not-found for unknown token, got %v", err)
+		}
+	})
+
+	t.Run("trust session sequence concurrent single-consume", func(t *testing.T) {
+		a := mustTenant(t, store)
+		sess := &TrustSession{
+			TokenID: uuid.NewString(), TenantID: a.Id, AppID: "app", Status: "active",
+			SessionSecret: []byte("s"), IssuedAt: 1, ExpiresAt: 1 << 40,
+		}
+		if err := store.CreateTrustSession(ctx, sess); err != nil {
+			t.Fatal(err)
+		}
+		// Many goroutines race to consume the same sequence number; the row lock
+		// (SELECT ... FOR UPDATE) must ensure exactly one wins, the rest replay.
+		const n = 16
+		var wg sync.WaitGroup
+		var mu sync.Mutex
+		var wins int
+		start := make(chan struct{})
+		for i := 0; i < n; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				if err := store.ConsumeSequence(ctx, sess.TokenID, 1); err == nil {
+					mu.Lock()
+					wins++
+					mu.Unlock()
+				} else if !errors.Is(err, ErrReplay) {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}()
+		}
+		close(start)
+		wg.Wait()
+		if wins != 1 {
+			t.Fatalf("expected exactly one consumer to win, got %d", wins)
 		}
 	})
 
