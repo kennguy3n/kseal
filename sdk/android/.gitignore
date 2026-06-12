@@ -1,0 +1,9 @@
+# Gradle / Android build outputs
+/build/
+/.gradle/
+local.properties
+*.iml
+.cxx/
+
+# Generated native trust core (produced by scripts/build-rust-android.sh)
+/src/main/jniLibs/

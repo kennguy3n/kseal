@@ -1,0 +1,11 @@
+# SwiftPM build output
+/.build/
+*.xcodeproj
+.swiftpm/
+
+# Generated header staged by scripts/build-rust-host.sh
+/Sources/CKseal/include/kseal.h
+
+# Built xcframework / per-arch Rust slices
+/build/
+*.xcframework
