@@ -4,12 +4,43 @@
 //! offline against a pinned Ed25519 public key before use. A verified config is
 //! cached with its TTL so the SDK never needs a launch-time network call; the
 //! cache exposes staleness/expiry so callers can refresh lazily.
+//!
+//! # Security: what the signature actually covers
+//!
+//! Per `proto/kseal/v1/config.proto`, the Ed25519 signature is computed over
+//! `SignedConfig.config_bytes` **only** — the envelope fields `version`,
+//! `ttl_seconds`, and `key_id` are *not* authenticated. The `key_id` is
+//! harmless here because verification always uses the locally pinned key, but
+//! `version` (the rollback anchor) and `ttl_seconds` (the staleness anchor) are
+//! security-relevant, so an attacker able to tamper with a CDN/cache response
+//! could, with an otherwise-valid `config_bytes`:
+//!
+//! - inflate `version` to lock out future legitimate (lower-version) updates, or
+//! - inflate `ttl_seconds` to suppress refresh and pin a stale policy.
+//!
+//! The correct long-term fix is a wire change so the signature covers the whole
+//! envelope (or `version`/`ttl_seconds` move into the signed `PolicyConfig`);
+//! that requires coordinated server + proto changes and is flagged in the PR.
+//! Until then this module bounds the blast radius defensively by clamping the
+//! unauthenticated TTL to [`MAX_TTL_SECONDS`], so a tampered TTL can never pin a
+//! stale config beyond a bounded window (upholding the "reject stale config"
+//! guarantee in `PROPOSAL.md`).
 
 use crate::crypto::verify_ed25519;
 use crate::policy::Policy;
 use crate::proto::{PolicyConfig, SignedConfig};
 use crate::{Error, Result};
 use prost::Message;
+
+/// Upper bound applied to the unauthenticated `SignedConfig.ttl_seconds`.
+///
+/// The TTL is not covered by the config signature (see the [module
+/// docs](self)), so it is clamped to this maximum (24h) as defense-in-depth:
+/// even a tampered or absurdly large TTL forces a refresh within a bounded
+/// window. Legitimate TTLs at or below this value are unaffected; negative
+/// TTLs are clamped to `0` (immediately stale). This aligns with the "rapid
+/// signed config updates" posture in `PROPOSAL.md`.
+pub const MAX_TTL_SECONDS: i64 = 24 * 60 * 60;
 
 /// A verified, cached policy config plus the metadata needed to age it out.
 #[derive(Debug, Clone)]
@@ -65,7 +96,9 @@ pub fn verify_and_decode(
         version: signed.version,
         key_id: signed.key_id.clone(),
         loaded_at: now,
-        ttl_seconds: signed.ttl_seconds,
+        // `ttl_seconds` is not covered by the signature; clamp it to a bounded
+        // window so a tampered TTL cannot pin a stale config (see module docs).
+        ttl_seconds: signed.ttl_seconds.clamp(0, MAX_TTL_SECONDS),
     })
 }
 
@@ -180,6 +213,26 @@ mod tests {
             .unwrap_err();
         assert!(matches!(err, Error::Config(_)));
         assert_eq!(cache.current().unwrap().version, 5);
+    }
+
+    #[test]
+    fn ttl_is_clamped_to_max() {
+        let sk = signing_key();
+        // A tampered/absurd TTL must not pin the config beyond MAX_TTL_SECONDS.
+        let signed = make_signed(1, i64::MAX, &sk);
+        let cached = verify_and_decode(&signed, sk.verifying_key().as_bytes(), 1000).unwrap();
+        assert_eq!(cached.ttl_seconds, MAX_TTL_SECONDS);
+        assert_eq!(cached.expires_at(), 1000 + MAX_TTL_SECONDS);
+        assert!(cached.is_expired(1000 + MAX_TTL_SECONDS));
+    }
+
+    #[test]
+    fn negative_ttl_is_immediately_stale() {
+        let sk = signing_key();
+        let signed = make_signed(1, -42, &sk);
+        let cached = verify_and_decode(&signed, sk.verifying_key().as_bytes(), 1000).unwrap();
+        assert_eq!(cached.ttl_seconds, 0);
+        assert!(cached.is_expired(1000));
     }
 
     #[test]
