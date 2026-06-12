@@ -1,0 +1,31 @@
+import { createClient, type Client, type Transport } from "@connectrpc/connect";
+import { RegistryService } from "../gen/kseal/v1/registry_service_pb";
+import { ConfigService } from "../gen/kseal/v1/config_service_pb";
+import { TrustService } from "../gen/kseal/v1/trust_service_pb";
+import { IngestService } from "../gen/kseal/v1/ingest_service_pb";
+import { WebhookService } from "../gen/kseal/v1/webhook_service_pb";
+import { QueryService } from "../gen/kseal/v1/query_service_pb";
+
+// Typed Connect clients for every kseal service. RegistryService, ConfigService,
+// TrustService, IngestService and WebhookService are generated from the
+// canonical protos. QueryService is the console-local read API (see
+// proto/kseal/v1/query_service.proto) pending promotion upstream.
+export interface KsealClients {
+  registry: Client<typeof RegistryService>;
+  config: Client<typeof ConfigService>;
+  trust: Client<typeof TrustService>;
+  ingest: Client<typeof IngestService>;
+  webhook: Client<typeof WebhookService>;
+  query: Client<typeof QueryService>;
+}
+
+export function createClients(transport: Transport): KsealClients {
+  return {
+    registry: createClient(RegistryService, transport),
+    config: createClient(ConfigService, transport),
+    trust: createClient(TrustService, transport),
+    ingest: createClient(IngestService, transport),
+    webhook: createClient(WebhookService, transport),
+    query: createClient(QueryService, transport),
+  };
+}

@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
+    <title>kseal console</title>
+    <!--
+      Runtime config injection (NoOps): a prebuilt image renders /env.js at
+      container start from KSEAL_API_BASE_URL (see docker-entrypoint.sh). In
+      local dev this file is absent and the app falls back to the Vite-inlined
+      VITE_KSEAL_API_BASE_URL. Loaded before the bundle so window config exists.
+    -->
+    <script src="/env.js"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
