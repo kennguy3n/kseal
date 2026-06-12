@@ -47,6 +47,29 @@ func TestRequestProofPreimageFixedVector(t *testing.T) {
 	}
 }
 
+// TestRequestProofGoldenHMACVector asserts the full HMAC-SHA256 tag over the
+// request-proof preimage matches S2's locked golden vector. Matching the tag
+// (not just the preimage) proves the two implementations are byte-identical end
+// to end, including the keyed hash.
+func TestRequestProofGoldenHMACVector(t *testing.T) {
+	key := []byte("kseal-test-instance-key")
+	const (
+		tokenID = "tok"
+		seq     = int64(1)
+	)
+	requestHash := []byte{0x01, 0x02, 0x03, 0x04}
+	nonce := []byte{0xAA, 0xBB}
+
+	const wantHex = "718bb06df45dc4bbc5bf483bd65acf7609429966adba8baff66fa965857ebd0d"
+	tag := HMACSHA256(key, RequestProofPreimage(tokenID, requestHash, nonce, seq))
+	if h := hex.EncodeToString(tag); h != wantHex {
+		t.Fatalf("golden HMAC mismatch:\n got=%s\nwant=%s", h, wantHex)
+	}
+	if !VerifyHMACSHA256(key, RequestProofPreimage(tokenID, requestHash, nonce, seq), tag) {
+		t.Fatal("constant-time verify rejected the golden tag")
+	}
+}
+
 func TestEd25519SignVerify(t *testing.T) {
 	kp, err := GenerateEd25519()
 	if err != nil {

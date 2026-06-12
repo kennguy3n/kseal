@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
@@ -850,6 +851,90 @@ func (s *PostgresStore) RevokeTrustSession(ctx context.Context, tenantID, tokenI
 		}
 		return nil
 	}))
+}
+
+func (s *PostgresStore) RecordFailedAttestation(ctx context.Context, sess *TrustSession) error {
+	if sess.TenantID == "" {
+		return fmt.Errorf("%w: tenant_id required", ErrInvalidInput)
+	}
+	tokenID := sess.TokenID
+	if tokenID == "" {
+		tokenID = uuid.NewString()
+	}
+	issuedAt := sess.IssuedAt
+	if issuedAt == 0 {
+		issuedAt = time.Now().Unix()
+	}
+	// expires_at is NOT NULL; a failed record never validates proofs so it can
+	// expire immediately.
+	expiresAt := sess.ExpiresAt
+	if expiresAt == 0 {
+		expiresAt = issuedAt
+	}
+	return wrapPgErr(s.db.WithTenantTx(ctx, sess.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `
+			INSERT INTO trust_sessions
+			    (token_id, tenant_id, app_id, build_hash, instance_id, policy_hash, risk_level, capability_scope, session_secret, last_sequence, status, issued_at, expires_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, '{}', ''::bytea, 0, 'failed', to_timestamp($8), to_timestamp($9))`,
+			tokenID, sess.TenantID, sess.AppID, sess.BuildHash, sess.InstanceID, sess.PolicyHash,
+			sess.RiskLevel, issuedAt, expiresAt)
+		return err
+	}))
+}
+
+func (s *PostgresStore) GetTenantCounts(ctx context.Context, tenantID string) (*TenantCounts, error) {
+	c := &TenantCounts{}
+	err := s.db.WithTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `
+			SELECT
+			    (SELECT count(*) FROM apps     WHERE tenant_id = $1),
+			    (SELECT count(*) FROM builds   WHERE tenant_id = $1),
+			    (SELECT count(*) FROM policies WHERE tenant_id = $1 AND is_active),
+			    (SELECT count(*) FROM webhooks WHERE tenant_id = $1)`,
+			tenantID).Scan(&c.Apps, &c.Builds, &c.ActivePolicies, &c.Webhooks)
+	})
+	if err != nil {
+		return nil, wrapPgErr(err)
+	}
+	return c, nil
+}
+
+func (s *PostgresStore) GetTrustSessionStats(ctx context.Context, tenantID string, fromSec, toSec int64) (*TrustSessionStats, error) {
+	stats := &TrustSessionStats{ByRiskLevel: map[int32]int64{}}
+	err := s.db.WithTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `
+			SELECT risk_level, status, count(*)
+			FROM trust_sessions
+			WHERE tenant_id = $1
+			  AND ($2 = 0 OR issued_at >= to_timestamp($2))
+			  AND ($3 = 0 OR issued_at <= to_timestamp($3))
+			GROUP BY risk_level, status`,
+			tenantID, fromSec, toSec)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var riskLevel int32
+			var status string
+			var n int64
+			if err := rows.Scan(&riskLevel, &status, &n); err != nil {
+				return err
+			}
+			stats.TotalSessions += n
+			if status == "failed" {
+				stats.AttestationsFailed += n
+				continue
+			}
+			stats.TokensIssued += n
+			stats.ByRiskLevel[riskLevel] += n
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, wrapPgErr(err)
+	}
+	return stats, nil
 }
 
 func defaultJSON(s, def string) string {

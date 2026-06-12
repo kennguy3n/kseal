@@ -21,16 +21,16 @@ import (
 type MemStore struct {
 	mu sync.Mutex
 
-	tenants  map[string]*ksealv1.Tenant
-	apps     map[string]*ksealv1.App
-	builds   map[string]*ksealv1.Build
-	policies map[string]*ksealv1.Policy
+	tenants      map[string]*ksealv1.Tenant
+	apps         map[string]*ksealv1.App
+	builds       map[string]*ksealv1.Build
+	policies     map[string]*ksealv1.Policy
 	policyHashes map[string]string
-	profiles map[string]*ksealv1.ProtectionProfile
-	apiKeys  map[string]*memAPIKey // keyed by key_id
-	signing  map[string]*SigningKey
-	webhooks map[string]*memWebhook
-	sessions map[string]*TrustSession
+	profiles     map[string]*ksealv1.ProtectionProfile
+	apiKeys      map[string]*memAPIKey // keyed by key_id
+	signing      map[string]*SigningKey
+	webhooks     map[string]*memWebhook
+	sessions     map[string]*TrustSession
 }
 
 type memAPIKey struct {
@@ -591,6 +591,75 @@ func (m *MemStore) RevokeTrustSession(_ context.Context, tenantID, tokenID strin
 	}
 	s.Status = "revoked"
 	return nil
+}
+
+func (m *MemStore) RecordFailedAttestation(_ context.Context, sess *TrustSession) error {
+	if sess.TenantID == "" {
+		return fmt.Errorf("%w: tenant_id required", ErrInvalidInput)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cp := *sess
+	if cp.TokenID == "" {
+		cp.TokenID = uuid.NewString()
+	}
+	cp.CapabilityScope = nil
+	cp.SessionSecret = nil
+	cp.Status = "failed"
+	m.sessions[cp.TokenID] = &cp
+	return nil
+}
+
+func (m *MemStore) GetTenantCounts(_ context.Context, tenantID string) (*TenantCounts, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	c := &TenantCounts{}
+	for _, a := range m.apps {
+		if a.TenantId == tenantID {
+			c.Apps++
+		}
+	}
+	for _, b := range m.builds {
+		if b.TenantId == tenantID {
+			c.Builds++
+		}
+	}
+	for _, p := range m.policies {
+		if p.TenantId == tenantID && p.IsActive {
+			c.ActivePolicies++
+		}
+	}
+	for _, w := range m.webhooks {
+		if w.wh.TenantId == tenantID {
+			c.Webhooks++
+		}
+	}
+	return c, nil
+}
+
+func (m *MemStore) GetTrustSessionStats(_ context.Context, tenantID string, fromSec, toSec int64) (*TrustSessionStats, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	stats := &TrustSessionStats{ByRiskLevel: map[int32]int64{}}
+	for _, s := range m.sessions {
+		if s.TenantID != tenantID {
+			continue
+		}
+		if fromSec != 0 && s.IssuedAt < fromSec {
+			continue
+		}
+		if toSec != 0 && s.IssuedAt > toSec {
+			continue
+		}
+		stats.TotalSessions++
+		if s.Status == "failed" {
+			stats.AttestationsFailed++
+			continue
+		}
+		stats.TokensIssued++
+		stats.ByRiskLevel[s.RiskLevel]++
+	}
+	return stats, nil
 }
 
 func containsEventType(types []ksealv1.EventType, t ksealv1.EventType) bool {

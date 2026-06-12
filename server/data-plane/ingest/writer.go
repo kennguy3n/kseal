@@ -7,20 +7,32 @@ package ingest
 
 import (
 	"context"
+	"encoding/base64"
+	"errors"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
 )
 
+var errBadCursor = errors.New("invalid page cursor")
+
 // StoredEvent is the normalized, tenant-scoped telemetry record persisted by the
 // analytics store. It deliberately carries no PII — only coarse, aggregate-safe
 // fields.
 type StoredEvent struct {
-	TenantID       string
-	AppID          string
-	EventType      ksealv1.EventType
+	// ID is a stable, unique identifier assigned at ingest, used as the keyset
+	// pagination tiebreaker and the dashboard EventRecord id.
+	ID        string
+	TenantID  string
+	AppID     string
+	EventType ksealv1.EventType
+	// RiskLevel is the fused trust classification derived from RiskBits at
+	// ingest, so reads need no policy lookup to render risk.
+	RiskLevel      ksealv1.TrustLevel
 	RiskBits       uint64
 	Confidence     ksealv1.Confidence
 	BuildHash      string
@@ -37,9 +49,17 @@ type Query struct {
 	TenantID   string
 	AppID      string
 	EventTypes []ksealv1.EventType
+	RiskLevels []ksealv1.TrustLevel
 	PolicyHash string
 	From       int64
 	To         int64
+}
+
+// Page is one keyset-paginated window of events. NextCursor is empty when the
+// window is the last one.
+type Page struct {
+	Events     []StoredEvent
+	NextCursor string
 }
 
 // AnalyticsStore is the clean interface over event storage. ClickHouse can
@@ -48,6 +68,9 @@ type AnalyticsStore interface {
 	Write(ctx context.Context, events []StoredEvent) error
 	Query(ctx context.Context, q Query) ([]StoredEvent, error)
 	Count(ctx context.Context, q Query) (int, error)
+	// ListEvents returns a recent-first (TimeBucket desc, ID desc) page of
+	// matching events with an opaque keyset cursor. limit <= 0 uses a default.
+	ListEvents(ctx context.Context, q Query, limit int, cursor string) (Page, error)
 }
 
 // InMemoryAnalyticsStore is a concurrency-safe slice-backed analytics store.
@@ -97,6 +120,18 @@ func (q Query) matches(e StoredEvent) bool {
 			return false
 		}
 	}
+	if len(q.RiskLevels) > 0 {
+		found := false
+		for _, l := range q.RiskLevels {
+			if e.RiskLevel == l {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
 	return true
 }
 
@@ -125,6 +160,87 @@ func (s *InMemoryAnalyticsStore) Count(_ context.Context, q Query) (int, error) 
 		}
 	}
 	return n, nil
+}
+
+const defaultEventPageSize = 50
+const maxEventPageSize = 500
+
+// ListEvents returns a recent-first page of matching events. Ordering is
+// (TimeBucket desc, ID desc) which gives a strict total order, so the cursor
+// (the last item's (TimeBucket, ID)) yields stable, gap-free keyset pagination.
+func (s *InMemoryAnalyticsStore) ListEvents(_ context.Context, q Query, limit int, cursor string) (Page, error) {
+	if limit <= 0 {
+		limit = defaultEventPageSize
+	}
+	if limit > maxEventPageSize {
+		limit = maxEventPageSize
+	}
+	curTB, curID, hasCur, err := decodeCursor(cursor)
+	if err != nil {
+		return Page{}, err
+	}
+
+	s.mu.RLock()
+	var out []StoredEvent
+	for _, e := range s.events {
+		if q.matches(e) {
+			out = append(out, e)
+		}
+	}
+	s.mu.RUnlock()
+
+	sort.Slice(out, func(i, j int) bool { return eventLess(out[j], out[i]) })
+
+	start := 0
+	if hasCur {
+		for start < len(out) {
+			e := out[start]
+			if e.TimeBucket < curTB || (e.TimeBucket == curTB && e.ID < curID) {
+				break
+			}
+			start++
+		}
+	}
+	out = out[start:]
+
+	var next string
+	if len(out) > limit {
+		last := out[limit-1]
+		next = encodeCursor(last.TimeBucket, last.ID)
+		out = out[:limit]
+	}
+	return Page{Events: out, NextCursor: next}, nil
+}
+
+// eventLess defines the keyset order: later TimeBucket first, ID as tiebreaker.
+func eventLess(a, b StoredEvent) bool {
+	if a.TimeBucket != b.TimeBucket {
+		return a.TimeBucket < b.TimeBucket
+	}
+	return a.ID < b.ID
+}
+
+func encodeCursor(tb int64, id string) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(strconv.FormatInt(tb, 10) + ":" + id))
+}
+
+func decodeCursor(cursor string) (tb int64, id string, ok bool, err error) {
+	if cursor == "" {
+		return 0, "", false, nil
+	}
+	raw, derr := base64.RawURLEncoding.DecodeString(cursor)
+	if derr != nil {
+		return 0, "", false, derr
+	}
+	parts := strings.SplitN(string(raw), ":", 2)
+	if len(parts) != 2 {
+		return 0, "", false, errBadCursor
+	}
+	tb, err = strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		return 0, "", false, err
+	}
+	return tb, parts[1], true, nil
 }
 
 // EventSink receives each validated event as it is drained, for fan-out to

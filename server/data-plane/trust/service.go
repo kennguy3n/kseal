@@ -89,6 +89,16 @@ func (s *Service) VerifyAttestation(ctx context.Context, req *connect.Request[ks
 	}
 	if !res.Accepted {
 		// Attestation parsed but failed cryptographic verification; do not mint.
+		// Record the failure for dashboard stats (best-effort: a recording error
+		// must not turn a clean rejection into a 500). Reached only after the
+		// single-use nonce was consumed, so it is rate-limited like the flow.
+		_ = s.store.RecordFailedAttestation(ctx, &registry.TrustSession{
+			TenantID:   m.TenantId,
+			AppID:      m.AppId,
+			BuildHash:  m.BuildHash,
+			InstanceID: m.InstanceId,
+			IssuedAt:   time.Now().Unix(),
+		})
 		reason := res.Reason
 		if reason == "" {
 			reason = "attestation rejected"

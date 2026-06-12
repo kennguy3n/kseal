@@ -31,6 +31,7 @@ import (
 	"github.com/kennguy3n/kseal/server/data-plane/attestation"
 	cfgsvc "github.com/kennguy3n/kseal/server/data-plane/config"
 	"github.com/kennguy3n/kseal/server/data-plane/ingest"
+	"github.com/kennguy3n/kseal/server/data-plane/query"
 	"github.com/kennguy3n/kseal/server/data-plane/trust"
 	"github.com/kennguy3n/kseal/server/data-plane/webhook"
 )
@@ -113,6 +114,8 @@ func run() error {
 		return err
 	}
 
+	querySvc := query.NewService(store, analytics)
+
 	// Interceptors.
 	limiter := middleware.NewRedisRateLimiter(rdb, cfg.RateLimitPerSecond, cfg.RateLimitBurst, "rl")
 	ic := &middleware.Interceptors{
@@ -131,6 +134,7 @@ func run() error {
 	mux.Handle(ksealv1connect.NewConfigServiceHandler(configSvc, opts))
 	mux.Handle(ksealv1connect.NewIngestServiceHandler(ingestSvc, opts))
 	mux.Handle(ksealv1connect.NewWebhookServiceHandler(webhookSvc, opts))
+	mux.Handle(ksealv1connect.NewQueryServiceHandler(querySvc, opts))
 
 	mux.Handle("/metrics", tel.Metrics.Handler())
 	mux.Handle("/healthz", telemetry.HealthHandler())
@@ -227,5 +231,8 @@ func controlPlaneProcedures() map[string]bool {
 		ksealv1connect.WebhookServiceRegisterWebhookProcedure:          true,
 		ksealv1connect.WebhookServiceListWebhooksProcedure:             true,
 		ksealv1connect.WebhookServiceDeleteWebhookProcedure:            true,
+		ksealv1connect.QueryServiceListEventsProcedure:                 true,
+		ksealv1connect.QueryServiceGetTenantOverviewProcedure:          true,
+		ksealv1connect.QueryServiceGetTrustSessionStatsProcedure:       true,
 	}
 }

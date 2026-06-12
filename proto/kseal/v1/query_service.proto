@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package kseal.v1;
+
+import "kseal/v1/query.proto";
+
+option go_package = "github.com/kennguy3n/kseal/server/gen/kseal/v1;ksealv1";
+
+// QueryService is the dashboard's READ surface over derived data-plane state:
+// stored risk events, tenant overview counters, and trust-session statistics.
+// All RPCs are tenant-scoped and enforce tenant_id isolation server-side.
+service QueryService {
+  // ListEvents returns stored risk events for a tenant, filtered by app,
+  // event type, fused risk level, and time range, with keyset pagination.
+  rpc ListEvents(ListEventsRequest) returns (ListEventsResponse);
+  // GetTenantOverview returns the dashboard summary counters for a tenant.
+  rpc GetTenantOverview(GetTenantOverviewRequest) returns (GetTenantOverviewResponse);
+  // GetTrustSessionStats returns trust-session outcome counts over a window.
+  rpc GetTrustSessionStats(GetTrustSessionStatsRequest) returns (GetTrustSessionStatsResponse);
+}

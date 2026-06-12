@@ -225,6 +225,84 @@ func runStoreSuite(t *testing.T, store Store) {
 			t.Fatalf("delete: %v %v", err, deleted)
 		}
 	})
+
+	t.Run("trust session stats", func(t *testing.T) {
+		a := mustTenant(t, store)
+		mk := func(level int32) {
+			if err := store.CreateTrustSession(ctx, &TrustSession{
+				TokenID: uuid.NewString(), TenantID: a.Id, AppID: "app", Status: "active",
+				RiskLevel: level, SessionSecret: []byte("s"), IssuedAt: 1000, ExpiresAt: 1 << 40,
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		mk(int32(ksealv1.TrustLevel_TRUST_LEVEL_TRUSTED))
+		mk(int32(ksealv1.TrustLevel_TRUST_LEVEL_TRUSTED))
+		mk(int32(ksealv1.TrustLevel_TRUST_LEVEL_HIGH_RISK))
+		if err := store.RecordFailedAttestation(ctx, &TrustSession{TenantID: a.Id, AppID: "app", IssuedAt: 1000}); err != nil {
+			t.Fatal(err)
+		}
+
+		st, err := store.GetTrustSessionStats(ctx, a.Id, 0, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if st.TotalSessions != 4 || st.TokensIssued != 3 || st.AttestationsFailed != 1 {
+			t.Fatalf("stats: %+v", st)
+		}
+		if st.ByRiskLevel[int32(ksealv1.TrustLevel_TRUST_LEVEL_TRUSTED)] != 2 ||
+			st.ByRiskLevel[int32(ksealv1.TrustLevel_TRUST_LEVEL_HIGH_RISK)] != 1 {
+			t.Fatalf("by level: %+v", st.ByRiskLevel)
+		}
+
+		// Window bounds exclude sessions outside [from, to].
+		windowed, err := store.GetTrustSessionStats(ctx, a.Id, 2000, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if windowed.TotalSessions != 0 {
+			t.Fatalf("window from=2000 should exclude issued_at=1000 sessions, got %d", windowed.TotalSessions)
+		}
+
+		// Another tenant sees none of these sessions.
+		b := mustTenant(t, store)
+		bst, err := store.GetTrustSessionStats(ctx, b.Id, 0, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bst.TotalSessions != 0 {
+			t.Fatalf("cross-tenant leak: tenant b saw %d sessions", bst.TotalSessions)
+		}
+	})
+
+	t.Run("tenant counts", func(t *testing.T) {
+		a := mustTenant(t, store)
+		if _, err := store.CreateApp(ctx, CreateAppInput{
+			TenantID: a.Id, Name: "App", Platform: ksealv1.Platform_PLATFORM_ANDROID, PackageID: uniqueSlug("com.acme"),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.CreateWebhook(ctx, a.Id, "https://example.com/h", []ksealv1.EventType{ksealv1.EventType_EVENT_TYPE_ROOT_RISK}); err != nil {
+			t.Fatal(err)
+		}
+		c, err := store.GetTenantCounts(ctx, a.Id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c.Apps != 1 || c.Webhooks != 1 {
+			t.Fatalf("counts: %+v", c)
+		}
+
+		// Counts are tenant-scoped.
+		b := mustTenant(t, store)
+		cb, err := store.GetTenantCounts(ctx, b.Id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cb.Apps != 0 || cb.Webhooks != 0 {
+			t.Fatalf("cross-tenant count leak: %+v", cb)
+		}
+	})
 }
 
 func TestMemStore(t *testing.T) {

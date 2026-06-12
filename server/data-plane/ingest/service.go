@@ -7,12 +7,14 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/google/uuid"
 	"github.com/klauspost/compress/zstd"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/kennguy3n/kseal/server/control-plane/registry"
 	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
 	"github.com/kennguy3n/kseal/server/gen/kseal/v1/ksealv1connect"
+	"github.com/kennguy3n/kseal/server/shared/risk"
 )
 
 const maxDecompressedBytes = 16 << 20 // 16 MiB ceiling guards against zip bombs.
@@ -184,9 +186,11 @@ func (s *Service) SubmitTelemetry(ctx context.Context, req *connect.Request[ksea
 			continue
 		}
 		stored := StoredEvent{
+			ID:             uuid.NewString(),
 			TenantID:       m.TenantId,
 			AppID:          m.AppId,
 			EventType:      ev.EventType,
+			RiskLevel:      risk.Level(risk.Score(ev.RiskBits, nil), nil),
 			RiskBits:       ev.RiskBits,
 			Confidence:     ev.Confidence,
 			BuildHash:      ev.AppBuildHash,

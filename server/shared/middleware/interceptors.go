@@ -24,11 +24,11 @@ type APIKeyValidator interface {
 
 // Interceptors assembles the standard Connect interceptor chain.
 type Interceptors struct {
-	Logger      zerolog.Logger
-	Metrics     *telemetry.Metrics
-	Tracer      telemetry.Telemetry
-	Limiter     *RedisRateLimiter
-	Validator   APIKeyValidator
+	Logger    zerolog.Logger
+	Metrics   *telemetry.Metrics
+	Tracer    telemetry.Telemetry
+	Limiter   *RedisRateLimiter
+	Validator APIKeyValidator
 	// RequireAuth is the set of fully-qualified procedures that demand a valid
 	// API key (control-plane surfaces). Device-plane procedures authenticate via
 	// request body + signed proofs and are absent here.

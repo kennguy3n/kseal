@@ -70,6 +70,25 @@ type TrustSession struct {
 	ExpiresAt       int64
 }
 
+// TrustSessionStats aggregates trust-session outcomes for a tenant over a time
+// window. TokensIssued counts minting sessions (active/revoked);
+// AttestationsFailed counts non-minting 'failed' records; ByRiskLevel buckets
+// the issued sessions by their fused risk level (TrustLevel enum value).
+type TrustSessionStats struct {
+	TotalSessions      int64
+	TokensIssued       int64
+	AttestationsFailed int64
+	ByRiskLevel        map[int32]int64
+}
+
+// TenantCounts are the registry cardinalities shown on the dashboard overview.
+type TenantCounts struct {
+	Apps           int64
+	Builds         int64
+	ActivePolicies int64
+	Webhooks       int64
+}
+
 // CreateTenantInput carries the fields for creating a tenant.
 type CreateTenantInput struct {
 	Name string
@@ -182,6 +201,16 @@ type Store interface {
 	GetTrustSession(ctx context.Context, tokenID string) (*TrustSession, error)
 	ConsumeSequence(ctx context.Context, tokenID string, seq int64) error
 	RevokeTrustSession(ctx context.Context, tenantID, tokenID string) error
+	// RecordFailedAttestation persists a non-minting attestation outcome
+	// (status 'failed') so the dashboard can report attestation failures. It is
+	// reached only after the single-use nonce is consumed, so it is bounded by
+	// the same rate limits as the trust flow.
+	RecordFailedAttestation(ctx context.Context, s *TrustSession) error
+	// GetTrustSessionStats aggregates trust-session outcomes for a tenant over
+	// [fromSec, toSec] (unix seconds; 0 means unbounded).
+	GetTrustSessionStats(ctx context.Context, tenantID string, fromSec, toSec int64) (*TrustSessionStats, error)
+	// GetTenantCounts returns the registry cardinalities for the overview panel.
+	GetTenantCounts(ctx context.Context, tenantID string) (*TenantCounts, error)
 
 	// Close releases resources.
 	Close()

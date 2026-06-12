@@ -12,17 +12,17 @@ import (
 // Risk signal bit positions (packed into a uint64). Keep in sync with the Rust
 // core's RiskBitset and the protocol docs.
 const (
-	BitRootJailbreak    uint64 = 1 << 0
-	BitDebugger         uint64 = 1 << 1
-	BitEmulator         uint64 = 1 << 2
-	BitHooking          uint64 = 1 << 3
-	BitAppTamper        uint64 = 1 << 4
-	BitAttestationFail  uint64 = 1 << 5
-	BitNetworkMITM      uint64 = 1 << 6
-	BitAccountRisk      uint64 = 1 << 7
-	BitDeviceIntegrity  uint64 = 1 << 8 // device integrity could not be established
-	BitAppUnrecognized  uint64 = 1 << 9 // app not recognized by the platform
-	BitEnvironmentRisk  uint64 = 1 << 10
+	BitRootJailbreak   uint64 = 1 << 0
+	BitDebugger        uint64 = 1 << 1
+	BitEmulator        uint64 = 1 << 2
+	BitHooking         uint64 = 1 << 3
+	BitAppTamper       uint64 = 1 << 4
+	BitAttestationFail uint64 = 1 << 5
+	BitNetworkMITM     uint64 = 1 << 6
+	BitAccountRisk     uint64 = 1 << 7
+	BitDeviceIntegrity uint64 = 1 << 8 // device integrity could not be established
+	BitAppUnrecognized uint64 = 1 << 9 // app not recognized by the platform
+	BitEnvironmentRisk uint64 = 1 << 10
 )
 
 // defaultWeights assigns a severity weight to each known bit. Higher means more

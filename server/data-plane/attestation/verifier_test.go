@@ -59,9 +59,9 @@ func TestPlayIntegrityAcceptsGenuineDevice(t *testing.T) {
 			"requestPackageName": "com.x",
 			"nonce":              base64.StdEncoding.EncodeToString(nonce),
 		},
-		"appIntegrity":   map[string]interface{}{"appRecognitionVerdict": "PLAY_RECOGNIZED"},
+		"appIntegrity":    map[string]interface{}{"appRecognitionVerdict": "PLAY_RECOGNIZED"},
 		"deviceIntegrity": map[string]interface{}{"deviceRecognitionVerdict": []interface{}{"MEETS_STRONG_INTEGRITY"}},
-		"accountDetails": map[string]interface{}{"appLicensingVerdict": "LICENSED"},
+		"accountDetails":  map[string]interface{}{"appLicensingVerdict": "LICENSED"},
 	}
 	token := signPlayToken(t, priv, "k1", claims)
 
