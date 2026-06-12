@@ -6,18 +6,21 @@ import type { EventRecord } from "../gen/kseal/v1/query_pb";
 // event-type and risk-level multi-selects are refined purely client-side here
 // so toggling those chips is instant and never triggers a network round-trip.
 export interface EventFilter {
-  // Empty arrays mean "no constraint" (match all).
-  eventTypes: EventType[];
-  riskLevels: TrustLevel[];
+  // Empty arrays mean "no constraint" (match all). Read-only: the filter is only
+  // ever consumed, never mutated in place.
+  readonly eventTypes: readonly EventType[];
+  readonly riskLevels: readonly TrustLevel[];
   // Inclusive bounds in unix milliseconds; undefined means unbounded.
   startTime?: number;
   endTime?: number;
 }
 
-export const emptyEventFilter: EventFilter = {
-  eventTypes: [],
-  riskLevels: [],
-};
+// Frozen so this shared singleton can't be mutated by a consumer and leak
+// state across callers (it's only ever read by filterEvents/isEventFilterActive).
+export const emptyEventFilter: EventFilter = Object.freeze({
+  eventTypes: Object.freeze([]),
+  riskLevels: Object.freeze([]),
+});
 
 export function isEventFilterActive(f: EventFilter): boolean {
   return (

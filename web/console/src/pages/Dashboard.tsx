@@ -39,11 +39,13 @@ export function DashboardPage() {
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
         <Stat
           label="Apps"
-          value={apps.isLoading ? "…" : (apps.data?.length ?? 0)}
+          value={apps.isLoading ? "…" : apps.data ? apps.data.length : "—"}
         />
         <Stat
           label="Webhooks"
-          value={webhooks.isLoading ? "…" : (webhooks.data?.length ?? 0)}
+          value={
+            webhooks.isLoading ? "…" : webhooks.data ? webhooks.data.length : "—"
+          }
         />
         <Stat
           label="Events (24h)"
