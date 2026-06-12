@@ -403,7 +403,7 @@ pub unsafe extern "C" fn kseal_generate_request_proof(
     let Some(handle) = handle.as_ref() else {
         return Status::ErrNull;
     };
-    if out.is_null() {
+    if out.is_null() || token_id.is_null() {
         return Status::ErrNull;
     }
     let Some(token) = as_str(token_id) else {
@@ -489,7 +489,8 @@ pub unsafe extern "C" fn kseal_decompress(
     let Some(slice) = as_slice(data, len) else {
         return Status::ErrNull;
     };
-    match transport::decompress(slice, None) {
+    // FFI input is untrusted; cap output to guard against decompression bombs.
+    match transport::decompress_limited(slice, None, transport::DEFAULT_MAX_DECOMPRESSED) {
         Ok(v) => {
             out.write(Buffer::from_vec(v));
             Status::Ok
@@ -745,6 +746,30 @@ mod tests {
                 Status::ErrNull as i32
             );
             kseal_core_free(std::ptr::null_mut()); // no-op, must not crash
+        }
+    }
+
+    #[test]
+    fn request_proof_null_token_is_err_null() {
+        unsafe {
+            let sk = signing_key();
+            let handle = new_core(&sk);
+            let mut out = Buffer::empty();
+            // Null token_id must report ErrNull (a null-pointer bug), not ErrInvalid.
+            assert_eq!(
+                kseal_generate_request_proof(
+                    handle,
+                    std::ptr::null(),
+                    b"h".as_ptr(),
+                    1,
+                    b"n".as_ptr(),
+                    1,
+                    1,
+                    &mut out,
+                ),
+                Status::ErrNull
+            );
+            kseal_core_free(handle);
         }
     }
 

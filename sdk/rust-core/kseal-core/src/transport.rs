@@ -47,26 +47,52 @@ pub fn compress(data: &[u8], level: i32, dictionary: Option<&[u8]>) -> Result<Ve
         .map_err(|e| Error::Transport(format!("zstd finish: {e}")))
 }
 
+/// Default cap on decompressed output for untrusted input (16 MiB). A
+/// well-formed telemetry batch is far smaller; this only bounds a hostile
+/// "zip bomb" reaching the FFI boundary.
+pub const DEFAULT_MAX_DECOMPRESSED: usize = 16 * 1024 * 1024;
+
 /// Decompresses zstd `data`, optionally using the shared `dictionary` it was
-/// compressed with.
+/// compressed with. Output size is unbounded — only use on trusted input
+/// (e.g. the SDK's own batches); for untrusted input use [`decompress_limited`].
 ///
 /// # Errors
 /// [`Error::Transport`] on truncated/corrupt input or a dictionary mismatch.
 pub fn decompress(data: &[u8], dictionary: Option<&[u8]>) -> Result<Vec<u8>> {
+    decompress_limited(data, dictionary, usize::MAX)
+}
+
+/// Decompresses zstd `data`, refusing to allocate more than `max_len` bytes of
+/// output. This guards the FFI boundary against decompression bombs.
+///
+/// # Errors
+/// [`Error::Transport`] on truncated/corrupt input, a dictionary mismatch, or
+/// when the decompressed output would exceed `max_len`.
+pub fn decompress_limited(
+    data: &[u8],
+    dictionary: Option<&[u8]>,
+    max_len: usize,
+) -> Result<Vec<u8>> {
+    let decoder: Box<dyn Read + '_> = match dictionary {
+        Some(dict) => Box::new(
+            zstd::Decoder::with_dictionary(data, dict)
+                .map_err(|e| Error::Transport(format!("zstd init: {e}")))?,
+        ),
+        None => Box::new(
+            zstd::Decoder::new(data).map_err(|e| Error::Transport(format!("zstd init: {e}")))?,
+        ),
+    };
+    // Read one byte past the limit so an over-large stream is detectable.
+    let read_cap = max_len.saturating_add(1) as u64;
     let mut out = Vec::new();
-    match dictionary {
-        Some(dict) => {
-            let mut dec = zstd::Decoder::with_dictionary(data, dict)
-                .map_err(|e| Error::Transport(format!("zstd init: {e}")))?;
-            dec.read_to_end(&mut out)
-                .map_err(|e| Error::Transport(format!("zstd read: {e}")))?;
-        }
-        None => {
-            let mut dec = zstd::Decoder::new(data)
-                .map_err(|e| Error::Transport(format!("zstd init: {e}")))?;
-            dec.read_to_end(&mut out)
-                .map_err(|e| Error::Transport(format!("zstd read: {e}")))?;
-        }
+    decoder
+        .take(read_cap)
+        .read_to_end(&mut out)
+        .map_err(|e| Error::Transport(format!("zstd read: {e}")))?;
+    if out.len() > max_len {
+        return Err(Error::Transport(format!(
+            "decompressed output exceeds limit of {max_len} bytes"
+        )));
     }
     Ok(out)
 }
@@ -187,6 +213,16 @@ mod tests {
         assert!(decompress(b"not a zstd frame", None).is_err());
         let wire = compress(b"hello world hello world", DEFAULT_ZSTD_LEVEL, None).unwrap();
         assert!(decompress(&wire[..wire.len() / 2], None).is_err());
+    }
+
+    #[test]
+    fn decompress_limited_rejects_oversized_output() {
+        // 64 KiB of zeros compresses tiny but expands past a small cap.
+        let payload = vec![0u8; 64 * 1024];
+        let wire = compress(&payload, DEFAULT_ZSTD_LEVEL, None).unwrap();
+        // Exact-size cap succeeds; one byte under fails cleanly (no OOM/panic).
+        assert_eq!(decompress_limited(&wire, None, payload.len()).unwrap(), payload);
+        assert!(decompress_limited(&wire, None, payload.len() - 1).is_err());
     }
 
     #[test]

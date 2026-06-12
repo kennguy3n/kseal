@@ -42,7 +42,7 @@ impl CachedConfig {
     /// Remaining lifetime in seconds (`0` once expired).
     #[must_use]
     pub fn remaining_ttl(&self, now: i64) -> i64 {
-        (self.expires_at() - now).max(0)
+        self.expires_at().saturating_sub(now).max(0)
     }
 }
 

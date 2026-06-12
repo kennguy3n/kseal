@@ -95,7 +95,9 @@ impl RiskEngine {
         let RiskScore { score, confidence, .. } =
             RiskScore::compute(filtered, &self.policy.config().signal_weights);
         let level = self.policy.trust_level_for_score(score);
-        let local_response = Self::cap_local(self.policy.evaluate(signals).mode);
+        // `evaluate` re-applies the module filter internally; pass `filtered`
+        // so we don't mask the same signals twice.
+        let local_response = Self::cap_local(self.policy.evaluate(filtered).mode);
 
         self.record(filtered);
 
