@@ -40,10 +40,16 @@ export function AuthProvider({
     return createClients(t);
   }, [baseUrl, transport]);
 
-  const login = useCallback((next: Session) => {
-    saveSession(next);
-    setSession(next);
-  }, []);
+  const login = useCallback(
+    (next: Session) => {
+      // Clear any residual cache before adopting the new session (symmetric
+      // with logout) so a login never serves another session's cached data.
+      queryClient.clear();
+      saveSession(next);
+      setSession(next);
+    },
+    [queryClient],
+  );
 
   const logout = useCallback(() => {
     clearSession();

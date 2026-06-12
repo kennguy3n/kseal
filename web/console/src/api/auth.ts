@@ -14,9 +14,6 @@ export interface Session {
 
 const STORAGE_KEY = "kseal.console.session.v1";
 
-type Listener = (session: Session | null) => void;
-const listeners = new Set<Listener>();
-
 function readStorage(): Session | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -52,15 +49,8 @@ export function loadSession(): Session | null {
 
 export function saveSession(session: Session): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
-  for (const l of listeners) l(session);
 }
 
 export function clearSession(): void {
   localStorage.removeItem(STORAGE_KEY);
-  for (const l of listeners) l(null);
-}
-
-export function subscribe(listener: Listener): () => void {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
 }

@@ -71,5 +71,7 @@ export function riskLevelTone(level: TrustLevel): string {
 export function formatTimestamp(ms: bigint | number): string {
   const n = typeof ms === "bigint" ? Number(ms) : ms;
   if (!Number.isFinite(n) || n <= 0) return "—";
-  return new Date(n).toISOString().replace("T", " ").replace(".000Z", "Z");
+  // Always render to second precision so rows are formatted consistently
+  // regardless of sub-second timestamp components.
+  return new Date(n).toISOString().replace("T", " ").replace(/\.\d{3}Z$/, "Z");
 }
