@@ -33,14 +33,15 @@ use crate::proto::{PolicyConfig, SignedConfig};
 use crate::{Error, Result};
 use prost::Message;
 
-/// Upper bound applied to the unauthenticated `SignedConfig.ttl_seconds`.
+/// Upper bound applied to `SignedConfig.ttl_seconds`.
 ///
-/// The TTL is not covered by the config signature (see the [module
-/// docs](self)), so it is clamped to this maximum (24h) as defense-in-depth:
-/// even a tampered or absurdly large TTL forces a refresh within a bounded
-/// window. Legitimate TTLs at or below this value are unaffected; negative
-/// TTLs are clamped to `0` (immediately stale). This aligns with the "rapid
-/// signed config updates" posture in `PROPOSAL.md`.
+/// `ttl_seconds` is now authenticated by the envelope signature (see the
+/// [module docs](self)), so this clamp is an **operational** bound rather than
+/// a security one: even a *validly-signed* but misconfigured oversized TTL is
+/// capped to this maximum (24h) so the SDK refreshes within a bounded window,
+/// upholding the "rapid signed config updates" posture in `PROPOSAL.md`.
+/// Legitimate TTLs at or below this value are unaffected; negative TTLs are
+/// clamped to `0` (immediately stale).
 pub const MAX_TTL_SECONDS: i64 = 24 * 60 * 60;
 
 /// A verified, cached policy config plus the metadata needed to age it out.
@@ -105,8 +106,9 @@ pub fn verify_and_decode(
         version: signed.version,
         key_id: signed.key_id.clone(),
         loaded_at: now,
-        // `ttl_seconds` is not covered by the signature; clamp it to a bounded
-        // window so a tampered TTL cannot pin a stale config (see module docs).
+        // `ttl_seconds` is authenticated by the envelope signature; this clamp
+        // is an operational bound so a validly-signed but oversized TTL still
+        // refreshes within a bounded window (see module docs).
         ttl_seconds: signed.ttl_seconds.clamp(0, MAX_TTL_SECONDS),
     })
 }
@@ -264,7 +266,8 @@ mod tests {
     #[test]
     fn ttl_is_clamped_to_max() {
         let sk = signing_key();
-        // A tampered/absurd TTL must not pin the config beyond MAX_TTL_SECONDS.
+        // A validly-signed but absurd TTL must not pin the config beyond
+        // MAX_TTL_SECONDS (operational bound; tampering would fail the signature).
         let signed = make_signed(1, i64::MAX, &sk);
         let cached = verify_and_decode(&signed, sk.verifying_key().as_bytes(), 1000).unwrap();
         assert_eq!(cached.ttl_seconds, MAX_TTL_SECONDS);

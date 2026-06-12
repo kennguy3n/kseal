@@ -56,10 +56,19 @@ impl RiskEngine {
         &self.policy
     }
 
-    /// Replaces the active policy and clears history (signals are policy-relative).
+    /// Replaces the active policy.
+    ///
+    /// Scores and the anomaly window are interpreted *relative to* the policy's
+    /// weights, thresholds, and enabled modules, so a genuine policy change
+    /// invalidates the recent window and it is cleared. An idempotent reload of
+    /// a byte-identical policy (e.g. a same-version config refresh) leaves the
+    /// window intact — otherwise a persistently-present signal would re-fire as
+    /// a spurious anomaly after every reload.
     pub fn set_policy(&mut self, policy: Policy) {
+        if self.policy.config() != policy.config() {
+            self.history.clear();
+        }
         self.policy = policy;
-        self.history.clear();
     }
 
     /// Caps a policy enforcement mode to the strongest *local* response.
@@ -201,6 +210,26 @@ mod tests {
                                       // ROOT has aged out, so it re-emerges as anomalous.
         let r = e.fuse(RiskBitset::ROOT);
         assert!(r.anomaly);
+    }
+
+    #[test]
+    fn idempotent_policy_reload_preserves_anomaly_window() {
+        let mut e = RiskEngine::new(policy(), DEFAULT_WINDOW);
+        // DEBUGGER is now established in the window.
+        assert!(e.fuse(RiskBitset::DEBUGGER).anomaly);
+        assert!(!e.fuse(RiskBitset::DEBUGGER).anomaly);
+
+        // Reloading a byte-identical policy must NOT reset the window, so a
+        // persistently-present signal does not re-fire as a spurious anomaly.
+        e.set_policy(policy());
+        assert!(!e.fuse(RiskBitset::DEBUGGER).anomaly);
+
+        // A genuine policy change DOES reset the window: the same signal is
+        // re-evaluated from scratch and flags as newly emerged.
+        let mut changed_cfg = policy().config().clone();
+        changed_cfg.signal_weights.insert(4, 99); // bump DEBUGGER weight
+        e.set_policy(Policy::new(changed_cfg));
+        assert!(e.fuse(RiskBitset::DEBUGGER).anomaly);
     }
 
     #[test]
