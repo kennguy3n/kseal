@@ -22,14 +22,26 @@ const (
 
 // SignedConfig wraps a serialized PolicyConfig with an Ed25519 signature so the
 // SDK can verify authenticity offline and cache it behind a CDN.
+//
+// The signature authenticates the whole envelope, not just config_bytes. It is
+// computed over a canonical, domain-separated, length-prefixed preimage:
+//
+//	u32_be(len)||"kseal/v1/signed-config" || i64_be(version) ||
+//	i64_be(ttl_seconds) || u32_be(len)||key_id || u32_be(len)||config_bytes
+//
+// so version (rollback anchor), ttl_seconds (staleness anchor), key_id and
+// config_bytes are all covered, closing the CDN/cache tamper vector. The Go
+// server and the Rust device core mirror this layout byte-for-byte (pinned by a
+// shared golden vector).
 type SignedConfig struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	// Serialized PolicyConfig bytes that the signature covers.
+	// Serialized PolicyConfig bytes (part of the signed envelope preimage).
 	ConfigBytes []byte `protobuf:"bytes,1,opt,name=config_bytes,json=configBytes,proto3" json:"config_bytes,omitempty"`
-	// Ed25519 signature over config_bytes.
+	// Ed25519 signature over the canonical envelope preimage (see message docs):
+	// version, ttl_seconds, key_id and config_bytes are all authenticated.
 	Signature []byte `protobuf:"bytes,2,opt,name=signature,proto3" json:"signature,omitempty"`
 	// Identifier of the signing key (for rotation).
 	KeyId string `protobuf:"bytes,3,opt,name=key_id,json=keyId,proto3" json:"key_id,omitempty"`
