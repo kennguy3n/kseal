@@ -1,0 +1,207 @@
+syntax = "proto3";
+
+package kseal.v1;
+
+import "kseal/v1/common.proto";
+
+option go_package = "github.com/kennguy3n/kseal/server/gen/kseal/v1;ksealv1";
+
+// Tenant is the control-plane source of truth for an isolation boundary.
+message Tenant {
+  string id = 1;
+  string name = 2;
+  string slug = 3;
+  // Isolation tier: starter | growth | enterprise | regulated.
+  string tier = 4;
+  // Lifecycle status: active | suspended | deleted.
+  string status = 5;
+  int64 created_at = 6;
+  int64 updated_at = 7;
+}
+
+// App is a registered application bound to a tenant and platform.
+message App {
+  string id = 1;
+  string tenant_id = 2;
+  string name = 3;
+  Platform platform = 4;
+  // Android package name or iOS bundle id.
+  string package_id = 5;
+  // Allowed signing identities (cert fingerprints / team ids).
+  repeated string signing_identities = 6;
+  string status = 7;
+  int64 created_at = 8;
+  int64 updated_at = 9;
+}
+
+// Build is an immutable record of a protected build of an app.
+message Build {
+  string id = 1;
+  string tenant_id = 2;
+  string app_id = 3;
+  string build_hash = 4;
+  string version_name = 5;
+  int64 version_code = 6;
+  string protection_profile_id = 7;
+  // Build manifest as JSON (provenance, module set, transforms applied).
+  string manifest = 8;
+  int64 created_at = 9;
+}
+
+// ProtectionProfile is a reusable named bundle of enabled modules + policy.
+message ProtectionProfile {
+  string id = 1;
+  string tenant_id = 2;
+  string name = 3;
+  repeated string modules_enabled = 4;
+  EnforcementMode default_mode = 5;
+  int64 created_at = 6;
+}
+
+// Policy is a versioned, activatable policy for a tenant (optionally per-app).
+message Policy {
+  string id = 1;
+  string tenant_id = 2;
+  // Empty app_id means tenant-wide default.
+  string app_id = 3;
+  string name = 4;
+  int32 version = 5;
+  EnforcementMode enforcement_mode = 6;
+  // Rules as JSON (mirrors PolicyConfig.rules).
+  string rules = 7;
+  string risk_thresholds = 8;
+  repeated string modules_enabled = 9;
+  bool is_active = 10;
+  int64 created_at = 11;
+  int64 updated_at = 12;
+}
+
+// ---- Tenant CRUD ----
+
+message CreateTenantRequest {
+  string name = 1;
+  string slug = 2;
+  string tier = 3;
+}
+message CreateTenantResponse { Tenant tenant = 1; }
+
+message GetTenantRequest { string id = 1; }
+message GetTenantResponse { Tenant tenant = 1; }
+
+message ListTenantsRequest {
+  int32 page_size = 1;
+  string page_token = 2;
+}
+message ListTenantsResponse {
+  repeated Tenant tenants = 1;
+  string next_page_token = 2;
+}
+
+message UpdateTenantRequest {
+  string id = 1;
+  string name = 2;
+  string tier = 3;
+  string status = 4;
+}
+message UpdateTenantResponse { Tenant tenant = 1; }
+
+// ---- App CRUD ----
+
+message CreateAppRequest {
+  string tenant_id = 1;
+  string name = 2;
+  Platform platform = 3;
+  string package_id = 4;
+  repeated string signing_identities = 5;
+}
+message CreateAppResponse { App app = 1; }
+
+message GetAppRequest {
+  string tenant_id = 1;
+  string id = 2;
+}
+message GetAppResponse { App app = 1; }
+
+message ListAppsRequest {
+  string tenant_id = 1;
+  int32 page_size = 2;
+  string page_token = 3;
+}
+message ListAppsResponse {
+  repeated App apps = 1;
+  string next_page_token = 2;
+}
+
+// ---- Build CRUD ----
+
+message CreateBuildRequest {
+  string tenant_id = 1;
+  string app_id = 2;
+  string build_hash = 3;
+  string version_name = 4;
+  int64 version_code = 5;
+  string protection_profile_id = 6;
+  string manifest = 7;
+}
+message CreateBuildResponse { Build build = 1; }
+
+message GetBuildRequest {
+  string tenant_id = 1;
+  string id = 2;
+}
+message GetBuildResponse { Build build = 1; }
+
+message ListBuildsRequest {
+  string tenant_id = 1;
+  string app_id = 2;
+  int32 page_size = 3;
+  string page_token = 4;
+}
+message ListBuildsResponse {
+  repeated Build builds = 1;
+  string next_page_token = 2;
+}
+
+// ---- Policy CRUD ----
+
+message CreatePolicyRequest {
+  string tenant_id = 1;
+  string app_id = 2;
+  string name = 3;
+  EnforcementMode enforcement_mode = 4;
+  string rules = 5;
+  string risk_thresholds = 6;
+  repeated string modules_enabled = 7;
+}
+message CreatePolicyResponse { Policy policy = 1; }
+
+message GetActivePolicyRequest {
+  string tenant_id = 1;
+  string app_id = 2;
+}
+message GetActivePolicyResponse { Policy policy = 1; }
+
+message ListPoliciesRequest {
+  string tenant_id = 1;
+  string app_id = 2;
+}
+message ListPoliciesResponse { repeated Policy policies = 1; }
+
+message ActivatePolicyRequest {
+  string tenant_id = 1;
+  string id = 2;
+}
+message ActivatePolicyResponse { Policy policy = 1; }
+
+// ---- Protection profile ----
+
+message CreateProtectionProfileRequest {
+  string tenant_id = 1;
+  string name = 2;
+  repeated string modules_enabled = 3;
+  EnforcementMode default_mode = 4;
+}
+message CreateProtectionProfileResponse { ProtectionProfile profile = 1; }
+
+message ListProtectionProfilesRequest { string tenant_id = 1; }
+message ListProtectionProfilesResponse { repeated ProtectionProfile profiles = 1; }

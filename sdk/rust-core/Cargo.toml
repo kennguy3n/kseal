@@ -1,0 +1,29 @@
+[workspace]
+resolver = "2"
+members = ["kseal-core", "kseal-ffi"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/kennguy3n/kseal"
+rust-version = "1.74"
+
+[workspace.dependencies]
+prost = "0.13"
+zstd = "0.13"
+sha2 = "0.10"
+hmac = "0.12"
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
+getrandom = "0.2"
+bitflags = "2"
+thiserror = "1"
+serde = { version = "1", features = ["derive"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

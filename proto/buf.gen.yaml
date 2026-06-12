@@ -1,0 +1,16 @@
+version: v2
+clean: true
+managed:
+  enabled: true
+  override:
+    - file_option: go_package_prefix
+      value: github.com/kennguy3n/kseal/server/gen
+plugins:
+  # Go protobuf message types.
+  - local: protoc-gen-go
+    out: ../server/gen
+    opt: paths=source_relative
+  # Connect-Go service handlers and clients.
+  - local: protoc-gen-connect-go
+    out: ../server/gen
+    opt: paths=source_relative

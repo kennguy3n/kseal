@@ -1,0 +1,30 @@
+[package]
+name = "kseal-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "kseal device trust core: policy evaluation, risk scoring, telemetry, and request proofs."
+
+[dependencies]
+prost.workspace = true
+zstd.workspace = true
+sha2.workspace = true
+hmac.workspace = true
+ed25519-dalek.workspace = true
+rand_core.workspace = true
+getrandom.workspace = true
+bitflags.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+
+[build-dependencies]
+prost-build = "0.13"
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "core_benches"
+harness = false

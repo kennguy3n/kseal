@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package kseal.v1;
+
+import "kseal/v1/webhook.proto";
+
+option go_package = "github.com/kennguy3n/kseal/server/gen/kseal/v1;ksealv1";
+
+// WebhookService manages tenant webhook registrations for event fan-out.
+service WebhookService {
+  rpc RegisterWebhook(RegisterWebhookRequest) returns (RegisterWebhookResponse);
+  rpc ListWebhooks(ListWebhooksRequest) returns (ListWebhooksResponse);
+  rpc DeleteWebhook(DeleteWebhookRequest) returns (DeleteWebhookResponse);
+}

@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package kseal.v1;
+
+import "kseal/v1/ingest.proto";
+
+option go_package = "github.com/kennguy3n/kseal/server/gen/kseal/v1;ksealv1";
+
+// IngestService accepts batched, compressed telemetry at the edge.
+service IngestService {
+  // SubmitTelemetry decompresses, validates, quota-checks, and enqueues a batch.
+  rpc SubmitTelemetry(SubmitTelemetryRequest) returns (SubmitTelemetryResponse);
+}
