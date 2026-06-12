@@ -114,21 +114,31 @@ gap versus good design.
 | Resource | Formula (monthly) |
 |---|---|
 | **Ingest bandwidth** | `≈ $0` (ingress free); compressed wire = `daily_raw / 4` |
-| **Compute** | `max(HA_floor, ceil(peak_eps / 2000)) × $30`, `HA_floor = 4 vCPU` |
+| **Compute** | `max(4, ceil((peak_eps / 2000) × H)) × $30`, `H = 1.5` (HA + burst headroom) |
 | **Streaming (Kafka)** | `$300 + (daily_raw/4 × buffer_days) × $0.10 + throughput_tier`, `buffer_days = 3` |
 | **Hot storage (ClickHouse)** | `(daily_raw × hot_days / 8) × 1.5 × $0.10`, `hot_days = 30` |
 | **Cold storage (S3)** | `(daily_raw / 4 × cold_days) × $0.0125`, `cold_days = 365` |
-| **CDN config egress** | `DAU × eff_cfg_bytes × $0.05`, `eff_cfg_bytes ≈ 2 KB` (304-dominated) |
-| **KMS** | key rotation + envelope ops only (token signing done in-process with rotated keys) — low |
-| **Redis sessions** | `peak_sessions × 300 B × $35/GB-mo` |
+| **CDN config egress** | `DAU × eff_cfg_bytes × 30 × $0.05`, `eff_cfg_bytes ≈ 2 KB` (304-dominated) |
+| **KMS** | tenant-scaled key ops only — token signing done in-process with rotated keys (see below) |
+| **Redis sessions** | `max($30 node floor, peak_sessions × 300 B × 2 (replica) × $35/GB-mo)` |
+
+The compute headroom factor `H = 1.5` provisions for HA spread + diurnal burst
+above average peak; `max(4, …)` enforces a 4-vCPU HA floor. Worked example —
+naive 100M (peak ≈ 20,833 eps): `ceil((20833 / 2000) × 1.5) = ceil(15.6) = 16
+vCPU → $480`.
 
 The streaming **`throughput_tier`** term captures broker/partition scaling once
-sustained throughput outgrows the baseline cluster: `+$200 per full 30k peak eps
-above 30k`, i.e. `throughput_tier = floor(peak_eps / 30000) × $200`. It is `$0`
-for every row except **naive 300M** (peak ≈ 62.5k eps → one tier → `+$200`),
-which is why that cell is `$367.50 + $200 ≈ $568` rather than the floor-only
-`$367.50`. All other cells sit at the $300 floor plus negligible buffered
-storage.
+sustained throughput outgrows the baseline cluster, charged only on the excess
+**above 30k peak eps**:
+
+```text
+throughput_tier = max(0, floor((peak_eps − 30000) / 30000)) × $200
+```
+
+It is `$0` for every row except **naive 300M** (peak ≈ 62.5k eps →
+`floor((62500 − 30000)/30000) = 1` tier → `+$200`), which is why that cell is
+`$367.50 + $200 ≈ $568` rather than the floor-only `$367.50`. All other rows sit
+at the $300 floor plus negligible buffered storage.
 
 Two design choices keep several lines near-floor regardless of event volume:
 
@@ -140,6 +150,12 @@ Two design choices keep several lines near-floor regardless of event volume:
   against **cached public keys** — so KMS op volume is key-management traffic,
   not per-request traffic. (A naive "KMS sign per token" design would cost
   thousands of dollars/month at 100M MAU; kseal explicitly avoids it.)
+- **KMS and control-plane cost scale with the *tenant* count (~5000 SME
+  tenants), not MAU or event volume.** Each tenant has its own wrapped signing
+  key under logical `tenant_id` isolation; key rotation + envelope wraps for
+  ~5000 tenants are a few million KMS ops/month (≈ $5–$30), independent of `E`.
+  This is why the KMS line is identical for the good and naive designs at each
+  scale.
 
 ---
 
@@ -154,19 +170,21 @@ is cheaper still because raw events are not stored
 |---|---|---|---|
 | Ingest bandwidth | ~$0 | ~$0 | ~$0 |
 | Compute (Go workers) | $120 | $120 | $150 |
-| Streaming (Kafka/Redpanda) | $300 | $305 | $303 |
+| Streaming (Kafka/Redpanda) | $300 | $301 | $303 |
 | Hot storage (ClickHouse, 30d raw) | $1 | $8 | $25 |
 | Cold storage (S3, 365d raw) | $2 | $17 | $51 |
 | CDN config egress | $9 | $90 | $270 |
 | KMS | $5 | $10 | $30 |
-| Redis (trust sessions) | $30 | $70 | $100 |
-| **Total (raw retention)** | **≈ $470/mo** | **≈ $620/mo** | **≈ $930/mo** |
-| **Total (aggregates default)** | **≈ $460/mo** | **≈ $595/mo** | **≈ $850/mo** |
+| Redis (trust sessions) | $30 | $63 | $189 |
+| **Total (raw retention)** | **≈ $470/mo** | **≈ $610/mo** | **≈ $1,020/mo** |
+| **Total (aggregates default)** | **≈ $465/mo** | **≈ $585/mo** | **≈ $945/mo** |
 
 The headline: with the good design, **the data is almost free** — even at 300M
-MAU the event-driven storage lines total well under $100/month. Cost is set by
-**fixed floors** (streaming cluster, HA compute) and by **user-scaled** lines
-(config egress, Redis), exactly as the architecture intends.
+MAU the event-driven storage lines (hot + cold) total only ~$76/month. Cost is
+set by **fixed floors** (streaming cluster, HA compute) and by **user-scaled**
+lines (config egress, Redis), exactly as the architecture intends. The aggregates
+default path drops the raw hot/cold lines to ~2% (only rollups stored), which is
+why its totals sit just below the raw-retention totals.
 
 ---
 
@@ -176,33 +194,36 @@ Same rate card, naive knobs (`E=20, B=500`):
 
 | Line item | 10M (naive) | 100M (naive) | 300M (naive) |
 |---|---|---|---|
-| Compute | $120 | $480 | $1,200 |
+| Compute | $120 | $480 | $1,410 |
 | Streaming | $302 | $322 | $568 |
 | Hot storage (30d raw) | $17 | $169 | $506 |
 | Cold storage (365d raw) | $34 | $342 | $1,027 |
 | CDN config egress | $9 | $90 | $270 |
-| KMS | $10 | $30 | $80 |
-| Redis | $30 | $70 | $100 |
-| **Total (naive)** | **≈ $520/mo** | **≈ $1,500/mo** | **≈ $3,750/mo** |
+| KMS | $5 | $10 | $30 |
+| Redis | $30 | $63 | $189 |
+| **Total (naive)** | **≈ $520/mo** | **≈ $1,480/mo** | **≈ $4,000/mo** |
 
 ### Good vs naive, side by side
 
-| Scale | Good (raw retention) | Naive | Blended multiple | Variable-cost multiple* |
+| Scale | Good (raw retention) | Naive | Blended multiple | Variable-infra multiple* |
 |---|---|---|---|---|
-| 10M MAU | ~$470 | ~$520 | 1.1× | ~3–4× |
-| 100M MAU | ~$620 | ~$1,500 | 2.4× | ~6–8× |
-| 300M MAU | ~$930 | ~$3,750 | 4.0× | ~10–15× |
+| 10M MAU | ~$470 | ~$520 | 1.1× | ~1.4× |
+| 100M MAU | ~$610 | ~$1,480 | 2.4× | ~7× |
+| 300M MAU | ~$1,020 | ~$4,000 | 3.9× | ~14× |
 
-\* *Variable-cost multiple* isolates the event-driven lines
-(compute + streaming throughput + hot + cold), excluding fixed floors and
-user-scaled lines.
+\* *Variable-infra multiple* isolates the event-driven lines
+(compute + streaming throughput-above-floor + hot + cold), excluding the fixed
+$300 streaming floor and user-scaled lines. At 300M it is `~$3,210 / ~$229 ≈
+14×`, approaching the underlying **20× raw-data-per-user gap** (good
+`2 × 250 B = 500 B/user/day` vs naive `20 × 500 B = 10 KB/user/day`).
 
-**Interpretation.** The raw event-math gap is **20×**, but the *blended* infra
-multiple is smaller (1.1×→4×) because fixed floors and user-scaled costs (config
-egress, Redis, cluster minimums) dilute it. The gap **widens with scale** as
-floors amortize: at 10M the two designs are nearly identical, but by 300M the
-naive design is ~4× more expensive blended and ~10–15× on marginal event cost.
-That **marginal** cost is what determines gross margin on the
+**Interpretation.** The raw event-math gap is **20×** (500 B vs 10 KB per user
+per day), but the *blended* infra multiple is smaller (1.1×→3.9×) because fixed
+floors and user-scaled costs (config egress, Redis, cluster minimums) dilute it.
+The gap **widens with scale** as floors amortize: at 10M the two designs are
+nearly identical, but by 300M the naive design is ~3.9× more expensive blended
+and ~14× on variable infra — approaching the full 20× at the margin. That
+**marginal** cost is what determines gross margin on the
 [event-based pricing axis](../PROPOSAL.md#pricing-model-direction) — so the good
 design is what makes 100M+-MAU pricing viable, precisely the
 [Unit Economics](../PROPOSAL.md#unit-economics) claim.
@@ -271,9 +292,11 @@ The model validates the three [pricing axes](../PROPOSAL.md#pricing-model-direct
   consuming that storage, keeping the base offer (aggregates + standard
   retention) cheap.
 
-Because the good design keeps blended infra cost in the **hundreds of dollars per
-month even at 300M MAU**, the dominant real cost at scale is **not raw infra** but
-**HA/operational headroom and the paid raw-retention path** — which the pricing
-model deliberately pushes onto the tenants who opt into it. See
+Because the good design keeps blended infra cost at **roughly $1,000/month even at
+300M MAU** (vs ~$4,000 for the naive design), the dominant real cost at scale is
+**not raw event infra** (hot + cold storage is only ~$76/month at 300M) but
+**HA/operational headroom, user-scaled lines (config egress, Redis), and the paid
+raw-retention path** — which the pricing model deliberately pushes onto the
+tenants who opt into it. See
 [feature-parity-matrix.md](feature-parity-matrix.md#where-kseal-wins-matches-and-trails)
 for how this "lightweight / lower operating cost" position compares to incumbents.
