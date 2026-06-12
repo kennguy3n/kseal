@@ -196,7 +196,7 @@ func (s *Service) SubmitTelemetry(ctx context.Context, req *connect.Request[ksea
 			BuildHash:      ev.AppBuildHash,
 			PolicyHash:     ev.PolicyHash,
 			InstallKeyHash: ev.TenantScopedInstallKeyHash,
-			TimeBucket:     coalesce(ev.CoarseTimeBucket, now),
+			TimeBucket:     normalizeTimeBucketSec(ev.CoarseTimeBucket, now),
 			Country:        derefStr(ev.CountryOrRegion),
 			Platform:       batch.Platform,
 			ReceivedAt:     now,
@@ -237,9 +237,33 @@ func derefStr(s *string) string {
 	return *s
 }
 
-func coalesce(v, fallback int64) int64 {
-	if v == 0 {
-		return fallback
+const (
+	// millisCutoffSec separates a unix-seconds value from a unix-millis value
+	// by magnitude: a seconds timestamp stays below this until the year ~5138,
+	// while a millis timestamp is already ~1.7e12 today. Any value at or above
+	// it is treated as millis and scaled down.
+	millisCutoffSec = int64(1e11)
+	// maxClockSkewSec bounds how far ahead of the server clock a coarse bucket
+	// may sit before it is rejected as bogus (generous, to tolerate coarse
+	// hour-bucketing and client clock skew).
+	maxClockSkewSec = int64(25 * 3600)
+)
+
+// normalizeTimeBucketSec collapses a client-supplied coarse time bucket to
+// canonical unix seconds. The wire contract (telemetry.proto coarse_time_bucket)
+// is unix-millis, but normalizing by magnitude also absorbs a misbehaving SDK
+// that sends seconds, so storage is always seconds and the millis<->seconds
+// conversions at the query boundary can never be fed an ambiguous unit.
+// Non-positive or implausibly-future values fall back to nowSec.
+func normalizeTimeBucketSec(v, nowSec int64) int64 {
+	if v <= 0 {
+		return nowSec
+	}
+	if v >= millisCutoffSec {
+		v /= 1000
+	}
+	if v > nowSec+maxClockSkewSec {
+		return nowSec
 	}
 	return v
 }

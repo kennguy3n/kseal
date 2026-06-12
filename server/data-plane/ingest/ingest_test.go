@@ -225,3 +225,58 @@ func TestBrokerFull(t *testing.T) {
 		t.Fatalf("expected ErrBrokerFull, got %v", err)
 	}
 }
+
+func TestNormalizeTimeBucketSec(t *testing.T) {
+	const now = int64(1_700_000_000) // fixed "server clock" in unix seconds
+	cases := []struct {
+		name string
+		in   int64
+		want int64
+	}{
+		{"zero falls back to now", 0, now},
+		{"negative falls back to now", -5, now},
+		{"seconds in past kept", 1_699_000_000, 1_699_000_000},
+		{"millis normalized to seconds", 1_700_000_000_000, now},
+		{"future within skew kept", now + 3600, now + 3600},
+		{"future seconds beyond skew clamped", now + 200_000, now},
+		{"huge millis future clamped", 5_000_000_000_000, now},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := normalizeTimeBucketSec(c.in, now); got != c.want {
+				t.Fatalf("normalizeTimeBucketSec(%d, %d) = %d, want %d", c.in, now, got, c.want)
+			}
+		})
+	}
+}
+
+// TestSubmitTelemetryNormalizesMillisBucket proves the wire-contract millis bucket
+// is stored as canonical unix seconds, so the query-boundary millis<->seconds
+// conversion can never be fed an ambiguous unit.
+func TestSubmitTelemetryNormalizesMillisBucket(t *testing.T) {
+	svc, _, tn, app, broker := setupIngest(t, 1000)
+	millisBucket := time.Now().Add(-time.Hour).UnixMilli()
+	batch, _ := proto.Marshal(&ksealv1.TelemetryBatch{
+		Platform: ksealv1.Platform_PLATFORM_ANDROID,
+		Events: []*ksealv1.TelemetryEvent{
+			{EventType: ksealv1.EventType_EVENT_TYPE_ROOT_RISK, RiskBits: 1, CoarseTimeBucket: millisBucket},
+		},
+	})
+	resp, err := svc.SubmitTelemetry(context.Background(), connect.NewRequest(&ksealv1.SubmitTelemetryRequest{
+		TenantId: tn.Id, AppId: app.Id, Compression: ksealv1.Compression_COMPRESSION_NONE, CompressedBatch: batch,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Msg.Accepted != 1 {
+		t.Fatalf("accepted=%d rejected=%d", resp.Msg.Accepted, resp.Msg.Rejected)
+	}
+	select {
+	case e := <-broker.Consume():
+		if e.TimeBucket != millisBucket/1000 {
+			t.Fatalf("TimeBucket=%d, want canonical seconds %d", e.TimeBucket, millisBucket/1000)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no event published to broker")
+	}
+}
