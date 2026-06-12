@@ -1,6 +1,18 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { useClients, useSession } from "../state/useAuth";
 import type { EventType } from "../gen/kseal/v1/common_pb";
+
+// Server-side page sizes for the keyset-paginated list RPCs. The console loads
+// one page at a time and exposes a "Load more" control driven by the response's
+// next_page_token, so nothing is ever silently truncated.
+const APPS_PAGE_SIZE = 50;
+const BUILDS_PAGE_SIZE = 50;
+const EVENTS_PAGE_SIZE = 100;
 
 // Centralized query keys, all tenant-scoped so caches never bleed across the
 // tenant boundary even if the same client instance is reused.
@@ -22,12 +34,19 @@ export const queryKeys = {
 export function useApps() {
   const clients = useClients();
   const { tenantId } = useSession();
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: queryKeys.apps(tenantId),
-    queryFn: async () => {
-      const res = await clients.registry.listApps({ tenantId, pageSize: 200 });
-      return res.apps;
+    queryFn: async ({ pageParam }) => {
+      const res = await clients.registry.listApps({
+        tenantId,
+        pageSize: APPS_PAGE_SIZE,
+        pageToken: pageParam,
+      });
+      return { items: res.apps, nextPageToken: res.nextPageToken };
     },
+    initialPageParam: "",
+    getNextPageParam: (last) => last.nextPageToken || undefined,
+    select: (data) => data.pages.flatMap((page) => page.items),
   });
 }
 
@@ -47,16 +66,20 @@ export function useApp(appId: string) {
 export function useBuilds(appId: string) {
   const clients = useClients();
   const { tenantId } = useSession();
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: queryKeys.builds(tenantId, appId),
-    queryFn: async () => {
+    queryFn: async ({ pageParam }) => {
       const res = await clients.registry.listBuilds({
         tenantId,
         appId,
-        pageSize: 100,
+        pageSize: BUILDS_PAGE_SIZE,
+        pageToken: pageParam,
       });
-      return res.builds;
+      return { items: res.builds, nextPageToken: res.nextPageToken };
     },
+    initialPageParam: "",
+    getNextPageParam: (last) => last.nextPageToken || undefined,
+    select: (data) => data.pages.flatMap((page) => page.items),
     enabled: appId.length > 0,
   });
 }
@@ -127,18 +150,22 @@ export interface EventsQueryArgs {
 export function useEvents(args: EventsQueryArgs) {
   const clients = useClients();
   const { tenantId } = useSession();
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: queryKeys.events(tenantId, args),
-    queryFn: async () => {
+    queryFn: async ({ pageParam }) => {
       const res = await clients.query.listEvents({
         tenantId,
         appId: args.appId ?? "",
         startTime: BigInt(args.startTime ?? 0),
         endTime: BigInt(args.endTime ?? 0),
-        pageSize: 200,
+        pageSize: EVENTS_PAGE_SIZE,
+        pageToken: pageParam,
       });
-      return res.events;
+      return { items: res.events, nextPageToken: res.nextPageToken };
     },
+    initialPageParam: "",
+    getNextPageParam: (last) => last.nextPageToken || undefined,
+    select: (data) => data.pages.flatMap((page) => page.items),
   });
 }
 

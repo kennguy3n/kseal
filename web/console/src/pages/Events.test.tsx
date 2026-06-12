@@ -98,4 +98,50 @@ describe("EventsPage", () => {
     await user.click(screen.getByRole("button", { name: "Clear filters" }));
     await waitFor(() => expect(screen.getAllByRole("row")).toHaveLength(4));
   });
+
+  it("loads the next page via the next_page_token cursor", async () => {
+    const user = userEvent.setup();
+    const page1 = [
+      record("p1", EventType.ROOT_RISK, TrustLevel.CRITICAL, 3_000),
+    ];
+    const page2 = [
+      record("p2", EventType.DEBUGGER, TrustLevel.LOW_RISK, 1_000),
+    ];
+
+    const transport = createRouterTransport(({ service }) => {
+      service(QueryService, {
+        listEvents(req) {
+          // First page returns a cursor; the page it points at returns no
+          // further cursor, so "Load more" should disappear afterward.
+          return req.pageToken === "cursor-1"
+            ? create(ListEventsResponseSchema, { events: page2 })
+            : create(ListEventsResponseSchema, {
+                events: page1,
+                nextPageToken: "cursor-1",
+              });
+        },
+        getTenantOverview: () => {
+          throw new Error("unused");
+        },
+        getTrustSessionStats: () => {
+          throw new Error("unused");
+        },
+      });
+    });
+
+    renderWithProviders(<EventsPage />, { transport, route: "/events" });
+
+    await waitFor(() => expect(screen.getAllByRole("row")).toHaveLength(2)); // header + 1
+    const loadMore = screen.getByRole("button", { name: "Load more" });
+
+    await user.click(loadMore);
+
+    await waitFor(() => expect(screen.getAllByRole("row")).toHaveLength(3)); // header + 2
+    const table = screen.getByRole("table");
+    expect(within(table).getByText("Debugger")).toBeInTheDocument();
+    // Cursor exhausted: the control is gone.
+    expect(
+      screen.queryByRole("button", { name: "Load more" }),
+    ).not.toBeInTheDocument();
+  });
 });

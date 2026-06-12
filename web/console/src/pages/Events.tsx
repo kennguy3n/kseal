@@ -1,6 +1,13 @@
 import { useMemo, useState } from "react";
 import { useEvents } from "../hooks/queries";
-import { Card, EmptyState, ErrorNotice, Spinner, Badge } from "../components/ui";
+import {
+  Card,
+  EmptyState,
+  ErrorNotice,
+  LoadMore,
+  Spinner,
+  Badge,
+} from "../components/ui";
 import { EventType, TrustLevel } from "../gen/kseal/v1/common_pb";
 import {
   eventTypeLabels,
@@ -182,9 +189,17 @@ export function EventsPage() {
         ) : events.isError ? (
           <ErrorNotice error={events.error} />
         ) : visible.length === 0 ? (
-          <EmptyState>No events match the current filters.</EmptyState>
+          <>
+            <EmptyState>No events match the current filters.</EmptyState>
+            <LoadMore
+              hasNextPage={events.hasNextPage}
+              isFetchingNextPage={events.isFetchingNextPage}
+              onClick={() => void events.fetchNextPage()}
+            />
+          </>
         ) : (
-          <table className="w-full">
+          <>
+            <table className="w-full">
             <thead>
               <tr className="border-b border-slate-800">
                 <th className="th">Time</th>
@@ -215,7 +230,13 @@ export function EventsPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+            </table>
+            <LoadMore
+              hasNextPage={events.hasNextPage}
+              isFetchingNextPage={events.isFetchingNextPage}
+              onClick={() => void events.fetchNextPage()}
+            />
+          </>
         )}
       </Card>
     </div>

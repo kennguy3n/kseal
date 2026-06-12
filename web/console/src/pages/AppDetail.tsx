@@ -5,7 +5,14 @@ import {
   useBuilds,
   useEvents,
 } from "../hooks/queries";
-import { Card, EmptyState, ErrorNotice, Spinner, Badge } from "../components/ui";
+import {
+  Card,
+  EmptyState,
+  ErrorNotice,
+  LoadMore,
+  Spinner,
+  Badge,
+} from "../components/ui";
 import {
   enforcementModeLabels,
   eventTypeLabels,
@@ -102,7 +109,8 @@ export function AppDetailPage() {
           ) : !builds.data || builds.data.length === 0 ? (
             <EmptyState>No builds recorded.</EmptyState>
           ) : (
-            <table className="w-full">
+            <>
+              <table className="w-full">
               <thead>
                 <tr className="border-b border-slate-800">
                   <th className="th">Version</th>
@@ -125,7 +133,13 @@ export function AppDetailPage() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+              </table>
+              <LoadMore
+                hasNextPage={builds.hasNextPage}
+                isFetchingNextPage={builds.isFetchingNextPage}
+                onClick={() => void builds.fetchNextPage()}
+              />
+            </>
           )}
         </Card>
       </div>

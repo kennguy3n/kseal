@@ -65,6 +65,14 @@ defined in the canonical `//proto/kseal/v1/query.proto` +
 keyset-paginated queries. The pages render real data; a thin `ErrorNotice`
 fallback covers transient RPC failures.
 
+### Pagination
+
+The Apps, App-detail builds, and Events lists are keyset-paginated. Each hook
+(`useApps`, `useBuilds`, `useEvents`) is a `useInfiniteQuery` that sends the
+server's `next_page_token` back as the `page_token` of the next request and a
+"Load more" control appends the next page. When the server returns an empty
+`next_page_token` the control disappears, so the views never silently truncate.
+
 ## Runtime configuration (NoOps)
 
 `VITE_KSEAL_API_BASE_URL` is inlined at build time (default

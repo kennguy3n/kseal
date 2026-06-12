@@ -67,6 +67,33 @@ export function EmptyState({ children }: { children: ReactNode }) {
   );
 }
 
+// Keyset-pagination control for the list views. Renders nothing when the server
+// reported no further pages (empty next_page_token), so callers can drop it in
+// unconditionally below a list.
+export function LoadMore({
+  hasNextPage,
+  isFetchingNextPage,
+  onClick,
+}: {
+  hasNextPage: boolean;
+  isFetchingNextPage: boolean;
+  onClick: () => void;
+}) {
+  if (!hasNextPage) return null;
+  return (
+    <div className="mt-4 flex justify-center">
+      <button
+        type="button"
+        className="btn-ghost"
+        onClick={onClick}
+        disabled={isFetchingNextPage}
+      >
+        {isFetchingNextPage ? "Loading…" : "Load more"}
+      </button>
+    </div>
+  );
+}
+
 // Renders a Connect error as a thin, defensive fallback for transient failures
 // (the read RPCs are implemented server-side, so this is no longer a "pending
 // support" degrade path).

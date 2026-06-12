@@ -1,6 +1,13 @@
 import { Link } from "react-router-dom";
 import { useApps } from "../hooks/queries";
-import { Card, EmptyState, ErrorNotice, Spinner, Badge } from "../components/ui";
+import {
+  Card,
+  EmptyState,
+  ErrorNotice,
+  LoadMore,
+  Spinner,
+  Badge,
+} from "../components/ui";
 import { platformLabels } from "../lib/format";
 
 export function AppsListPage() {
@@ -23,7 +30,8 @@ export function AppsListPage() {
         ) : !apps.data || apps.data.length === 0 ? (
           <EmptyState>No apps registered yet.</EmptyState>
         ) : (
-          <table className="w-full">
+          <>
+            <table className="w-full">
             <thead>
               <tr className="border-b border-slate-800">
                 <th className="th">Name</th>
@@ -56,7 +64,13 @@ export function AppsListPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+            </table>
+            <LoadMore
+              hasNextPage={apps.hasNextPage}
+              isFetchingNextPage={apps.isFetchingNextPage}
+              onClick={() => void apps.fetchNextPage()}
+            />
+          </>
         )}
       </Card>
     </div>
