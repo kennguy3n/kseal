@@ -14,7 +14,13 @@ fn main() {
     // still succeed so downstream crates can link the static library.
     match cbindgen::generate(&crate_dir) {
         Ok(bindings) => {
-            bindings.write_to_file(out_dir.join("kseal.h"));
+            let header = out_dir.join("kseal.h");
+            if !bindings.write_to_file(&header) {
+                println!(
+                    "cargo:warning=cbindgen wrote no changes or failed to write {}",
+                    header.display()
+                );
+            }
         }
         Err(e) => {
             println!("cargo:warning=cbindgen header generation skipped: {e}");
