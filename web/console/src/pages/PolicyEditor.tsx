@@ -66,7 +66,9 @@ export function PolicyEditorPage() {
         riskThresholds: result.draft.riskThresholds,
         modulesEnabled: result.draft.modulesEnabled,
       });
-      setForm((f) => ({ ...initialForm, appId: f.appId }));
+      // Reset the authoring fields; the selected app scope lives in its own
+      // `appId` state and is intentionally left untouched.
+      setForm(initialForm);
     } catch (err) {
       setSubmitError(err);
     }

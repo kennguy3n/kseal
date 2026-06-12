@@ -56,17 +56,14 @@ export function EventsPage() {
   // no per-toggle network round-trip.
   const events = useEvents({ startTime, endTime });
 
+  // The time range is already applied server-side by ListEvents, so the
+  // client-side pass only refines by event type and risk level.
   const visible = useMemo(() => {
     if (!events.data) return [];
     return sortEventsByTimeDesc(
-      filterEvents(events.data, {
-        eventTypes,
-        riskLevels,
-        startTime,
-        endTime,
-      }),
+      filterEvents(events.data, { eventTypes, riskLevels }),
     );
-  }, [events.data, eventTypes, riskLevels, startTime, endTime]);
+  }, [events.data, eventTypes, riskLevels]);
 
   return (
     <div className="space-y-6">
