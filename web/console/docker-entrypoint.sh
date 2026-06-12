@@ -24,3 +24,28 @@ window.__KSEAL_ENV__ = { apiBaseUrl: "${SAFE_URL}" };
 EOF
 
 echo "kseal-console: rendered ${TARGET} (apiBaseUrl='${API_BASE_URL}')"
+
+# Tighten the CSP connect-src to the configured kseal API origin so the browser
+# only allows API calls to that origin. We can only derive it from the runtime
+# env var; when KSEAL_API_BASE_URL is unset (build-time-configured deploys) or
+# is not a clean http(s) origin we leave connect-src '*' rather than guess.
+NGINX_CONF="/etc/nginx/conf.d/default.conf"
+CONNECT_SRC="*"
+if [ -n "${API_BASE_URL}" ]; then
+  ORIGIN=$(printf '%s' "${API_BASE_URL}" \
+    | tr -d '\r\n' \
+    | sed -E 's#^(https?://[^/]+).*#\1#')
+  # Only accept a strict scheme://host[:port] origin; reject anything carrying
+  # characters that could break out of the nginx directive or the CSP grammar.
+  if printf '%s' "${ORIGIN}" | grep -Eq '^https?://[A-Za-z0-9._-]+(:[0-9]+)?$'; then
+    CONNECT_SRC="'self' ${ORIGIN}"
+  else
+    echo "kseal-console: WARNING KSEAL_API_BASE_URL is not a clean http(s) origin; leaving connect-src permissive"
+  fi
+fi
+
+if [ -f "${NGINX_CONF}" ]; then
+  # Idempotent: rewrite whatever the current connect-src value is.
+  sed -i -E "s#connect-src [^;]*;#connect-src ${CONNECT_SRC};#" "${NGINX_CONF}"
+  echo "kseal-console: set CSP connect-src to '${CONNECT_SRC}'"
+fi
