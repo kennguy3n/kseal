@@ -76,11 +76,21 @@ fn policy_config() -> PolicyConfig {
 
 fn signed_config(sk: &SigningKey, version: i64, ttl: i64) -> SignedConfig {
     let config_bytes = policy_config().encode_to_vec();
-    let signature = sk.sign(&config_bytes).to_bytes().to_vec();
+    let key_id = "key-1";
+    // Sign the canonical envelope preimage so version/ttl/key_id are covered.
+    let signature = sk
+        .sign(&kseal_core::crypto::signed_config_preimage(
+            version,
+            ttl,
+            key_id,
+            &config_bytes,
+        ))
+        .to_bytes()
+        .to_vec();
     SignedConfig {
         config_bytes,
         signature,
-        key_id: "key-1".into(),
+        key_id: key_id.into(),
         version,
         ttl_seconds: ttl,
     }

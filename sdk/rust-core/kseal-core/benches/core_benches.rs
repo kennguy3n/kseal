@@ -111,13 +111,22 @@ fn bench_config_verify(c: &mut Criterion) {
     let sk = SigningKey::from_bytes(&[7u8; 32]);
     let pk = sk.verifying_key();
     let config_bytes = policy_config().encode_to_vec();
-    let signature = sk.sign(&config_bytes).to_bytes().to_vec();
+    let (version, ttl_seconds, key_id) = (1i64, 3600i64, "key-1");
+    let signature = sk
+        .sign(&kseal_core::crypto::signed_config_preimage(
+            version,
+            ttl_seconds,
+            key_id,
+            &config_bytes,
+        ))
+        .to_bytes()
+        .to_vec();
     let signed = SignedConfig {
         config_bytes,
         signature,
-        key_id: "key-1".into(),
-        version: 1,
-        ttl_seconds: 3600,
+        key_id: key_id.into(),
+        version,
+        ttl_seconds,
     };
     let pk_bytes = pk.to_bytes();
     c.bench_function("config_verify_and_decode_ed25519", |b| {

@@ -5,28 +5,29 @@
 //! cached with its TTL so the SDK never needs a launch-time network call; the
 //! cache exposes staleness/expiry so callers can refresh lazily.
 //!
-//! # Security: what the signature actually covers
+//! # Security: what the signature covers
 //!
-//! Per `proto/kseal/v1/config.proto`, the Ed25519 signature is computed over
-//! `SignedConfig.config_bytes` **only** — the envelope fields `version`,
-//! `ttl_seconds`, and `key_id` are *not* authenticated. The `key_id` is
-//! harmless here because verification always uses the locally pinned key, but
-//! `version` (the rollback anchor) and `ttl_seconds` (the staleness anchor) are
-//! security-relevant, so an attacker able to tamper with a CDN/cache response
-//! could, with an otherwise-valid `config_bytes`:
+//! The Ed25519 signature authenticates the **whole envelope**, not just the
+//! policy bytes. Verification recomputes the canonical, domain-separated,
+//! length-prefixed preimage in [`crypto::signed_config_preimage`] —
+//! `DOMAIN || version || ttl_seconds || key_id || config_bytes` — so all of
+//! `version` (the rollback anchor), `ttl_seconds` (the staleness anchor),
+//! `key_id`, and `config_bytes` are covered by one signature. The wire shape of
+//! `SignedConfig` is unchanged; only the bytes the signature is computed over
+//! changed, and the Go server (S1) mirrors the identical layout when it signs
+//! (cross-checked by a shared golden vector).
 //!
-//! - inflate `version` to lock out future legitimate (lower-version) updates, or
-//! - inflate `ttl_seconds` to suppress refresh and pin a stale policy.
+//! This closes the earlier CDN/cache tamper vector: an attacker can no longer
+//! inflate `version` to lock out future legitimate updates, nor inflate
+//! `ttl_seconds` to pin a stale policy — any change to those fields invalidates
+//! the signature.
 //!
-//! The correct long-term fix is a wire change so the signature covers the whole
-//! envelope (or `version`/`ttl_seconds` move into the signed `PolicyConfig`);
-//! that requires coordinated server + proto changes and is flagged in the PR.
-//! Until then this module bounds the blast radius defensively by clamping the
-//! unauthenticated TTL to [`MAX_TTL_SECONDS`], so a tampered TTL can never pin a
-//! stale config beyond a bounded window (upholding the "reject stale config"
-//! guarantee in `PROPOSAL.md`).
+//! The TTL is still clamped to [`MAX_TTL_SECONDS`] as an **operational** bound
+//! (not a security one now): even a validly-signed but misconfigured oversized
+//! TTL is capped so the SDK refreshes within a bounded window, upholding the
+//! "reject stale config" guarantee in `PROPOSAL.md`.
 
-use crate::crypto::verify_ed25519;
+use crate::crypto::verify_config_envelope;
 use crate::policy::Policy;
 use crate::proto::{PolicyConfig, SignedConfig};
 use crate::{Error, Result};
@@ -80,14 +81,22 @@ impl CachedConfig {
 /// Verifies a [`SignedConfig`] and decodes its embedded [`PolicyConfig`].
 ///
 /// # Errors
-/// - [`Error::Crypto`] if the Ed25519 signature over `config_bytes` is invalid.
+/// - [`Error::Crypto`] if the Ed25519 signature over the canonical envelope
+///   preimage (`version || ttl_seconds || key_id || config_bytes`) is invalid.
 /// - [`Error::Decode`] if the embedded `PolicyConfig` fails to decode.
 pub fn verify_and_decode(
     signed: &SignedConfig,
     public_key: &[u8],
     now: i64,
 ) -> Result<CachedConfig> {
-    if !verify_ed25519(public_key, &signed.config_bytes, &signed.signature) {
+    if !verify_config_envelope(
+        public_key,
+        signed.version,
+        signed.ttl_seconds,
+        &signed.key_id,
+        &signed.config_bytes,
+        &signed.signature,
+    ) {
         return Err(Error::Crypto("config signature verification failed".into()));
     }
     let policy_config = PolicyConfig::decode(signed.config_bytes.as_slice())?;
@@ -172,11 +181,16 @@ mod tests {
             ..Default::default()
         };
         let config_bytes = policy.encode_to_vec();
-        let signature = sk.sign(&config_bytes).to_bytes().to_vec();
+        let key_id = "k1".to_string();
+        // Sign the canonical envelope preimage (not bare config_bytes) so the
+        // signature covers version/ttl_seconds/key_id too — mirrors S1.
+        let preimage =
+            crate::crypto::signed_config_preimage(version, ttl, &key_id, &config_bytes);
+        let signature = sk.sign(&preimage).to_bytes().to_vec();
         SignedConfig {
             config_bytes,
             signature,
-            key_id: "k1".to_string(),
+            key_id,
             version,
             ttl_seconds: ttl,
         }
@@ -198,6 +212,36 @@ mod tests {
         let sk = signing_key();
         let mut signed = make_signed(1, 60, &sk);
         signed.signature[0] ^= 0xff;
+        let err = verify_and_decode(&signed, sk.verifying_key().as_bytes(), 0).unwrap_err();
+        assert!(matches!(err, Error::Crypto(_)));
+    }
+
+    #[test]
+    fn rejects_tampered_version() {
+        // Envelope signing closes the old vector: flipping `version` after
+        // signing must now fail verification (previously it would pass because
+        // only `config_bytes` was signed).
+        let sk = signing_key();
+        let mut signed = make_signed(1, 3600, &sk);
+        signed.version = 999; // attacker inflates the rollback anchor
+        let err = verify_and_decode(&signed, sk.verifying_key().as_bytes(), 0).unwrap_err();
+        assert!(matches!(err, Error::Crypto(_)));
+    }
+
+    #[test]
+    fn rejects_tampered_ttl() {
+        let sk = signing_key();
+        let mut signed = make_signed(1, 60, &sk);
+        signed.ttl_seconds = i64::MAX; // attacker tries to pin a stale config
+        let err = verify_and_decode(&signed, sk.verifying_key().as_bytes(), 0).unwrap_err();
+        assert!(matches!(err, Error::Crypto(_)));
+    }
+
+    #[test]
+    fn rejects_tampered_key_id() {
+        let sk = signing_key();
+        let mut signed = make_signed(1, 60, &sk);
+        signed.key_id = "rotated".to_string();
         let err = verify_and_decode(&signed, sk.verifying_key().as_bytes(), 0).unwrap_err();
         assert!(matches!(err, Error::Crypto(_)));
     }

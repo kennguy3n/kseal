@@ -689,13 +689,22 @@ mod tests {
             ..Default::default()
         };
         let config_bytes = policy.encode_to_vec();
-        let signature = sk.sign(&config_bytes).to_bytes().to_vec();
+        let (version, ttl_seconds, key_id) = (1i64, 3600i64, "k");
+        let signature = sk
+            .sign(&kseal_core::crypto::signed_config_preimage(
+                version,
+                ttl_seconds,
+                key_id,
+                &config_bytes,
+            ))
+            .to_bytes()
+            .to_vec();
         SignedConfig {
             config_bytes,
             signature,
-            key_id: "k".into(),
-            version: 1,
-            ttl_seconds: 3600,
+            key_id: key_id.into(),
+            version,
+            ttl_seconds,
         }
         .encode_to_vec()
     }

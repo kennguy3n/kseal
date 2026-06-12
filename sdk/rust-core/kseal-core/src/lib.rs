@@ -349,7 +349,15 @@ impl KsealCore {
         crypto::generate_request_proof(&self.config.proof_key, token_id, request_hash, nonce, seq)
     }
 
-    /// Verifies an Ed25519 signature over `config_bytes` with `public_key`.
+    /// Raw Ed25519 verify of `signature` over exactly `config_bytes` with
+    /// `public_key` — a general-purpose primitive for callers that hold the
+    /// signed bytes and signature directly.
+    ///
+    /// Note: this is **not** how a [`proto::SignedConfig`] is authenticated.
+    /// [`KsealCore::load_config`] verifies the full canonical envelope
+    /// (`version || ttl_seconds || key_id || config_bytes`, see
+    /// [`crypto::verify_config_envelope`]); passing a `SignedConfig`'s
+    /// `config_bytes`/`signature` here would not match, by design.
     #[must_use]
     pub fn verify_config_signature(
         config_bytes: &[u8],
@@ -376,13 +384,22 @@ mod tests {
             ..Default::default()
         };
         let config_bytes = policy.encode_to_vec();
-        let signature = sk.sign(&config_bytes).to_bytes().to_vec();
+        let (version, ttl_seconds, key_id) = (1i64, 3600i64, "k1");
+        let signature = sk
+            .sign(&crypto::signed_config_preimage(
+                version,
+                ttl_seconds,
+                key_id,
+                &config_bytes,
+            ))
+            .to_bytes()
+            .to_vec();
         SignedConfig {
             config_bytes,
             signature,
-            key_id: "k1".into(),
-            version: 1,
-            ttl_seconds: 3600,
+            key_id: key_id.into(),
+            version,
+            ttl_seconds,
         }
         .encode_to_vec()
     }
