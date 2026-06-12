@@ -57,7 +57,10 @@ export function filterEvents(
 // Newest first; stable for equal timestamps via id as a tiebreaker.
 export function sortEventsByTimeDesc(events: readonly EventRecord[]): EventRecord[] {
   return [...events].sort((a, b) => {
-    if (a.timestamp === b.timestamp) return a.id < b.id ? -1 : 1;
+    if (a.timestamp === b.timestamp) {
+      if (a.id === b.id) return 0;
+      return a.id < b.id ? -1 : 1;
+    }
     return a.timestamp > b.timestamp ? -1 : 1;
   });
 }

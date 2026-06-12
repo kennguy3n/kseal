@@ -6,6 +6,7 @@ import {
   type ReactNode,
 } from "react";
 import type { Transport } from "@connectrpc/connect";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   clearSession,
   loadSession,
@@ -14,7 +15,7 @@ import {
 } from "../api/auth";
 import { createTransport } from "../api/transport";
 import { createClients } from "../api/clients";
-import { AuthContext, type AuthContextValue } from "./authContext";
+import { AuthContext, type AuthContextValue } from "./useAuth";
 
 export function AuthProvider({
   children,
@@ -25,6 +26,7 @@ export function AuthProvider({
   transport?: Transport;
 }) {
   const [session, setSession] = useState<Session | null>(() => loadSession());
+  const queryClient = useQueryClient();
 
   // Keep the latest API key in a ref so the transport interceptor always reads
   // the current credential without rebuilding the transport on every change.
@@ -46,7 +48,10 @@ export function AuthProvider({
   const logout = useCallback(() => {
     clearSession();
     setSession(null);
-  }, []);
+    // Drop all cached server state so a subsequent login (even as the same
+    // tenant with a different key/permissions) never shows stale data.
+    queryClient.clear();
+  }, [queryClient]);
 
   const value = useMemo<AuthContextValue>(
     () => ({ session, clients, login, logout }),

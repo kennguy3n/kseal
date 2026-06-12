@@ -10,9 +10,17 @@ set -eu
 TARGET="/usr/share/nginx/html/env.js"
 API_BASE_URL="${KSEAL_API_BASE_URL:-}"
 
+# env.js is loaded as a <script>, so the value MUST be escaped before being
+# embedded in a JS string literal — an unescaped " or \ (or </script>) would
+# let an operator-controlled env var inject arbitrary JavaScript (XSS). Escape
+# backslash, double-quote, angle brackets, and strip CR/LF.
+SAFE_URL=$(printf '%s' "${API_BASE_URL}" \
+  | tr -d '\r\n' \
+  | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/</\\u003c/g' -e 's/>/\\u003e/g')
+
 cat > "${TARGET}" <<EOF
 // Generated at container start from KSEAL_API_BASE_URL. Do not edit.
-window.__KSEAL_ENV__ = { apiBaseUrl: "${API_BASE_URL}" };
+window.__KSEAL_ENV__ = { apiBaseUrl: "${SAFE_URL}" };
 EOF
 
 echo "kseal-console: rendered ${TARGET} (apiBaseUrl='${API_BASE_URL}')"

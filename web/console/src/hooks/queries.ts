@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useClients, useSession } from "../state/authContext";
-import type { EventType, TrustLevel } from "../gen/kseal/v1/common_pb";
+import { useClients, useSession } from "../state/useAuth";
+import type { EventType } from "../gen/kseal/v1/common_pb";
 
 // Centralized query keys, all tenant-scoped so caches never bleed across the
 // tenant boundary even if the same client instance is reused.
@@ -115,10 +115,11 @@ export function useTrustSessionStats() {
   });
 }
 
+// Only coarse, server-relevant parameters live here. Event-type and risk-level
+// refinement is applied client-side (see filterEvents) so toggling those chips
+// is instant and does NOT trigger a network round-trip per toggle.
 export interface EventsQueryArgs {
   appId?: string;
-  eventTypes?: EventType[];
-  riskLevels?: TrustLevel[];
   startTime?: number;
   endTime?: number;
 }
@@ -132,8 +133,6 @@ export function useEvents(args: EventsQueryArgs) {
       const res = await clients.query.listEvents({
         tenantId,
         appId: args.appId ?? "",
-        eventTypes: args.eventTypes ?? [],
-        riskLevels: args.riskLevels ?? [],
         startTime: BigInt(args.startTime ?? 0),
         endTime: BigInt(args.endTime ?? 0),
         pageSize: 200,

@@ -51,9 +51,10 @@ export function EventsPage() {
   const startTime = toMillis(startLocal);
   const endTime = toMillis(endLocal);
 
-  // Time range and app scope drive the server query; type/risk toggles are
-  // applied client-side for instant feedback (and re-sent to the server too).
-  const events = useEvents({ eventTypes, riskLevels, startTime, endTime });
+  // Only the time range drives the server query; event-type and risk-level
+  // toggles are applied purely client-side (below) for instant feedback with
+  // no per-toggle network round-trip.
+  const events = useEvents({ startTime, endTime });
 
   const visible = useMemo(() => {
     if (!events.data) return [];

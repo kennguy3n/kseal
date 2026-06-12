@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
-import { useAuth } from "../state/authContext";
+import { useAuth } from "../state/useAuth";
 import { defaultApiBaseUrl } from "../config";
 
 interface LocationState {
