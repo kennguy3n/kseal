@@ -22,9 +22,14 @@ function readStorage(): Session | null {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<Session>;
+    // Require non-empty credentials: an empty apiKey/tenantId (e.g. from
+    // tampered localStorage) would load a "signed in" session whose RPCs all
+    // fail auth. Treat it as logged out instead.
     if (
       typeof parsed.apiKey !== "string" ||
-      typeof parsed.tenantId !== "string"
+      parsed.apiKey.length === 0 ||
+      typeof parsed.tenantId !== "string" ||
+      parsed.tenantId.length === 0
     ) {
       return null;
     }

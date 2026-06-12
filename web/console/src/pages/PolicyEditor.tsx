@@ -28,7 +28,7 @@ export function PolicyEditorPage() {
   const [appId, setAppId] = useState("");
   const policies = usePolicies(appId);
   const createPolicy = useCreatePolicy();
-  const activatePolicy = useActivatePolicy(appId);
+  const activatePolicy = useActivatePolicy();
 
   const [form, setForm] = useState<PolicyFormState>(initialForm);
   const [errors, setErrors] = useState<
@@ -135,7 +135,7 @@ export function PolicyEditorPage() {
                     disabled={
                       p.id === activePolicyId || activatePolicy.isPending
                     }
-                    onClick={() => activatePolicy.mutate(p.id)}
+                    onClick={() => activatePolicy.mutate({ policyId: p.id, appId })}
                   >
                     {p.id === activePolicyId ? "Active" : "Activate"}
                   </button>

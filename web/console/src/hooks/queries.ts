@@ -172,19 +172,22 @@ export function useCreatePolicy() {
   });
 }
 
-export function useActivatePolicy(appId: string) {
+// appId travels with each mutation call (not captured by closure) so that if
+// the selected app changes while an activation is in-flight, onSuccess still
+// invalidates the cache for the app the activation was actually for.
+export function useActivatePolicy() {
   const clients = useClients();
   const { tenantId } = useSession();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (policyId: string) =>
-      clients.registry.activatePolicy({ tenantId, id: policyId }),
-    onSuccess: () => {
+    mutationFn: (input: { policyId: string; appId: string }) =>
+      clients.registry.activatePolicy({ tenantId, id: input.policyId }),
+    onSuccess: (_res, input) => {
       void qc.invalidateQueries({
-        queryKey: queryKeys.policies(tenantId, appId),
+        queryKey: queryKeys.policies(tenantId, input.appId),
       });
       void qc.invalidateQueries({
-        queryKey: queryKeys.activePolicy(tenantId, appId),
+        queryKey: queryKeys.activePolicy(tenantId, input.appId),
       });
     },
   });
