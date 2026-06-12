@@ -1,10 +1,10 @@
 import type { EventType, TrustLevel } from "../gen/kseal/v1/common_pb";
-import type { EventRecord } from "../gen/kseal/v1/query_service_pb";
+import type { EventRecord } from "../gen/kseal/v1/query_pb";
 
-// Client-side filter applied to an already-fetched page of events. The same
-// criteria are also sent to QueryService.ListEvents for server-side narrowing;
-// this keeps multi-select toggles instant and acts as defense-in-depth so a
-// broader server response is never shown unfiltered.
+// Client-side filter applied to an already-fetched page of events. Only the
+// coarse time range is sent to QueryService.ListEvents (see useEvents); the
+// event-type and risk-level multi-selects are refined purely client-side here
+// so toggling those chips is instant and never triggers a network round-trip.
 export interface EventFilter {
   // Empty arrays mean "no constraint" (match all).
   eventTypes: EventType[];

@@ -6,10 +6,9 @@ import { IngestService } from "../gen/kseal/v1/ingest_service_pb";
 import { WebhookService } from "../gen/kseal/v1/webhook_service_pb";
 import { QueryService } from "../gen/kseal/v1/query_service_pb";
 
-// Typed Connect clients for every kseal service. RegistryService, ConfigService,
-// TrustService, IngestService and WebhookService are generated from the
-// canonical protos. QueryService is the console-local read API (see
-// proto/kseal/v1/query_service.proto) pending promotion upstream.
+// Typed Connect clients for every kseal service, all generated from the
+// canonical protos. QueryService is the read surface (events, tenant overview,
+// trust-session stats) backing the Dashboard and Events pages.
 export interface KsealClients {
   registry: Client<typeof RegistryService>;
   config: Client<typeof ConfigService>;

@@ -43,31 +43,27 @@ caches never bleed across tenants.
 
 ## Connect client codegen
 
-The canonical schemas live in `//proto` and are owned by another component; this
-package must not modify them. `npm run proto:gen` vendors a read-only copy of
-those protos (plus the console-local read API, see below) into a single buf
-module and runs `buf generate` into `src/gen/`:
+The canonical schemas live in `//proto` (their own buf module) and are owned by
+another component; this package must not modify them. `npm run proto:gen` runs
+`buf generate` directly against that module into `src/gen/`:
 
 ```bash
-npm run proto:gen   # regenerates src/gen from //proto + ./proto
+npm run proto:gen   # regenerates src/gen from //proto
 ```
 
 `buf.gen.yaml` and `scripts/gen-proto.sh` drive this. The generated output in
 `src/gen/` is committed so the Docker build (whose context is only
 `web/console/`) does not need access to `//proto`.
 
-### Proposed proto addition — `QueryService` (server gap)
+### Read surface — `QueryService`
 
-The five canonical services have no **read** RPCs for stored risk events, tenant
-overview counters, or trust-session statistics, which the Dashboard and Events
-pages require. `proto/kseal/v1/query_service.proto` (console-local) defines a
-`QueryService` (`ListEvents`, `GetTenantOverview`, `GetTrustSessionStats`) to
-fill that gap so the console is fully wired today.
-
-**This must be promoted into the canonical `//proto/kseal/v1/` and implemented by
-the data plane.** Until then those views call a real, generated client; if the
-server returns `Unimplemented` the UI shows an informative notice rather than an
-error. All other pages use the canonical services and work end-to-end.
+The Dashboard and Events pages read derived data-plane state — stored risk
+events, tenant overview counters, and trust-session statistics — via
+`QueryService` (`ListEvents`, `GetTenantOverview`, `GetTrustSessionStats`),
+defined in the canonical `//proto/kseal/v1/query.proto` +
+`query_service.proto` and implemented server-side with tenant-isolated,
+keyset-paginated queries. The pages render real data; a thin `ErrorNotice`
+fallback covers transient RPC failures.
 
 ## Runtime configuration (NoOps)
 

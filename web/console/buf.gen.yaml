@@ -1,8 +1,8 @@
 # Generates the Connect-Web TypeScript client into src/gen.
 #
-# Run via `npm run proto:gen`, which vendors the canonical protos from
-# ../../proto together with the console-local query_service.proto (see
-# scripts/gen-proto.sh) so imports resolve in a single buf module.
+# Run via `npm run proto:gen`, which generates straight from the canonical proto
+# module at ../../proto (see scripts/gen-proto.sh) — the same source of truth as
+# the rest of the repo, including the read-side QueryService.
 version: v2
 clean: true
 plugins:

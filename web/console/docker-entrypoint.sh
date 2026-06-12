@@ -29,7 +29,9 @@ echo "kseal-console: rendered ${TARGET} (apiBaseUrl='${API_BASE_URL}')"
 # only allows API calls to that origin. We can only derive it from the runtime
 # env var; when KSEAL_API_BASE_URL is unset (build-time-configured deploys) or
 # is not a clean http(s) origin we leave connect-src '*' rather than guess.
-NGINX_CONF="/etc/nginx/conf.d/default.conf"
+# The CSP lives in the shared security-headers snippet included by every nginx
+# location (see nginx.conf), so we rewrite it there.
+CSP_SNIPPET="/etc/nginx/snippets/kseal-security-headers.conf"
 CONNECT_SRC="*"
 if [ -n "${API_BASE_URL}" ]; then
   ORIGIN=$(printf '%s' "${API_BASE_URL}" \
@@ -44,8 +46,8 @@ if [ -n "${API_BASE_URL}" ]; then
   fi
 fi
 
-if [ -f "${NGINX_CONF}" ]; then
+if [ -f "${CSP_SNIPPET}" ]; then
   # Idempotent: rewrite whatever the current connect-src value is.
-  sed -i -E "s#connect-src [^;]*;#connect-src ${CONNECT_SRC};#" "${NGINX_CONF}"
+  sed -i -E "s#connect-src [^;]*;#connect-src ${CONNECT_SRC};#" "${CSP_SNIPPET}"
   echo "kseal-console: set CSP connect-src to '${CONNECT_SRC}'"
 fi

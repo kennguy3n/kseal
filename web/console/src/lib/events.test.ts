@@ -4,7 +4,7 @@ import { EventType, TrustLevel } from "../gen/kseal/v1/common_pb";
 import {
   EventRecordSchema,
   type EventRecord,
-} from "../gen/kseal/v1/query_service_pb";
+} from "../gen/kseal/v1/query_pb";
 import {
   emptyEventFilter,
   filterEvents,

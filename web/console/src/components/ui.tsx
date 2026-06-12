@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ConnectError, Code } from "@connectrpc/connect";
+import { ConnectError } from "@connectrpc/connect";
 
 export function Card({
   title,
@@ -67,18 +67,10 @@ export function EmptyState({ children }: { children: ReactNode }) {
   );
 }
 
-// Renders a Connect error. Unimplemented is surfaced as an informative notice
-// because the read API (QueryService) is pending server support.
+// Renders a Connect error as a thin, defensive fallback for transient failures
+// (the read RPCs are implemented server-side, so this is no longer a "pending
+// support" degrade path).
 export function ErrorNotice({ error }: { error: unknown }) {
-  if (error instanceof ConnectError && error.code === Code.Unimplemented) {
-    return (
-      <div className="rounded-lg border border-amber-700/50 bg-amber-900/20 p-4 text-sm text-amber-200">
-        This view depends on the server read API (<code>QueryService</code>),
-        which this server build does not implement yet. The console is wired and
-        will populate once the data plane ships it.
-      </div>
-    );
-  }
   const message =
     error instanceof ConnectError
       ? error.rawMessage
