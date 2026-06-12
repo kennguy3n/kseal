@@ -266,6 +266,11 @@ pub unsafe extern "C" fn kseal_evaluate_risk(
 /// active policy thresholds, or [`TrustLevel::Unspecified`] (0) when no policy
 /// is loaded. Returns a negative [`Status`] value for a null handle.
 ///
+/// Note: unlike [`kseal_evaluate_risk`], which always returns a numeric score
+/// (using default weights when no policy is loaded), a trust *level* requires
+/// configured thresholds. Without a loaded policy this reports `Unspecified`
+/// even though `kseal_evaluate_risk` would still yield a non-zero score.
+///
 /// # Safety
 /// `handle` must be valid.
 #[no_mangle]
