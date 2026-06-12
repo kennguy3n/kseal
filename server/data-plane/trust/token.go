@@ -7,7 +7,6 @@ package trust
 
 import (
 	"crypto/ed25519"
-	"encoding/binary"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -51,16 +50,12 @@ func DeriveProofKey(signedToken []byte) []byte {
 	return crypto.HMACSHA256(signedToken, []byte(proofKeyLabel))
 }
 
-// ProofMessage is the canonical byte string a request proof signs over.
+// ProofMessage is the canonical byte string a request proof signs over. It is a
+// thin wrapper over crypto.RequestProofPreimage so token minting and proof
+// validation share one domain-separated, length-prefixed layout that matches the
+// SDK core byte-for-byte.
 func ProofMessage(tokenID string, requestHash, nonce []byte, sequence int64) []byte {
-	seq := make([]byte, 8)
-	binary.BigEndian.PutUint64(seq, uint64(sequence))
-	msg := make([]byte, 0, len(tokenID)+len(requestHash)+len(nonce)+8)
-	msg = append(msg, tokenID...)
-	msg = append(msg, requestHash...)
-	msg = append(msg, nonce...)
-	msg = append(msg, seq...)
-	return msg
+	return crypto.RequestProofPreimage(tokenID, requestHash, nonce, sequence)
 }
 
 // tokenToProto builds the wire TrustToken from claims.

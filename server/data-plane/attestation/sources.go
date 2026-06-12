@@ -8,7 +8,6 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
-	"encoding/binary"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
@@ -139,7 +138,7 @@ func (k jwkKey) publicKey() (crypto.PublicKey, error) {
 			e = e<<8 | int(b)
 		}
 		if e == 0 {
-			e = int(binary.BigEndian.Uint32(append(make([]byte, 4-len(eb)), eb...)))
+			return nil, fmt.Errorf("attestation: invalid rsa exponent")
 		}
 		return &rsa.PublicKey{N: new(big.Int).SetBytes(nb), E: e}, nil
 	case "EC":
@@ -177,7 +176,7 @@ func AppleProductionRoots() *x509.CertPool {
 		return pool
 	}
 	pemBytes := []byte(raw)
-	if _, err := pem.Decode(pemBytes); err == nil {
+	if block, _ := pem.Decode(pemBytes); block != nil {
 		pool.AppendCertsFromPEM(pemBytes)
 		return pool
 	}

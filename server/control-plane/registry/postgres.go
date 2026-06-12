@@ -568,6 +568,12 @@ func (s *PostgresStore) CreateSigningKey(ctx context.Context, tenantID string) (
 	}
 	sk := &SigningKey{TenantID: tenantID, Algorithm: "ed25519", Public: kp.Public, Private: kp.Private, IsActive: true}
 	err = s.db.WithTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
+		// Deactivate any current active key first; the partial unique index
+		// uq_signing_keys_active permits only one active key per tenant.
+		if _, err := tx.Exec(ctx,
+			`UPDATE signing_keys SET is_active = false WHERE tenant_id = $1 AND is_active`, tenantID); err != nil {
+			return err
+		}
 		return tx.QueryRow(ctx, `
 			INSERT INTO signing_keys (tenant_id, algorithm, public_key, private_key_enc, is_active)
 			VALUES ($1, 'ed25519', $2, $3, true)
@@ -806,14 +812,20 @@ func (s *PostgresStore) GetTrustSession(ctx context.Context, tokenID string) (*T
 // request proofs.
 func (s *PostgresStore) ConsumeSequence(ctx context.Context, tokenID string, seq int64) error {
 	return wrapPgErr(s.db.WithAdminTx(ctx, func(tx pgx.Tx) error {
-		ct, err := tx.Exec(ctx, `
-			UPDATE trust_sessions SET last_sequence = $2
-			WHERE token_id = $1 AND status = 'active' AND $2 > last_sequence`, tokenID, seq)
-		if err != nil {
-			return err
+		// Distinguish a missing/inactive session (ErrNotFound) from a genuine
+		// replay (ErrReplay) so the contract matches MemStore.
+		var lastSeq int64
+		if err := tx.QueryRow(ctx,
+			`SELECT last_sequence FROM trust_sessions WHERE token_id = $1 AND status = 'active'`,
+			tokenID).Scan(&lastSeq); err != nil {
+			return err // pgx.ErrNoRows -> ErrNotFound via wrapPgErr
 		}
-		if ct.RowsAffected() == 0 {
+		if seq <= lastSeq {
 			return ErrReplay
+		}
+		if _, err := tx.Exec(ctx,
+			`UPDATE trust_sessions SET last_sequence = $2 WHERE token_id = $1`, tokenID, seq); err != nil {
+			return err
 		}
 		return nil
 	}))

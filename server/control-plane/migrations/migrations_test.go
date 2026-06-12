@@ -27,10 +27,9 @@ func TestMigrationsLoadInOrder(t *testing.T) {
 	for _, m := range ms {
 		all += m.SQL + "\n"
 	}
-	for _, tbl := range []string{"apps", "builds", "api_keys", "policies", "signing_keys", "webhooks", "trust_sessions"} {
-		if !strings.Contains(all, "ENABLE ROW LEVEL SECURITY") {
-			t.Fatal("expected RLS to be enabled")
+	for _, tbl := range []string{"apps", "builds", "api_keys", "policies", "protection_profiles", "signing_keys", "webhooks", "trust_sessions"} {
+		if !strings.Contains(all, "ALTER TABLE "+tbl+" ENABLE ROW LEVEL SECURITY") {
+			t.Fatalf("expected RLS to be enabled on table %s", tbl)
 		}
-		_ = tbl
 	}
 }

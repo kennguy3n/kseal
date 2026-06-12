@@ -14,10 +14,16 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 )
+
+// RequestProofDomain is the ASCII domain-separation tag prefixed to every
+// request-proof preimage. It is shared verbatim with the Rust SDK core so both
+// sides reconstruct identical bytes; changing it breaks proof compatibility.
+var RequestProofDomain = []byte("kseal/v1/request-proof")
 
 // NonceSize is the length in bytes of the nonces issued by the trust service.
 const NonceSize = 32
@@ -62,6 +68,35 @@ func HMACSHA256(key, message []byte) []byte {
 func VerifyHMACSHA256(key, message, tag []byte) bool {
 	expected := HMACSHA256(key, message)
 	return hmac.Equal(expected, tag)
+}
+
+// RequestProofPreimage builds the canonical, domain-separated, length-prefixed
+// byte string that a request proof is HMAC'd over. The layout is fixed and must
+// match the SDK core byte-for-byte:
+//
+//	u32_be(len(DOMAIN))       || DOMAIN
+//	u32_be(len(tokenID))      || tokenID (UTF-8)
+//	u32_be(len(requestHash))  || requestHash
+//	u32_be(len(nonce))        || nonce
+//	i64_be(sequence)          (fixed 8 bytes, no length prefix)
+func RequestProofPreimage(tokenID string, requestHash, nonce []byte, sequence int64) []byte {
+	tokenBytes := []byte(tokenID)
+	size := 4*4 + len(RequestProofDomain) + len(tokenBytes) + len(requestHash) + len(nonce) + 8
+	buf := make([]byte, 0, size)
+	buf = appendLengthPrefixed(buf, RequestProofDomain)
+	buf = appendLengthPrefixed(buf, tokenBytes)
+	buf = appendLengthPrefixed(buf, requestHash)
+	buf = appendLengthPrefixed(buf, nonce)
+	var seq [8]byte
+	binary.BigEndian.PutUint64(seq[:], uint64(sequence))
+	return append(buf, seq[:]...)
+}
+
+func appendLengthPrefixed(buf, b []byte) []byte {
+	var n [4]byte
+	binary.BigEndian.PutUint32(n[:], uint32(len(b)))
+	buf = append(buf, n[:]...)
+	return append(buf, b...)
 }
 
 // RandomNonce returns NonceSize bytes from crypto/rand.

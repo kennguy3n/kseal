@@ -77,7 +77,10 @@ type Service struct {
 // NewService builds an IngestService. The zstd decoder is shared and safe for
 // concurrent use via DecodeAll.
 func NewService(validator AppValidator, quota *Quota, broker Broker) (*Service, error) {
-	dec, err := zstd.NewReader(nil, zstd.WithDecoderConcurrency(0))
+	dec, err := zstd.NewReader(nil,
+		zstd.WithDecoderConcurrency(0),
+		zstd.WithDecoderMaxMemory(maxDecompressedBytes), // cap output to guard against zip bombs
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -161,7 +164,14 @@ func (s *Service) SubmitTelemetry(ctx context.Context, req *connect.Request[ksea
 func (s *Service) decompress(c ksealv1.Compression, data []byte) ([]byte, error) {
 	switch c {
 	case ksealv1.Compression_COMPRESSION_ZSTD:
-		return s.decoder.DecodeAll(data, make([]byte, 0, len(data)*3))
+		out, err := s.decoder.DecodeAll(data, make([]byte, 0, len(data)*3))
+		if err != nil {
+			return nil, err
+		}
+		if len(out) > maxDecompressedBytes {
+			return nil, errors.New("payload too large")
+		}
+		return out, nil
 	default:
 		if len(data) > maxDecompressedBytes {
 			return nil, errors.New("payload too large")

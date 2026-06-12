@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/google/uuid"
+
 	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
 )
 
@@ -138,8 +140,10 @@ func runStoreSuite(t *testing.T, store Store) {
 
 	t.Run("trust session sequence anti-replay", func(t *testing.T) {
 		a := mustTenant(t, store)
+		// Token IDs are UUIDs in production (jti from minted trust tokens), which
+		// the Postgres schema enforces (trust_sessions.token_id UUID).
 		sess := &TrustSession{
-			TokenID: uniqueSlug("tok"), TenantID: a.Id, AppID: "app", Status: "active",
+			TokenID: uuid.NewString(), TenantID: a.Id, AppID: "app", Status: "active",
 			SessionSecret: []byte("s"), IssuedAt: 1, ExpiresAt: 1 << 40,
 		}
 		if err := store.CreateTrustSession(ctx, sess); err != nil {
@@ -157,6 +161,10 @@ func runStoreSuite(t *testing.T, store Store) {
 		}
 		if err := store.ConsumeSequence(ctx, sess.TokenID, 1); !errors.Is(err, ErrReplay) {
 			t.Fatalf("expected replay on lower seq, got %v", err)
+		}
+		// Unknown/inactive sessions are reported as not-found, distinct from replay.
+		if err := store.ConsumeSequence(ctx, uuid.NewString(), 1); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("expected not-found for unknown token, got %v", err)
 		}
 	})
 
@@ -187,11 +195,15 @@ func TestMemStore(t *testing.T) {
 
 // ---- helpers ----
 
+// runID makes slugs unique across process runs so the suite can run repeatedly
+// against a persisted Postgres database without slug collisions.
+var runID = uuid.NewString()[:8]
+
 var slugCounter int
 
 func uniqueSlug(prefix string) string {
 	slugCounter++
-	return prefix + "-" + itoa(slugCounter)
+	return prefix + "-" + runID + "-" + itoa(slugCounter)
 }
 
 func itoa(n int) string {

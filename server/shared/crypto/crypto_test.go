@@ -2,8 +2,50 @@ package crypto
 
 import (
 	"bytes"
+	"encoding/binary"
+	"encoding/hex"
 	"testing"
 )
+
+// TestRequestProofPreimageFixedVector pins the exact byte layout shared with the
+// Rust SDK core (S2). The hex vector below is the canonical fixed vector; S2
+// asserts the identical bytes so generate/validate are proven byte-identical.
+func TestRequestProofPreimageFixedVector(t *testing.T) {
+	const (
+		tokenID = "tok_123"
+		seq     = int64(7)
+	)
+	requestHash := []byte{0x01, 0x02, 0x03, 0x04}
+	nonce := []byte{0xaa, 0xbb}
+
+	got := RequestProofPreimage(tokenID, requestHash, nonce, seq)
+
+	// Independent reconstruction of the documented layout.
+	var want bytes.Buffer
+	writeLP := func(b []byte) {
+		_ = binary.Write(&want, binary.BigEndian, uint32(len(b)))
+		want.Write(b)
+	}
+	writeLP([]byte("kseal/v1/request-proof"))
+	writeLP([]byte(tokenID))
+	writeLP(requestHash)
+	writeLP(nonce)
+	_ = binary.Write(&want, binary.BigEndian, seq)
+
+	if !bytes.Equal(got, want.Bytes()) {
+		t.Fatalf("preimage mismatch:\n got=%x\nwant=%x", got, want.Bytes())
+	}
+
+	const fixedVector = "00000016" + // u32 len(domain)=22
+		"6b7365616c2f76312f726571756573742d70726f6f66" + // "kseal/v1/request-proof"
+		"00000007" + "746f6b5f313233" + // u32 len(token)=7, "tok_123"
+		"00000004" + "01020304" + // u32 len(reqHash)=4, bytes
+		"00000002" + "aabb" + // u32 len(nonce)=2, bytes
+		"0000000000000007" // i64 sequence=7
+	if h := hex.EncodeToString(got); h != fixedVector {
+		t.Fatalf("fixed vector mismatch:\n got=%s\nwant=%s", h, fixedVector)
+	}
+}
 
 func TestEd25519SignVerify(t *testing.T) {
 	kp, err := GenerateEd25519()
