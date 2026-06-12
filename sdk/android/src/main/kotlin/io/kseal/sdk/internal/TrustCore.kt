@@ -8,8 +8,11 @@ import java.util.concurrent.locks.ReentrantReadWriteLock
 import kotlin.concurrent.read
 import kotlin.concurrent.write
 
-/** Weighted risk score plus the confidence the core derived for it. */
-internal data class CoreRiskScore(val score: Int, val confidence: Confidence)
+/** Weighted risk score plus the confidence the core derived for it.
+ *
+ * [score] is a `Long` holding the core's unsigned 32-bit score (0..u32::MAX)
+ * without the negative wrap a signed 32-bit type would suffer at the boundary. */
+internal data class CoreRiskScore(val score: Long, val confidence: Confidence)
 
 /**
  * High-level handle to the Rust trust core, hiding the raw FFI/JNI surface.
@@ -31,6 +34,13 @@ internal interface TrustCore : AutoCloseable {
     fun evaluateRisk(riskBits: Long): CoreRiskScore
 
     fun computeRiskLevel(riskBits: Long): TrustLevel
+
+    /**
+     * Scores [riskBits] and derives the trust level in a single critical section,
+     * so a concurrent config swap cannot land between the two and yield a score
+     * and level computed against different policies.
+     */
+    fun evaluateRiskAndLevel(riskBits: Long): Pair<CoreRiskScore, TrustLevel>
 
     fun createEvent(
         eventType: EventType,
@@ -113,7 +123,7 @@ internal class NativeTrustCore private constructor(
         val out = NativeBridge.nativeEvaluateRisk(handle, riskBits)
             ?: throw TrustCoreException("evaluateRisk failed")
         if (out.size != 2) throw TrustCoreException("evaluateRisk returned malformed result")
-        CoreRiskScore(out[0], Confidence.fromCode(out[1]))
+        CoreRiskScore(out[0], Confidence.fromCode(out[1].toInt()))
     }
 
     override fun computeRiskLevel(riskBits: Long): TrustLevel = coreLock.read {
@@ -122,6 +132,11 @@ internal class NativeTrustCore private constructor(
         if (code < 0) throw TrustCoreException("computeRiskLevel failed: status=$code")
         TrustLevel.fromCode(code)
     }
+
+    // The read lock is reentrant, so holding it across both calls keeps them
+    // atomic w.r.t. a writer (loadConfig) without duplicating their bodies.
+    override fun evaluateRiskAndLevel(riskBits: Long): Pair<CoreRiskScore, TrustLevel> =
+        coreLock.read { evaluateRisk(riskBits) to computeRiskLevel(riskBits) }
 
     override fun createEvent(
         eventType: EventType,

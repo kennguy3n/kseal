@@ -60,8 +60,8 @@ internal object NativeBridge {
     /** Returns a `KsealStatus` (0 = Ok, negative = error). */
     external fun nativeLoadConfig(handle: Long, bytes: ByteArray): Int
 
-    /** Returns `[score, confidence]`, or `null` on error (e.g. null handle / OOM). */
-    external fun nativeEvaluateRisk(handle: Long, riskBits: Long): IntArray?
+    /** Returns `[score, confidence]` (score widened from u32), or `null` on error. */
+    external fun nativeEvaluateRisk(handle: Long, riskBits: Long): LongArray?
 
     /** Returns the `TrustLevel` discriminant, or a negative status on error. */
     external fun nativeComputeRiskLevel(handle: Long, riskBits: Long): Int

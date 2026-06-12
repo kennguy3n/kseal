@@ -25,6 +25,9 @@ protocol TrustCore: AnyObject {
     func tryLoadConfig(_ signedConfigBytes: Data) -> Bool
     func evaluateRisk(_ riskBits: UInt64) throws -> CoreRiskScore
     func computeRiskLevel(_ riskBits: UInt64) -> TrustLevel
+    /// Scores `riskBits` and derives its trust level atomically, so a concurrent
+    /// config swap cannot split the two across different policies.
+    func evaluateRiskAndLevel(_ riskBits: UInt64) throws -> (CoreRiskScore, TrustLevel)
     func createEvent(
         eventType: EventType,
         riskBits: UInt64,
@@ -137,21 +140,33 @@ final class NativeTrustCore: TrustCore {
     }
 
     func evaluateRisk(_ riskBits: UInt64) throws -> CoreRiskScore {
-        try coreQueue.sync {
-            var score: UInt32 = 0
-            var confidence: Int32 = 0
-            let status = kseal_evaluate_risk(handle, riskBits, &score, &confidence)
-            if status != 0 {
-                throw TrustCoreError(message: "evaluateRisk failed: status=\(status)")
-            }
-            return CoreRiskScore(score: score, confidence: Confidence(code: confidence))
-        }
+        try coreQueue.sync { try unsafeEvaluateRisk(riskBits) }
     }
 
     func computeRiskLevel(_ riskBits: UInt64) -> TrustLevel {
-        coreQueue.sync {
-            TrustLevel(code: kseal_compute_risk_level(handle, riskBits))
+        coreQueue.sync { unsafeComputeRiskLevel(riskBits) }
+    }
+
+    func evaluateRiskAndLevel(_ riskBits: UInt64) throws -> (CoreRiskScore, TrustLevel) {
+        // One dispatch keeps score and level on the same policy; a config swap
+        // (barrier write) cannot interleave between the two FFI reads.
+        try coreQueue.sync { (try unsafeEvaluateRisk(riskBits), unsafeComputeRiskLevel(riskBits)) }
+    }
+
+    // `coreQueue.sync` is non-reentrant, so the on-queue work lives in these
+    // helpers that the combined and single-shot entry points share.
+    private func unsafeEvaluateRisk(_ riskBits: UInt64) throws -> CoreRiskScore {
+        var score: UInt32 = 0
+        var confidence: Int32 = 0
+        let status = kseal_evaluate_risk(handle, riskBits, &score, &confidence)
+        if status != 0 {
+            throw TrustCoreError(message: "evaluateRisk failed: status=\(status)")
         }
+        return CoreRiskScore(score: score, confidence: Confidence(code: confidence))
+    }
+
+    private func unsafeComputeRiskLevel(_ riskBits: UInt64) -> TrustLevel {
+        TrustLevel(code: kseal_compute_risk_level(handle, riskBits))
     }
 
     func createEvent(

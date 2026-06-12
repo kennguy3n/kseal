@@ -6,7 +6,13 @@ import javax.crypto.KeyGenerator
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
-/** Monotonic clock seam (injectable for deterministic tests). */
+/**
+ * Wall-clock time seam (injectable for deterministic tests).
+ *
+ * Returns Unix epoch millis; [SYSTEM] uses [System.currentTimeMillis]. Wall time
+ * (not a monotonic clock) is intentional: it feeds `coarseTimeBucket`, which
+ * aligns telemetry to real calendar hour boundaries.
+ */
 fun interface Clock {
     fun nowMillis(): Long
 

@@ -72,7 +72,7 @@ class NativeTrustCoreTest {
     fun evaluateRiskUsesDefaultWeightsWithoutPolicy() {
         val bits = RiskSignal.pack(setOf(RiskSignal.ROOT, RiskSignal.DEBUGGER))
         val score = core.evaluateRisk(bits)
-        assertEquals(20, score.score)
+        assertEquals(20L, score.score)
         // Two distinct signals → medium confidence per the core's derivation.
         assertEquals(Confidence.MEDIUM, score.confidence)
     }
@@ -80,7 +80,7 @@ class NativeTrustCoreTest {
     @Test
     fun cleanBitsScoreZero() {
         val score = core.evaluateRisk(0L)
-        assertEquals(0, score.score)
+        assertEquals(0L, score.score)
         assertEquals(Confidence.HIGH, score.confidence)
     }
 

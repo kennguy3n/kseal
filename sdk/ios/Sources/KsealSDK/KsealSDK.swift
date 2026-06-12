@@ -95,8 +95,7 @@ public final class KsealSDK {
     public func evaluateRisk() throws -> RiskAssessment {
         let signals = runProbes()
         let bits = RiskSignal.pack(signals)
-        let score = try core.evaluateRisk(bits)
-        let level = core.computeRiskLevel(bits)
+        let (score, level) = try core.evaluateRiskAndLevel(bits)
         return RiskAssessment(
             riskBits: bits,
             signals: signals,

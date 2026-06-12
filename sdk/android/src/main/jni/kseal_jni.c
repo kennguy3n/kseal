@@ -89,7 +89,7 @@ Java_io_kseal_sdk_internal_NativeBridge_nativeLoadConfig(
     return (jint)st;
 }
 
-JNIEXPORT jintArray JNICALL
+JNIEXPORT jlongArray JNICALL
 Java_io_kseal_sdk_internal_NativeBridge_nativeEvaluateRisk(
     JNIEnv *env, jobject thiz, jlong handle, jlong risk_bits) {
     (void)thiz;
@@ -99,10 +99,12 @@ Java_io_kseal_sdk_internal_NativeBridge_nativeEvaluateRisk(
     if (st != 0) {
         return NULL;
     }
-    jintArray out = (*env)->NewIntArray(env, 2);
+    jlongArray out = (*env)->NewLongArray(env, 2);
     if (out == NULL) return NULL;
-    jint vals[2] = {(jint)score, (jint)confidence};
-    (*env)->SetIntArrayRegion(env, out, 0, 2, vals);
+    /* Widen the u32 score into a jlong so the full unsigned range survives the
+     * boundary; a jint would wrap saturating scores (up to u32::MAX) negative. */
+    jlong vals[2] = {(jlong)score, (jlong)confidence};
+    (*env)->SetLongArrayRegion(env, out, 0, 2, vals);
     return out;
 }
 

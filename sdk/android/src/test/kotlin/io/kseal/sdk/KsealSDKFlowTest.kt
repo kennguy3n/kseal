@@ -71,7 +71,7 @@ class KsealSDKFlowTest {
         val risk = sdk.evaluateRisk()
         assertTrue(risk.isClean)
         assertEquals(0L, risk.riskBits)
-        assertEquals(0, risk.score)
+        assertEquals(0L, risk.score)
         assertEquals(TrustLevel.UNSPECIFIED, risk.trustLevel)
     }
 

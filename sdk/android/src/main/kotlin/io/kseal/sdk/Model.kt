@@ -68,7 +68,7 @@ enum class Platform(val code: Int) {
 data class RiskAssessment(
     val riskBits: Long,
     val signals: Set<RiskSignal>,
-    val score: Int,
+    val score: Long,
     val confidence: Confidence,
     val trustLevel: TrustLevel,
 ) {

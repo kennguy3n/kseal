@@ -112,8 +112,7 @@ class KsealSDK internal constructor(
     fun evaluateRisk(): RiskAssessment {
         val signals = runProbes()
         val bits = RiskSignal.pack(signals)
-        val score = core.evaluateRisk(bits)
-        val level = core.computeRiskLevel(bits)
+        val (score, level) = core.evaluateRiskAndLevel(bits)
         return RiskAssessment(
             riskBits = bits,
             signals = signals,
@@ -289,21 +288,27 @@ class KsealSDK internal constructor(
                     platform = Platform.ANDROID,
                     maxBatchEvents = options.maxBatchEvents,
                 )
-                val configProvider = FileConfigProvider(appContext)
-                val installHash = InstallIdentity(appContext).tenantScopedHash(tenantId, appId)
-                val sdk = KsealSDK(
-                    tenantId = tenantId,
-                    appId = appId,
-                    apiKey = apiKey,
-                    core = core,
-                    env = env,
-                    options = options,
-                    configProvider = configProvider,
-                    telemetrySink = BufferingTelemetrySink(),
-                    installIdentityHash = installHash,
-                    clock = Clock.SYSTEM,
-                )
-                sdk.loadCachedConfigIfPresent()
+                // Own the native handle from here: if any later init step throws,
+                // free it instead of leaking the core for the process lifetime.
+                val sdk = try {
+                    val configProvider = FileConfigProvider(appContext)
+                    val installHash = InstallIdentity(appContext).tenantScopedHash(tenantId, appId)
+                    KsealSDK(
+                        tenantId = tenantId,
+                        appId = appId,
+                        apiKey = apiKey,
+                        core = core,
+                        env = env,
+                        options = options,
+                        configProvider = configProvider,
+                        telemetrySink = BufferingTelemetrySink(),
+                        installIdentityHash = installHash,
+                        clock = Clock.SYSTEM,
+                    ).also { it.loadCachedConfigIfPresent() }
+                } catch (t: Throwable) {
+                    runCatching { core.close() }
+                    throw t
+                }
                 instance = sdk
                 return sdk
             }
