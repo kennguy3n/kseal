@@ -658,7 +658,9 @@ name = "kseal-ffi"
 version = "0.1.0"
 dependencies = [
  "cbindgen",
+ "ed25519-dalek",
  "kseal-core",
+ "prost",
 ]
 
 [[package]]

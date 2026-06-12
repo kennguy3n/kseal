@@ -24,6 +24,8 @@ prost-build = "0.13"
 
 [dev-dependencies]
 criterion = "0.5"
+prost.workspace = true
+ed25519-dalek.workspace = true
 
 [[bench]]
 name = "core_benches"
