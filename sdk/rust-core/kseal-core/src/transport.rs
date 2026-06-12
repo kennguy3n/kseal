@@ -147,7 +147,9 @@ impl RetryPolicy {
     #[must_use]
     pub fn delay_ms(&self, attempt: u32) -> u64 {
         let factor = u64::from(self.multiplier).saturating_pow(attempt);
-        self.base_delay_ms.saturating_mul(factor).min(self.max_delay_ms)
+        self.base_delay_ms
+            .saturating_mul(factor)
+            .min(self.max_delay_ms)
     }
 
     /// Whether another retry is permitted after `attempt` failures.
@@ -204,7 +206,10 @@ mod tests {
         let b = batch(50);
         let raw = serialize_batch(&b);
         let wire = compress(&raw, DEFAULT_ZSTD_LEVEL, None).unwrap();
-        assert!(wire.len() < raw.len(), "expected compression to shrink payload");
+        assert!(
+            wire.len() < raw.len(),
+            "expected compression to shrink payload"
+        );
     }
 
     #[test]
@@ -221,7 +226,10 @@ mod tests {
         let payload = vec![0u8; 64 * 1024];
         let wire = compress(&payload, DEFAULT_ZSTD_LEVEL, None).unwrap();
         // Exact-size cap succeeds; one byte under fails cleanly (no OOM/panic).
-        assert_eq!(decompress_limited(&wire, None, payload.len()).unwrap(), payload);
+        assert_eq!(
+            decompress_limited(&wire, None, payload.len()).unwrap(),
+            payload
+        );
         assert!(decompress_limited(&wire, None, payload.len() - 1).is_err());
     }
 

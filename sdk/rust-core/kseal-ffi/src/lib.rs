@@ -18,7 +18,9 @@
 //!   A null pointer with length 0 is treated as an empty slice.
 
 use kseal_core::events::{EventInput, PrivacyGuard};
-use kseal_core::proto::{Confidence, EventType, Platform, RequestProof, TelemetryEvent, TrustLevel};
+use kseal_core::proto::{
+    Confidence, EventType, Platform, RequestProof, TelemetryEvent, TrustLevel,
+};
 use kseal_core::risk::RiskBitset;
 use kseal_core::{transport, CoreConfig, KsealCore};
 use prost::Message;
@@ -41,6 +43,20 @@ pub enum Status {
     ErrCrypto = -4,
     /// Serialization/compression on the transport path failed.
     ErrTransport = -5,
+    /// An internal panic was caught at the boundary (should never happen; the
+    /// release profile aborts on panic, so this only surfaces in unwinding
+    /// builds — see [`ffi_catch`]).
+    ErrPanic = -6,
+}
+
+/// Runs `f` and catches any panic so it can never unwind across the `extern
+/// "C"` boundary (which is undefined behavior in build profiles that unwind).
+///
+/// The release profile sets `panic = "abort"`, so a panic aborts the process
+/// before this can catch it; this guard makes the boundary sound in debug/test
+/// builds too. On a caught panic it returns `sentinel`.
+fn ffi_catch<T>(sentinel: T, f: impl FnOnce() -> T) -> T {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).unwrap_or(sentinel)
 }
 
 /// Opaque handle wrapping a [`KsealCore`]. Created/destroyed via
@@ -168,35 +184,41 @@ pub unsafe extern "C" fn kseal_core_new(
     risk_window: usize,
     zstd_level: i32,
 ) -> *mut CoreHandle {
-    let pk = match as_slice(config_public_key, config_public_key_len) {
-        Some(s) => s.to_vec(),
-        None => return std::ptr::null_mut(),
-    };
-    let proof = match as_slice(proof_key, proof_key_len) {
-        Some(s) => s.to_vec(),
-        None => return std::ptr::null_mut(),
-    };
-    let config = CoreConfig {
-        config_public_key: pk,
-        proof_key: proof,
-        platform: Platform::try_from(platform).unwrap_or(Platform::Unspecified),
-        privacy_guard: PrivacyGuard::permissive(),
-        max_batch_events: if max_batch_events == 0 { 64 } else { max_batch_events },
-        risk_window: if risk_window == 0 {
-            kseal_core::risk_engine::DEFAULT_WINDOW
-        } else {
-            risk_window
-        },
-        zstd_level: if zstd_level == 0 {
-            transport::DEFAULT_ZSTD_LEVEL
-        } else {
-            zstd_level
-        },
-        ..CoreConfig::default()
-    };
-    Box::into_raw(Box::new(CoreHandle {
-        core: KsealCore::new(config),
-    }))
+    ffi_catch(std::ptr::null_mut(), || {
+        let pk = match as_slice(config_public_key, config_public_key_len) {
+            Some(s) => s.to_vec(),
+            None => return std::ptr::null_mut(),
+        };
+        let proof = match as_slice(proof_key, proof_key_len) {
+            Some(s) => s.to_vec(),
+            None => return std::ptr::null_mut(),
+        };
+        let config = CoreConfig {
+            config_public_key: pk,
+            proof_key: proof,
+            platform: Platform::try_from(platform).unwrap_or(Platform::Unspecified),
+            privacy_guard: PrivacyGuard::permissive(),
+            max_batch_events: if max_batch_events == 0 {
+                64
+            } else {
+                max_batch_events
+            },
+            risk_window: if risk_window == 0 {
+                kseal_core::risk_engine::DEFAULT_WINDOW
+            } else {
+                risk_window
+            },
+            zstd_level: if zstd_level == 0 {
+                transport::DEFAULT_ZSTD_LEVEL
+            } else {
+                zstd_level
+            },
+            ..CoreConfig::default()
+        };
+        Box::into_raw(Box::new(CoreHandle {
+            core: KsealCore::new(config),
+        }))
+    })
 }
 
 /// Releases a core handle created by [`kseal_core_new`]. Null is a no-op.
@@ -206,9 +228,62 @@ pub unsafe extern "C" fn kseal_core_new(
 /// already freed.
 #[no_mangle]
 pub unsafe extern "C" fn kseal_core_free(handle: *mut CoreHandle) {
-    if !handle.is_null() {
-        drop(Box::from_raw(handle));
-    }
+    ffi_catch((), || {
+        if !handle.is_null() {
+            drop(Box::from_raw(handle));
+        }
+    });
+}
+
+/// Installs the tenant's privacy guard, replacing the permissive default that
+/// [`kseal_core_new`] starts with. Call this once the tenant's privacy policy
+/// is known so on-device data minimization actually applies to telemetry
+/// batched afterward.
+///
+/// - `allowed_event_types` points to `allowed_event_types_len` [`EventType`]
+///   discriminants permitted to leave the device; a length of 0 means *all*
+///   types are allowed (so a misconfigured guard never silently drops
+///   everything).
+/// - `allowed_risk_mask` is the set of risk bits permitted on exported events;
+///   others are masked off. Pass `u64::MAX` (all-ones) for a truly permissive
+///   mask.
+/// - `allow_country` (nonzero = true) controls whether coarse geography is
+///   retained.
+///
+/// # Safety
+/// `handle` must be valid; `allowed_event_types` must be valid for
+/// `allowed_event_types_len` `i32`s (or null with length 0).
+#[no_mangle]
+pub unsafe extern "C" fn kseal_set_privacy_guard(
+    handle: *mut CoreHandle,
+    allowed_event_types: *const i32,
+    allowed_event_types_len: usize,
+    allowed_risk_mask: u64,
+    allow_country: i32,
+) -> Status {
+    ffi_catch(Status::ErrPanic, || {
+        let Some(handle) = handle.as_mut() else {
+            return Status::ErrNull;
+        };
+        if allowed_event_types.is_null() && allowed_event_types_len > 0 {
+            return Status::ErrNull;
+        }
+        let raw = if allowed_event_types_len == 0 {
+            &[][..]
+        } else {
+            std::slice::from_raw_parts(allowed_event_types, allowed_event_types_len)
+        };
+        let types = raw
+            .iter()
+            .map(|&t| EventType::try_from(t).unwrap_or(EventType::Unspecified));
+        let guard = PrivacyGuard::new(
+            types,
+            RiskBitset::from_raw(allowed_risk_mask),
+            allow_country != 0,
+        );
+        handle.core.set_privacy_guard(guard);
+        Status::Ok
+    })
 }
 
 /// Verifies and installs a signed config from protobuf bytes.
@@ -221,18 +296,20 @@ pub unsafe extern "C" fn kseal_load_config(
     bytes: *const u8,
     len: usize,
 ) -> Status {
-    let Some(handle) = handle.as_mut() else {
-        return Status::ErrNull;
-    };
-    let Some(slice) = as_slice(bytes, len) else {
-        return Status::ErrNull;
-    };
-    match handle.core.load_config(slice) {
-        Ok(()) => Status::Ok,
-        Err(kseal_core::Error::Decode(_)) => Status::ErrDecode,
-        Err(kseal_core::Error::Crypto(_)) => Status::ErrCrypto,
-        Err(_) => Status::ErrInvalid,
-    }
+    ffi_catch(Status::ErrPanic, || {
+        let Some(handle) = handle.as_mut() else {
+            return Status::ErrNull;
+        };
+        let Some(slice) = as_slice(bytes, len) else {
+            return Status::ErrNull;
+        };
+        match handle.core.load_config(slice) {
+            Ok(()) => Status::Ok,
+            Err(kseal_core::Error::Decode(_)) => Status::ErrDecode,
+            Err(kseal_core::Error::Crypto(_)) => Status::ErrCrypto,
+            Err(_) => Status::ErrInvalid,
+        }
+    })
 }
 
 /// Computes the weighted risk score and confidence for `risk_bits`.
@@ -250,16 +327,18 @@ pub unsafe extern "C" fn kseal_evaluate_risk(
     out_score: *mut u32,
     out_confidence: *mut i32,
 ) -> Status {
-    let Some(handle) = handle.as_ref() else {
-        return Status::ErrNull;
-    };
-    if out_score.is_null() || out_confidence.is_null() {
-        return Status::ErrNull;
-    }
-    let score = handle.core.evaluate_risk(RiskBitset::from_raw(risk_bits));
-    out_score.write(score.score);
-    out_confidence.write(score.confidence as i32);
-    Status::Ok
+    ffi_catch(Status::ErrPanic, || {
+        let Some(handle) = handle.as_ref() else {
+            return Status::ErrNull;
+        };
+        if out_score.is_null() || out_confidence.is_null() {
+            return Status::ErrNull;
+        }
+        let score = handle.core.evaluate_risk(RiskBitset::from_raw(risk_bits));
+        out_score.write(score.score);
+        out_confidence.write(score.confidence as i32);
+        Status::Ok
+    })
 }
 
 /// Returns the composite [`TrustLevel`] discriminant for `risk_bits` under the
@@ -274,17 +353,22 @@ pub unsafe extern "C" fn kseal_evaluate_risk(
 /// # Safety
 /// `handle` must be valid.
 #[no_mangle]
-pub unsafe extern "C" fn kseal_compute_risk_level(handle: *const CoreHandle, risk_bits: u64) -> i32 {
-    let Some(handle) = handle.as_ref() else {
-        return Status::ErrNull as i32;
-    };
-    let bits = RiskBitset::from_raw(risk_bits);
-    let score = handle.core.evaluate_risk(bits).score;
-    let level = match handle.core.policy() {
-        Some(p) => p.trust_level_for_score(score),
-        None => TrustLevel::Unspecified,
-    };
-    level as i32
+pub unsafe extern "C" fn kseal_compute_risk_level(
+    handle: *const CoreHandle,
+    risk_bits: u64,
+) -> i32 {
+    ffi_catch(Status::ErrPanic as i32, || {
+        let Some(handle) = handle.as_ref() else {
+            return Status::ErrNull as i32;
+        };
+        let bits = RiskBitset::from_raw(risk_bits);
+        let score = handle.core.evaluate_risk(bits).score;
+        let level = match handle.core.policy() {
+            Some(p) => p.trust_level_for_score(score),
+            None => TrustLevel::Unspecified,
+        };
+        level as i32
+    })
 }
 
 /// Builds a [`TelemetryEvent`] and writes its serialized protobuf bytes to `out`.
@@ -308,39 +392,41 @@ pub unsafe extern "C" fn kseal_create_event(
     country: *const c_char,
     out: *mut Buffer,
 ) -> Status {
-    let Some(handle) = handle.as_ref() else {
-        return Status::ErrNull;
-    };
-    if out.is_null() {
-        return Status::ErrNull;
-    }
-    let (Some(build), Some(policy), Some(install)) = (
-        as_str_or_empty(build_hash),
-        as_str_or_empty(policy_hash),
-        as_str_or_empty(install_key_hash),
-    ) else {
-        return Status::ErrInvalid;
-    };
-    let country = if country.is_null() {
-        None
-    } else {
-        match as_str(country) {
-            Some(c) => Some(c.to_string()),
-            None => return Status::ErrInvalid,
+    ffi_catch(Status::ErrPanic, || {
+        let Some(handle) = handle.as_ref() else {
+            return Status::ErrNull;
+        };
+        if out.is_null() {
+            return Status::ErrNull;
         }
-    };
-    let event = handle.core.create_event(EventInput {
-        event_type: EventType::try_from(event_type).unwrap_or(EventType::Unspecified),
-        risk_bits: RiskBitset::from_raw(risk_bits),
-        confidence: Confidence::try_from(confidence).unwrap_or(Confidence::Unspecified),
-        app_build_hash: build.to_string(),
-        policy_hash: policy.to_string(),
-        tenant_scoped_install_key_hash: install.to_string(),
-        coarse_time_bucket,
-        country_or_region: country,
-    });
-    out.write(Buffer::from_vec(event.encode_to_vec()));
-    Status::Ok
+        let (Some(build), Some(policy), Some(install)) = (
+            as_str_or_empty(build_hash),
+            as_str_or_empty(policy_hash),
+            as_str_or_empty(install_key_hash),
+        ) else {
+            return Status::ErrInvalid;
+        };
+        let country = if country.is_null() {
+            None
+        } else {
+            match as_str(country) {
+                Some(c) => Some(c.to_string()),
+                None => return Status::ErrInvalid,
+            }
+        };
+        let event = handle.core.create_event(EventInput {
+            event_type: EventType::try_from(event_type).unwrap_or(EventType::Unspecified),
+            risk_bits: RiskBitset::from_raw(risk_bits),
+            confidence: Confidence::try_from(confidence).unwrap_or(Confidence::Unspecified),
+            app_build_hash: build.to_string(),
+            policy_hash: policy.to_string(),
+            tenant_scoped_install_key_hash: install.to_string(),
+            coarse_time_bucket,
+            country_or_region: country,
+        });
+        out.write(Buffer::from_vec(event.encode_to_vec()));
+        Status::Ok
+    })
 }
 
 /// Privacy-guards and compresses serialized [`TelemetryEvent`]s into the
@@ -358,34 +444,36 @@ pub unsafe extern "C" fn kseal_batch_and_compress(
     count: usize,
     out: *mut Buffer,
 ) -> Status {
-    let Some(handle) = handle.as_ref() else {
-        return Status::ErrNull;
-    };
-    if out.is_null() || (events.is_null() && count > 0) {
-        return Status::ErrNull;
-    }
-    let views = if count == 0 {
-        &[][..]
-    } else {
-        std::slice::from_raw_parts(events, count)
-    };
-    let mut decoded = Vec::with_capacity(count);
-    for view in views {
-        let Some(bytes) = as_slice(view.data, view.len) else {
+    ffi_catch(Status::ErrPanic, || {
+        let Some(handle) = handle.as_ref() else {
             return Status::ErrNull;
         };
-        match TelemetryEvent::decode(bytes) {
-            Ok(ev) => decoded.push(ev),
-            Err(_) => return Status::ErrDecode,
+        if out.is_null() || (events.is_null() && count > 0) {
+            return Status::ErrNull;
         }
-    }
-    match handle.core.batch_and_compress(decoded) {
-        Ok(wire) => {
-            out.write(Buffer::from_vec(wire));
-            Status::Ok
+        let views = if count == 0 {
+            &[][..]
+        } else {
+            std::slice::from_raw_parts(events, count)
+        };
+        let mut decoded = Vec::with_capacity(count);
+        for view in views {
+            let Some(bytes) = as_slice(view.data, view.len) else {
+                return Status::ErrNull;
+            };
+            match TelemetryEvent::decode(bytes) {
+                Ok(ev) => decoded.push(ev),
+                Err(_) => return Status::ErrDecode,
+            }
         }
-        Err(_) => Status::ErrTransport,
-    }
+        match handle.core.batch_and_compress(decoded) {
+            Ok(wire) => {
+                out.write(Buffer::from_vec(wire));
+                Status::Ok
+            }
+            Err(_) => Status::ErrTransport,
+        }
+    })
 }
 
 /// Generates a [`RequestProof`] and writes its serialized protobuf bytes to `out`.
@@ -405,24 +493,26 @@ pub unsafe extern "C" fn kseal_generate_request_proof(
     seq: i64,
     out: *mut Buffer,
 ) -> Status {
-    let Some(handle) = handle.as_ref() else {
-        return Status::ErrNull;
-    };
-    if out.is_null() || token_id.is_null() {
-        return Status::ErrNull;
-    }
-    let Some(token) = as_str(token_id) else {
-        return Status::ErrInvalid;
-    };
-    let (Some(rh), Some(nc)) = (
-        as_slice(request_hash, request_hash_len),
-        as_slice(nonce, nonce_len),
-    ) else {
-        return Status::ErrNull;
-    };
-    let proof: RequestProof = handle.core.generate_request_proof(token, rh, nc, seq);
-    out.write(Buffer::from_vec(proof.encode_to_vec()));
-    Status::Ok
+    ffi_catch(Status::ErrPanic, || {
+        let Some(handle) = handle.as_ref() else {
+            return Status::ErrNull;
+        };
+        if out.is_null() || token_id.is_null() {
+            return Status::ErrNull;
+        }
+        let Some(token) = as_str(token_id) else {
+            return Status::ErrInvalid;
+        };
+        let (Some(rh), Some(nc)) = (
+            as_slice(request_hash, request_hash_len),
+            as_slice(nonce, nonce_len),
+        ) else {
+            return Status::ErrNull;
+        };
+        let proof: RequestProof = handle.core.generate_request_proof(token, rh, nc, seq);
+        out.write(Buffer::from_vec(proof.encode_to_vec()));
+        Status::Ok
+    })
 }
 
 /// Verifies an Ed25519 signature over `config` bytes with `public_key`.
@@ -441,14 +531,16 @@ pub unsafe extern "C" fn kseal_verify_config_signature(
     public_key: *const u8,
     public_key_len: usize,
 ) -> i32 {
-    let (Some(cfg), Some(sig), Some(pk)) = (
-        as_slice(config, config_len),
-        as_slice(signature, signature_len),
-        as_slice(public_key, public_key_len),
-    ) else {
-        return Status::ErrNull as i32;
-    };
-    i32::from(KsealCore::verify_config_signature(cfg, sig, pk))
+    ffi_catch(Status::ErrPanic as i32, || {
+        let (Some(cfg), Some(sig), Some(pk)) = (
+            as_slice(config, config_len),
+            as_slice(signature, signature_len),
+            as_slice(public_key, public_key_len),
+        ) else {
+            return Status::ErrNull as i32;
+        };
+        i32::from(KsealCore::verify_config_signature(cfg, sig, pk))
+    })
 }
 
 /// Compresses `data` with zstd at `level` (0 → default) into `out`.
@@ -462,20 +554,26 @@ pub unsafe extern "C" fn kseal_compress(
     level: i32,
     out: *mut Buffer,
 ) -> Status {
-    if out.is_null() {
-        return Status::ErrNull;
-    }
-    let Some(slice) = as_slice(data, len) else {
-        return Status::ErrNull;
-    };
-    let level = if level == 0 { transport::DEFAULT_ZSTD_LEVEL } else { level };
-    match transport::compress(slice, level, None) {
-        Ok(v) => {
-            out.write(Buffer::from_vec(v));
-            Status::Ok
+    ffi_catch(Status::ErrPanic, || {
+        if out.is_null() {
+            return Status::ErrNull;
         }
-        Err(_) => Status::ErrTransport,
-    }
+        let Some(slice) = as_slice(data, len) else {
+            return Status::ErrNull;
+        };
+        let level = if level == 0 {
+            transport::DEFAULT_ZSTD_LEVEL
+        } else {
+            level
+        };
+        match transport::compress(slice, level, None) {
+            Ok(v) => {
+                out.write(Buffer::from_vec(v));
+                Status::Ok
+            }
+            Err(_) => Status::ErrTransport,
+        }
+    })
 }
 
 /// Decompresses zstd `data` into `out`.
@@ -483,25 +581,23 @@ pub unsafe extern "C" fn kseal_compress(
 /// # Safety
 /// `data` must be valid for `len`; `out` must be valid.
 #[no_mangle]
-pub unsafe extern "C" fn kseal_decompress(
-    data: *const u8,
-    len: usize,
-    out: *mut Buffer,
-) -> Status {
-    if out.is_null() {
-        return Status::ErrNull;
-    }
-    let Some(slice) = as_slice(data, len) else {
-        return Status::ErrNull;
-    };
-    // FFI input is untrusted; cap output to guard against decompression bombs.
-    match transport::decompress_limited(slice, None, transport::DEFAULT_MAX_DECOMPRESSED) {
-        Ok(v) => {
-            out.write(Buffer::from_vec(v));
-            Status::Ok
+pub unsafe extern "C" fn kseal_decompress(data: *const u8, len: usize, out: *mut Buffer) -> Status {
+    ffi_catch(Status::ErrPanic, || {
+        if out.is_null() {
+            return Status::ErrNull;
         }
-        Err(_) => Status::ErrTransport,
-    }
+        let Some(slice) = as_slice(data, len) else {
+            return Status::ErrNull;
+        };
+        // FFI input is untrusted; cap output to guard against decompression bombs.
+        match transport::decompress_limited(slice, None, transport::DEFAULT_MAX_DECOMPRESSED) {
+            Ok(v) => {
+                out.write(Buffer::from_vec(v));
+                Status::Ok
+            }
+            Err(_) => Status::ErrTransport,
+        }
+    })
 }
 
 /// Fills `out` with `len` cryptographically secure random bytes (a nonce).
@@ -510,16 +606,18 @@ pub unsafe extern "C" fn kseal_decompress(
 /// `out` must be valid.
 #[no_mangle]
 pub unsafe extern "C" fn kseal_generate_nonce(len: usize, out: *mut Buffer) -> Status {
-    if out.is_null() {
-        return Status::ErrNull;
-    }
-    match kseal_core::crypto::generate_nonce(len) {
-        Ok(v) => {
-            out.write(Buffer::from_vec(v));
-            Status::Ok
+    ffi_catch(Status::ErrPanic, || {
+        if out.is_null() {
+            return Status::ErrNull;
         }
-        Err(_) => Status::ErrCrypto,
-    }
+        match kseal_core::crypto::generate_nonce(len) {
+            Ok(v) => {
+                out.write(Buffer::from_vec(v));
+                Status::Ok
+            }
+            Err(_) => Status::ErrCrypto,
+        }
+    })
 }
 
 /// Releases a [`Buffer`] previously produced by this library. Empty/null
@@ -529,9 +627,11 @@ pub unsafe extern "C" fn kseal_generate_nonce(len: usize, out: *mut Buffer) -> S
 /// `buffer` must have been produced by this library and not already freed.
 #[no_mangle]
 pub unsafe extern "C" fn kseal_buffer_free(buffer: Buffer) {
-    if !buffer.data.is_null() && buffer.cap > 0 {
-        drop(Vec::from_raw_parts(buffer.data, buffer.len, buffer.cap));
-    }
+    ffi_catch((), || {
+        if !buffer.data.is_null() && buffer.cap > 0 {
+            drop(Vec::from_raw_parts(buffer.data, buffer.len, buffer.cap));
+        }
+    });
 }
 
 #[cfg(test)]
@@ -605,7 +705,10 @@ mod tests {
 
             // Load config.
             let cfg = signed_config_bytes(&sk);
-            assert_eq!(kseal_load_config(handle, cfg.as_ptr(), cfg.len()), Status::Ok);
+            assert_eq!(
+                kseal_load_config(handle, cfg.as_ptr(), cfg.len()),
+                Status::Ok
+            );
 
             // Evaluate risk: ROOT (25) + DEBUGGER (30) = 55.
             let bits = RiskBitset::ROOT | RiskBitset::DEBUGGER;
@@ -682,7 +785,10 @@ mod tests {
             );
             let proof_bytes = take_buffer(proof_buf);
             let proof = RequestProof::decode(proof_bytes.as_slice()).unwrap();
-            assert!(kseal_core::crypto::verify_request_proof(b"instance-key", &proof));
+            assert!(kseal_core::crypto::verify_request_proof(
+                b"instance-key",
+                &proof
+            ));
             assert_eq!(proof.monotonic_sequence, 7);
 
             kseal_core_free(handle);
@@ -694,7 +800,10 @@ mod tests {
         unsafe {
             let data = b"kseal kseal kseal kseal kseal kseal kseal kseal";
             let mut c = Buffer::empty();
-            assert_eq!(kseal_compress(data.as_ptr(), data.len(), 0, &mut c), Status::Ok);
+            assert_eq!(
+                kseal_compress(data.as_ptr(), data.len(), 0, &mut c),
+                Status::Ok
+            );
             let compressed = take_buffer(c);
             let mut d = Buffer::empty();
             assert_eq!(
@@ -785,6 +894,103 @@ mod tests {
             assert_eq!(kseal_generate_nonce(16, &mut buf), Status::Ok);
             assert_eq!(buf.len, 16);
             take_buffer(buf);
+        }
+    }
+
+    #[test]
+    fn set_privacy_guard_applies_minimization() {
+        unsafe {
+            let sk = signing_key();
+            let handle = new_core(&sk);
+
+            // Install a tenant guard: only RootRisk events may leave, only the
+            // ROOT risk bit survives, and geography is stripped.
+            let allowed = [EventType::RootRisk as i32];
+            assert_eq!(
+                kseal_set_privacy_guard(
+                    handle,
+                    allowed.as_ptr(),
+                    allowed.len(),
+                    RiskBitset::ROOT.as_u64(),
+                    0,
+                ),
+                Status::Ok
+            );
+
+            let build = CString::new("b").unwrap();
+            let policy = CString::new("p").unwrap();
+            let install = CString::new("i").unwrap();
+            let country = CString::new("US").unwrap();
+
+            // Allowed type carrying an extra (DEBUGGER) bit that must be masked.
+            let mut root_ev = Buffer::empty();
+            assert_eq!(
+                kseal_create_event(
+                    handle,
+                    EventType::RootRisk as i32,
+                    (RiskBitset::ROOT | RiskBitset::DEBUGGER).as_u64(),
+                    Confidence::Low as i32,
+                    build.as_ptr(),
+                    policy.as_ptr(),
+                    install.as_ptr(),
+                    1_700_000_000,
+                    country.as_ptr(),
+                    &mut root_ev,
+                ),
+                Status::Ok
+            );
+            let root_bytes = take_buffer(root_ev);
+
+            // Denied type: must be dropped entirely by the guard.
+            let mut dbg_ev = Buffer::empty();
+            assert_eq!(
+                kseal_create_event(
+                    handle,
+                    EventType::Debugger as i32,
+                    RiskBitset::DEBUGGER.as_u64(),
+                    Confidence::Low as i32,
+                    build.as_ptr(),
+                    policy.as_ptr(),
+                    install.as_ptr(),
+                    1_700_000_000,
+                    std::ptr::null(),
+                    &mut dbg_ev,
+                ),
+                Status::Ok
+            );
+            let dbg_bytes = take_buffer(dbg_ev);
+
+            let views = [
+                BytesView {
+                    data: root_bytes.as_ptr(),
+                    len: root_bytes.len(),
+                },
+                BytesView {
+                    data: dbg_bytes.as_ptr(),
+                    len: dbg_bytes.len(),
+                },
+            ];
+            let mut wire = Buffer::empty();
+            assert_eq!(
+                kseal_batch_and_compress(handle, views.as_ptr(), views.len(), &mut wire),
+                Status::Ok
+            );
+            let batch = transport::decompress_batch(&take_buffer(wire), None).unwrap();
+
+            // Only the RootRisk event survives, with DEBUGGER masked off and no
+            // country retained.
+            assert_eq!(batch.events.len(), 1);
+            assert_eq!(batch.events[0].event_type, EventType::RootRisk as i32);
+            assert_eq!(batch.events[0].risk_bits, RiskBitset::ROOT.as_u64());
+            assert!(batch.events[0].country_or_region.is_none());
+
+            // Null handle is reported, not a crash.
+            assert_eq!(
+                kseal_set_privacy_guard(std::ptr::null_mut(), std::ptr::null(), 0, 0, 0),
+                Status::ErrNull
+            );
+
+            kseal_core_free(handle);
         }
     }
 }

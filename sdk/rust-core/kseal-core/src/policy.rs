@@ -74,18 +74,24 @@ impl Policy {
     ///
     /// An empty `modules_enabled` list means **all** modules are enabled
     /// (no filtering), which keeps a minimal policy fail-safe rather than
-    /// silently dropping every signal.
+    /// silently dropping every signal. The "allow all" mask is `u64::MAX`
+    /// (via [`RiskBitset::from_raw`]) rather than `RiskBitset::all()`: the
+    /// latter only covers the *named* bits (0–15), which would silently drop
+    /// forward-compatible signal bits added at higher positions later.
     #[must_use]
     pub fn new(config: PolicyConfig) -> Self {
         let enabled_mask = if config.modules_enabled.is_empty() {
-            RiskBitset::all()
+            RiskBitset::from_raw(u64::MAX)
         } else {
             config
                 .modules_enabled
                 .iter()
                 .fold(RiskBitset::empty(), |acc, m| acc | module_bits(m))
         };
-        Self { config, enabled_mask }
+        Self {
+            config,
+            enabled_mask,
+        }
     }
 
     /// The wrapped configuration.
@@ -202,7 +208,12 @@ mod tests {
         thresholds.insert("CRITICAL".to_string(), 100);
         PolicyConfig {
             rules: vec![
-                rule("block-hooking", RiskBitset::HOOKING.as_u64(), 0, EnforcementMode::Block),
+                rule(
+                    "block-hooking",
+                    RiskBitset::HOOKING.as_u64(),
+                    0,
+                    EnforcementMode::Block,
+                ),
                 rule(
                     "stepup-debugger",
                     RiskBitset::DEBUGGER.as_u64(),
@@ -268,5 +279,18 @@ mod tests {
         let p = Policy::new(base_config());
         assert!(p.is_module_enabled("anything"));
         assert_eq!(p.filter_signals(RiskBitset::all()), RiskBitset::all());
+    }
+
+    #[test]
+    fn empty_modules_preserves_forward_compat_bits() {
+        // With no modules listed ("all enabled"), the mask must not drop
+        // forward-compatible signal bits above the named range (0–15).
+        let p = Policy::new(base_config());
+        let future = RiskBitset::from_raw(1u64 << 40) | RiskBitset::ROOT;
+        assert_eq!(
+            p.filter_signals(future),
+            future,
+            "unnamed high bits must survive when all modules are enabled"
+        );
     }
 }

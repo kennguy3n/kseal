@@ -150,6 +150,16 @@ impl KsealCore {
         }
     }
 
+    /// Installs the tenant's [`PrivacyGuard`], replacing the one set at
+    /// construction.
+    ///
+    /// `kseal_core_new` (FFI) starts with [`PrivacyGuard::permissive`]; the
+    /// platform SDK calls this once the tenant's privacy policy is known so the
+    /// data-minimization rules actually apply to telemetry batched afterward.
+    pub fn set_privacy_guard(&mut self, guard: PrivacyGuard) {
+        self.config.privacy_guard = guard;
+    }
+
     /// Verifies and installs a signed config from its protobuf bytes, stamped
     /// at the current time. Builds the local risk engine on success.
     ///
@@ -258,7 +268,11 @@ impl KsealCore {
 
     /// Verifies an Ed25519 signature over `config_bytes` with `public_key`.
     #[must_use]
-    pub fn verify_config_signature(config_bytes: &[u8], signature: &[u8], public_key: &[u8]) -> bool {
+    pub fn verify_config_signature(
+        config_bytes: &[u8],
+        signature: &[u8],
+        public_key: &[u8],
+    ) -> bool {
         crypto::verify_ed25519(public_key, config_bytes, signature)
     }
 }
@@ -339,6 +353,34 @@ mod tests {
     }
 
     #[test]
+    fn set_privacy_guard_replaces_default() {
+        let sk = SigningKey::from_bytes(&[1u8; 32]);
+        let mut core = core_with(&sk);
+        // Install a guard that only permits RootRisk events.
+        core.set_privacy_guard(PrivacyGuard::new(
+            [EventType::RootRisk],
+            RiskBitset::from_raw(u64::MAX),
+            true,
+        ));
+        let denied = core.create_event(EventInput {
+            event_type: EventType::Debugger,
+            risk_bits: RiskBitset::DEBUGGER,
+            confidence: Confidence::Low,
+            app_build_hash: "b".into(),
+            policy_hash: "p".into(),
+            tenant_scoped_install_key_hash: "h".into(),
+            coarse_time_bucket: 1_700_000_000,
+            country_or_region: None,
+        });
+        let wire = core.batch_and_compress(vec![denied]).unwrap();
+        let batch = transport::decompress_batch(&wire, None).unwrap();
+        assert!(
+            batch.events.is_empty(),
+            "guard must drop denied event types"
+        );
+    }
+
+    #[test]
     fn request_proof_uses_instance_key() {
         let sk = SigningKey::from_bytes(&[1u8; 32]);
         let core = core_with(&sk);
@@ -357,6 +399,10 @@ mod tests {
             &sig,
             sk.verifying_key().as_bytes()
         ));
-        assert!(!KsealCore::verify_config_signature(b"other", &sig, sk.verifying_key().as_bytes()));
+        assert!(!KsealCore::verify_config_signature(
+            b"other",
+            &sig,
+            sk.verifying_key().as_bytes()
+        ));
     }
 }

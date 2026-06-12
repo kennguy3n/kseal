@@ -209,7 +209,10 @@ mod tests {
     fn confidence_scales_with_corroboration() {
         assert_eq!(RiskBitset::empty().confidence(), Confidence::High);
         assert_eq!(RiskBitset::ROOT.confidence(), Confidence::Low);
-        assert_eq!((RiskBitset::ROOT | RiskBitset::PROXY).confidence(), Confidence::Medium);
+        assert_eq!(
+            (RiskBitset::ROOT | RiskBitset::PROXY).confidence(),
+            Confidence::Medium
+        );
         assert_eq!(
             (RiskBitset::ROOT | RiskBitset::PROXY | RiskBitset::DEBUGGER).confidence(),
             Confidence::High

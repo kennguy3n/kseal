@@ -181,11 +181,7 @@ mod tests {
         let vk = sk.verifying_key();
         let msg = b"signed config bytes";
         let sig = sk.sign(msg);
-        assert!(verify_ed25519(
-            vk.as_bytes(),
-            msg,
-            &sig.to_bytes()
-        ));
+        assert!(verify_ed25519(vk.as_bytes(), msg, &sig.to_bytes()));
     }
 
     #[test]
@@ -198,8 +194,16 @@ mod tests {
 
     #[test]
     fn ed25519_rejects_malformed_inputs() {
-        assert!(!verify_ed25519(&[0u8; 10], b"m", &[0u8; ED25519_SIGNATURE_LEN]));
-        assert!(!verify_ed25519(&[0u8; ED25519_PUBLIC_KEY_LEN], b"m", &[0u8; 10]));
+        assert!(!verify_ed25519(
+            &[0u8; 10],
+            b"m",
+            &[0u8; ED25519_SIGNATURE_LEN]
+        ));
+        assert!(!verify_ed25519(
+            &[0u8; ED25519_PUBLIC_KEY_LEN],
+            b"m",
+            &[0u8; 10]
+        ));
     }
 
     #[test]
@@ -282,8 +286,7 @@ mod tests {
         let tag = hmac_sha256(key, &actual);
         let tag_hex: String = tag.iter().map(|b| format!("{b:02x}")).collect();
         assert_eq!(
-            tag_hex,
-            "718bb06df45dc4bbc5bf483bd65acf7609429966adba8baff66fa965857ebd0d",
+            tag_hex, "718bb06df45dc4bbc5bf483bd65acf7609429966adba8baff66fa965857ebd0d",
             "golden HMAC tag for the fixed vector"
         );
     }

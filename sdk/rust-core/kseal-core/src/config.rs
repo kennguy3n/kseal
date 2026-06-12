@@ -207,7 +207,9 @@ mod tests {
         let sk = signing_key();
         let pk = sk.verifying_key();
         let mut cache = ConfigCache::new();
-        cache.update(&make_signed(5, 60, &sk), pk.as_bytes(), 0).unwrap();
+        cache
+            .update(&make_signed(5, 60, &sk), pk.as_bytes(), 0)
+            .unwrap();
         let err = cache
             .update(&make_signed(4, 60, &sk), pk.as_bytes(), 0)
             .unwrap_err();
@@ -241,7 +243,9 @@ mod tests {
         let pk = sk.verifying_key();
         let mut cache = ConfigCache::new();
         assert!(cache.needs_refresh(0));
-        cache.update(&make_signed(1, 100, &sk), pk.as_bytes(), 0).unwrap();
+        cache
+            .update(&make_signed(1, 100, &sk), pk.as_bytes(), 0)
+            .unwrap();
         assert!(!cache.needs_refresh(50));
         assert!(cache.needs_refresh(100));
     }

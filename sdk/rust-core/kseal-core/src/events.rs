@@ -76,7 +76,10 @@ impl PrivacyGuard {
     ///   empty set means *all* types are allowed (so a misconfigured guard
     ///   never silently drops everything).
     /// * `allowed_risk_mask` — bits permitted on exported events; others are
-    ///   masked off.
+    ///   masked off. For a *truly* permissive mask use
+    ///   `RiskBitset::from_raw(u64::MAX)`, not `RiskBitset::all()`: the latter
+    ///   only covers the named bits (0–15) and would mask off any
+    ///   forward-compatible signal bits added at higher positions later.
     /// * `allow_country` — whether coarse geography may be retained.
     #[must_use]
     pub fn new(
@@ -227,7 +230,10 @@ mod tests {
     fn build_event_maps_fields() {
         let e = build_event(sample_input(EventType::RootRisk));
         assert_eq!(e.event_type, EventType::RootRisk as i32);
-        assert_eq!(e.risk_bits, (RiskBitset::ROOT | RiskBitset::NETWORK_MITM).as_u64());
+        assert_eq!(
+            e.risk_bits,
+            (RiskBitset::ROOT | RiskBitset::NETWORK_MITM).as_u64()
+        );
         assert_eq!(e.country_or_region.as_deref(), Some("US"));
     }
 
@@ -252,13 +258,17 @@ mod tests {
     fn batch_enforces_capacity_and_guard() {
         let guard = PrivacyGuard::new([EventType::RootRisk], RiskBitset::all(), true);
         let mut batch = EventBatch::new(guard, 2, "1.0", Platform::Android);
-        assert!(batch.add(build_event(sample_input(EventType::RootRisk))).is_ok());
+        assert!(batch
+            .add(build_event(sample_input(EventType::RootRisk)))
+            .is_ok());
         // Denied type.
         assert_eq!(
             batch.add(build_event(sample_input(EventType::Debugger))),
             Err(RejectReason::Denied)
         );
-        assert!(batch.add(build_event(sample_input(EventType::RootRisk))).is_ok());
+        assert!(batch
+            .add(build_event(sample_input(EventType::RootRisk)))
+            .is_ok());
         // Now full.
         assert_eq!(
             batch.add(build_event(sample_input(EventType::RootRisk))),

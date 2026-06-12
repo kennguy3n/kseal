@@ -92,8 +92,9 @@ impl RiskEngine {
         let emerged = RiskBitset::from_raw(filtered.as_u64() & !prior_union.as_u64());
         let anomaly = !filtered.is_clean() && !emerged.is_clean();
 
-        let RiskScore { score, confidence, .. } =
-            RiskScore::compute(filtered, &self.policy.config().signal_weights);
+        let RiskScore {
+            score, confidence, ..
+        } = RiskScore::compute(filtered, &self.policy.config().signal_weights);
         let level = self.policy.trust_level_for_score(score);
         // `evaluate` re-applies the module filter internally; pass `filtered`
         // so we don't mask the same signals twice.
@@ -190,7 +191,7 @@ mod tests {
         let mut e = RiskEngine::new(policy(), 1);
         e.fuse(RiskBitset::ROOT); // window: [ROOT]
         e.fuse(RiskBitset::DEBUGGER); // evicts ROOT; window: [DEBUGGER]
-        // ROOT has aged out, so it re-emerges as anomalous.
+                                      // ROOT has aged out, so it re-emerges as anomalous.
         let r = e.fuse(RiskBitset::ROOT);
         assert!(r.anomaly);
     }

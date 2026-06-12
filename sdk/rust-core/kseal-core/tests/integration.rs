@@ -47,7 +47,12 @@ fn rule(id: &str, mask: RiskBitset, min_score: u32, action: EnforcementMode) -> 
 fn policy_config() -> PolicyConfig {
     PolicyConfig {
         rules: vec![
-            rule("block-hooking", RiskBitset::HOOKING, 0, EnforcementMode::Block),
+            rule(
+                "block-hooking",
+                RiskBitset::HOOKING,
+                0,
+                EnforcementMode::Block,
+            ),
             rule(
                 "stepup-debugger",
                 RiskBitset::DEBUGGER,
@@ -118,7 +123,10 @@ fn policy_min_score_boundary() {
         EnforcementMode::StepUp,
     )];
     let p = Policy::new(cfg.clone());
-    assert_eq!(p.evaluate(RiskBitset::DEBUGGER).mode, EnforcementMode::StepUp);
+    assert_eq!(
+        p.evaluate(RiskBitset::DEBUGGER).mode,
+        EnforcementMode::StepUp
+    );
 
     cfg.rules = vec![rule(
         "too-high",
@@ -128,7 +136,10 @@ fn policy_min_score_boundary() {
     )];
     let p = Policy::new(cfg);
     // Falls through to default OBSERVE.
-    assert_eq!(p.evaluate(RiskBitset::DEBUGGER).mode, EnforcementMode::Observe);
+    assert_eq!(
+        p.evaluate(RiskBitset::DEBUGGER).mode,
+        EnforcementMode::Observe
+    );
 }
 
 #[test]
@@ -155,7 +166,10 @@ fn risk_scoring_edge_cases() {
 
     // Unknown high bit uses the default weight and survives round-trips.
     let unknown = RiskBitset::from_raw(1 << 40);
-    assert_eq!(unknown.weighted_score(&w), kseal_core::risk::DEFAULT_SIGNAL_WEIGHT);
+    assert_eq!(
+        unknown.weighted_score(&w),
+        kseal_core::risk::DEFAULT_SIGNAL_WEIGHT
+    );
     assert_eq!(unknown.as_u64(), 1 << 40);
 
     // Single signal → low confidence; multiple → escalating.
@@ -212,7 +226,10 @@ fn event_batch_privacy_guard_and_roundtrip() {
     let dict = b"shared-zstd-dictionary".to_vec();
     let wire_d =
         transport::compress_batch(&sealed, transport::DEFAULT_ZSTD_LEVEL, Some(&dict)).unwrap();
-    assert_eq!(transport::decompress_batch(&wire_d, Some(&dict)).unwrap(), sealed);
+    assert_eq!(
+        transport::decompress_batch(&wire_d, Some(&dict)).unwrap(),
+        sealed
+    );
 }
 
 #[test]
@@ -266,8 +283,10 @@ fn config_signature_valid_invalid_expired() {
 
     // Invalid signature (wrong key) is rejected.
     let other = SigningKey::from_bytes(&[12u8; 32]);
-    assert!(kseal_core::config::verify_and_decode(&signed, other.verifying_key().as_bytes(), 0)
-        .is_err());
+    assert!(
+        kseal_core::config::verify_and_decode(&signed, other.verifying_key().as_bytes(), 0)
+            .is_err()
+    );
 
     // Tampered config bytes invalidate the signature.
     let mut tampered = signed.clone();
@@ -281,12 +300,16 @@ fn config_cache_rejects_rollback_and_tracks_refresh() {
     let pk = sk.verifying_key();
     let mut cache = ConfigCache::new();
 
-    cache.update(&signed_config(&sk, 5, 100), pk.as_bytes(), 0).unwrap();
+    cache
+        .update(&signed_config(&sk, 5, 100), pk.as_bytes(), 0)
+        .unwrap();
     assert!(!cache.needs_refresh(50));
     assert!(cache.needs_refresh(100));
 
     // Rollback to an older version is rejected; cached version stays.
-    assert!(cache.update(&signed_config(&sk, 4, 100), pk.as_bytes(), 0).is_err());
+    assert!(cache
+        .update(&signed_config(&sk, 4, 100), pk.as_bytes(), 0)
+        .is_err());
     assert_eq!(cache.current().unwrap().version, 5);
 }
 
