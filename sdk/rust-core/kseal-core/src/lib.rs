@@ -8,6 +8,18 @@
 //!
 //! The protobuf wire types are generated from `proto/` at build time (see
 //! `build.rs`) and re-exported under [`proto`].
+//!
+//! # Layout
+//!
+//! - [`risk`] — packed signal bitset, weighted scoring, confidence.
+//! - [`policy`] — ordered rule evaluation and trust-level thresholds.
+//! - [`crypto`] — Ed25519 verification, HMAC request proofs, nonces.
+//! - [`config`] — signed-config verification and TTL caching.
+//! - [`events`] — event construction, privacy guard, batching.
+//! - [`transport`] — protobuf + zstd serialization and retry policy.
+//! - [`risk_engine`] — Phase 2 signal fusion with anomaly detection.
+//!
+//! [`KsealCore`] ties these together behind the surface the FFI layer exposes.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -17,6 +29,23 @@ pub mod proto {
     #![allow(missing_docs)]
     include!(concat!(env!("OUT_DIR"), "/kseal.v1.rs"));
 }
+
+pub mod config;
+pub mod crypto;
+pub mod events;
+pub mod policy;
+pub mod risk;
+pub mod risk_engine;
+pub mod transport;
+
+use crate::config::ConfigCache;
+use crate::events::{EventBatch, EventInput, PrivacyGuard};
+use crate::proto::{Compression, Platform, RequestProof, SignedConfig, TelemetryEvent, TrustLevel};
+use crate::risk::{RiskBitset, RiskScore};
+use crate::risk_engine::{FusedRisk, RiskEngine};
+use prost::Message;
+use std::collections::HashMap;
+use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 /// Crate-wide error type.
 #[derive(Debug, thiserror::Error)]
@@ -33,6 +62,9 @@ pub enum Error {
     /// Configuration was missing, malformed, or expired.
     #[error("config error: {0}")]
     Config(String),
+    /// Serialization or compression on the transport path failed.
+    #[error("transport error: {0}")]
+    Transport(String),
 }
 
 /// Convenience result alias for this crate.
@@ -40,3 +72,479 @@ pub type Result<T> = core::result::Result<T, Error>;
 
 /// Crate version string, surfaced to telemetry as the SDK version.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Returns the current wall-clock time in whole Unix seconds.
+///
+/// Used to stamp/age the config cache. The platform may instead call the
+/// `*_at` variants with its own clock for deterministic control.
+#[must_use]
+pub fn now_unix_secs() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        // Saturate rather than wrap: a clock past i64::MAX seconds (~year 2262)
+        // must never produce a negative timestamp, which would make every cached
+        // config look prematurely expired.
+        .map(|d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
+        .unwrap_or(0)
+}
+
+/// Immutable configuration for a [`KsealCore`] instance.
+#[derive(Debug, Clone)]
+pub struct CoreConfig {
+    /// Ed25519 public key used to verify signed configs.
+    pub config_public_key: Vec<u8>,
+    /// Instance HMAC key for request proofs (hardware-bound in the platform SDK).
+    pub proof_key: Vec<u8>,
+    /// SDK version string stamped onto telemetry batches.
+    pub sdk_version: String,
+    /// Reporting platform.
+    pub platform: Platform,
+    /// Data-minimization guard applied to telemetry.
+    pub privacy_guard: PrivacyGuard,
+    /// Maximum events per telemetry batch.
+    pub max_batch_events: usize,
+    /// Sliding-window size for the risk engine's anomaly detection.
+    pub risk_window: usize,
+    /// zstd level for telemetry compression.
+    pub zstd_level: i32,
+    /// Optional shared zstd dictionary bytes.
+    pub zstd_dictionary: Option<Vec<u8>>,
+    /// Identifier of the shared dictionary (recorded on the batch for decode).
+    pub zstd_dictionary_id: String,
+}
+
+impl Default for CoreConfig {
+    fn default() -> Self {
+        Self {
+            config_public_key: Vec::new(),
+            proof_key: Vec::new(),
+            sdk_version: VERSION.to_string(),
+            platform: Platform::Unspecified,
+            privacy_guard: PrivacyGuard::permissive(),
+            max_batch_events: 64,
+            risk_window: risk_engine::DEFAULT_WINDOW,
+            zstd_level: transport::DEFAULT_ZSTD_LEVEL,
+            zstd_dictionary: None,
+            zstd_dictionary_id: String::new(),
+        }
+    }
+}
+
+/// The device-side trust core: holds the verified policy cache and the local
+/// risk engine, and exposes the operations consumed by the platform SDKs (and,
+/// via `kseal-ffi`, by C callers).
+///
+/// # Thread-safety
+///
+/// `KsealCore` is internally synchronized and therefore `Sync`: every method
+/// takes `&self`, including the mutating ones ([`load_config`](Self::load_config),
+/// [`set_privacy_guard`](Self::set_privacy_guard),
+/// [`fuse_risk`](Self::fuse_risk)). The mutable runtime state lives behind a
+/// [`RwLock`] ([`CoreState`]) so a single shared instance — e.g. the one behind
+/// the C ABI's opaque handle — can be read concurrently from many threads while
+/// a config reload happens on another, with no external locking and no data
+/// race. Reads take a shared lock; the three writers take the exclusive lock,
+/// which also serializes concurrent reloads.
+///
+/// `RwLock` (rather than `ArcSwap`/lock-free snapshots) is deliberate: it adds
+/// no dependency, correctly serializes the rare writers, and lets the stateful
+/// anomaly-detection window in [`fuse_risk`](Self::fuse_risk) be updated
+/// in place under the write lock. The per-request hot paths stay cheap — an
+/// uncontended read lock on the mobile single-reader workload — and
+/// [`generate_request_proof`](Self::generate_request_proof) reads only immutable
+/// config, so it takes no lock at all.
+#[derive(Debug)]
+pub struct KsealCore {
+    /// Immutable per-instance configuration (verification key, proof key, SDK
+    /// version, platform, batch/zstd parameters). The privacy guard is mutable
+    /// and lives in [`CoreState`] instead; the copy here is only the seed.
+    config: CoreConfig,
+    /// Mutable runtime state behind a lock so the core is `Sync` and the FFI
+    /// handle can be shared across threads. See the type-level docs.
+    state: RwLock<CoreState>,
+}
+
+/// Mutable runtime state of a [`KsealCore`], guarded by its `RwLock`.
+#[derive(Debug)]
+struct CoreState {
+    /// TTL-bounded cache of the active verified config (rollback-protected).
+    cache: ConfigCache,
+    /// Local fusion engine; `None` until a config is loaded.
+    engine: Option<RiskEngine>,
+    /// Active data-minimization guard applied when batching telemetry.
+    privacy_guard: PrivacyGuard,
+}
+
+impl KsealCore {
+    /// Creates a core from immutable configuration. No policy is active until
+    /// [`KsealCore::load_config`] succeeds.
+    #[must_use]
+    pub fn new(config: CoreConfig) -> Self {
+        let privacy_guard = config.privacy_guard.clone();
+        Self {
+            config,
+            state: RwLock::new(CoreState {
+                cache: ConfigCache::new(),
+                engine: None,
+                privacy_guard,
+            }),
+        }
+    }
+
+    /// Acquires the shared (read) lock over [`CoreState`], recovering from a
+    /// poisoned lock.
+    ///
+    /// Poisoning would only occur if a thread panicked mid-critical-section;
+    /// our sections are short and leave the state consistent, and the FFI
+    /// boundary already converts panics into an error code, so recovering keeps
+    /// a security-critical core usable rather than wedging every later call.
+    fn read_state(&self) -> RwLockReadGuard<'_, CoreState> {
+        self.state.read().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Acquires the exclusive (write) lock over [`CoreState`], recovering from
+    /// a poisoned lock (see [`read_state`](Self::read_state)).
+    fn write_state(&self) -> RwLockWriteGuard<'_, CoreState> {
+        self.state.write().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Installs the tenant's [`PrivacyGuard`], replacing the one set at
+    /// construction.
+    ///
+    /// `kseal_core_new` (FFI) starts with [`PrivacyGuard::permissive`]; the
+    /// platform SDK calls this once the tenant's privacy policy is known so the
+    /// data-minimization rules actually apply to telemetry batched afterward.
+    /// Takes `&self` (interior mutability) so it is sound to call on a shared
+    /// instance concurrently with reads from other threads.
+    pub fn set_privacy_guard(&self, guard: PrivacyGuard) {
+        self.write_state().privacy_guard = guard;
+    }
+
+    /// Verifies and installs a signed config from its protobuf bytes, stamped
+    /// at the current time. Builds the local risk engine on success.
+    ///
+    /// # Errors
+    /// Propagates decode/verification/rollback failures.
+    pub fn load_config(&self, signed_bytes: &[u8]) -> Result<()> {
+        self.load_config_at(signed_bytes, now_unix_secs())
+    }
+
+    /// Like [`KsealCore::load_config`] but with a caller-supplied `now`
+    /// (Unix seconds) for deterministic caching/testing.
+    ///
+    /// # Errors
+    /// Propagates decode/verification/rollback failures.
+    pub fn load_config_at(&self, signed_bytes: &[u8], now: i64) -> Result<()> {
+        let signed = SignedConfig::decode(signed_bytes)?;
+        let mut state = self.write_state();
+        let policy = state
+            .cache
+            .update(&signed, &self.config.config_public_key, now)?
+            .policy
+            .clone();
+        match state.engine.as_mut() {
+            Some(engine) => engine.set_policy(policy),
+            None => state.engine = Some(RiskEngine::new(policy, self.config.risk_window)),
+        }
+        Ok(())
+    }
+
+    /// Whether a verified policy is currently active.
+    #[must_use]
+    pub fn has_policy(&self) -> bool {
+        self.read_state().engine.is_some()
+    }
+
+    /// Scores `signals` against the active policy's weights. Without a loaded
+    /// policy, default per-signal weights apply (and no module filtering).
+    #[must_use]
+    pub fn evaluate_risk(&self, signals: RiskBitset) -> RiskScore {
+        match self.read_state().engine.as_ref() {
+            Some(engine) => {
+                let p = engine.policy();
+                RiskScore::compute(p.filter_signals(signals), &p.config().signal_weights)
+            }
+            None => RiskScore::compute(signals, &HashMap::new()),
+        }
+    }
+
+    /// Maps `signals` to the composite [`TrustLevel`] under the active policy's
+    /// thresholds, or [`TrustLevel::Unspecified`] when no config is loaded.
+    ///
+    /// Unlike [`evaluate_risk`](Self::evaluate_risk), which always yields a
+    /// numeric score (default weights when unconfigured), a trust *level*
+    /// requires configured thresholds, so it reports `Unspecified` until a
+    /// policy is active.
+    #[must_use]
+    pub fn trust_level_for(&self, signals: RiskBitset) -> TrustLevel {
+        match self.read_state().engine.as_ref() {
+            Some(engine) => {
+                let p = engine.policy();
+                let score =
+                    RiskScore::compute(p.filter_signals(signals), &p.config().signal_weights).score;
+                p.trust_level_for_score(score)
+            }
+            None => TrustLevel::Unspecified,
+        }
+    }
+
+    /// Fuses `signals` through the local risk engine (Phase 2). Returns `None`
+    /// until a policy is loaded.
+    ///
+    /// Takes `&self` (the sliding anomaly-detection window is updated under the
+    /// exclusive lock), so it is sound on a shared instance.
+    pub fn fuse_risk(&self, signals: RiskBitset) -> Option<FusedRisk> {
+        self.write_state().engine.as_mut().map(|e| e.fuse(signals))
+    }
+
+    /// Builds a [`TelemetryEvent`] from raw signals. Field-level minimization
+    /// (risk-bit masking, type denial) is applied when the event is batched via
+    /// [`KsealCore::batch_and_compress`].
+    #[must_use]
+    pub fn create_event(&self, input: EventInput) -> TelemetryEvent {
+        events::build_event(input)
+    }
+
+    /// Privacy-guards `events` into a batch and returns the protobuf+zstd wire
+    /// payload. Events whose type the guard denies are dropped.
+    ///
+    /// # Errors
+    /// [`Error::Transport`] if compression fails.
+    pub fn batch_and_compress(&self, events: Vec<TelemetryEvent>) -> Result<Vec<u8>> {
+        // Snapshot the guard under the read lock, then release it before the
+        // (relatively slow) zstd compression so reloads aren't blocked on it.
+        let privacy_guard = self.read_state().privacy_guard.clone();
+        let mut batch = EventBatch::new(
+            privacy_guard,
+            self.config.max_batch_events,
+            self.config.sdk_version.clone(),
+            self.config.platform,
+        );
+        for ev in events {
+            // Drop denied/over-capacity events; partial batches are valid.
+            let _ = batch.add(ev);
+        }
+        let mut sealed = batch.seal(Compression::Zstd);
+        sealed
+            .compression_dictionary_id
+            .clone_from(&self.config.zstd_dictionary_id);
+        transport::compress_batch(
+            &sealed,
+            self.config.zstd_level,
+            self.config.zstd_dictionary.as_deref(),
+        )
+    }
+
+    /// Generates a per-request proof binding `request_hash` to a trust token
+    /// using the instance proof key.
+    #[must_use]
+    pub fn generate_request_proof(
+        &self,
+        token_id: &str,
+        request_hash: &[u8],
+        nonce: &[u8],
+        seq: i64,
+    ) -> RequestProof {
+        crypto::generate_request_proof(&self.config.proof_key, token_id, request_hash, nonce, seq)
+    }
+
+    /// Raw Ed25519 verify of `signature` over exactly `config_bytes` with
+    /// `public_key` — a general-purpose primitive for callers that hold the
+    /// signed bytes and signature directly.
+    ///
+    /// Note: this is **not** how a [`proto::SignedConfig`] is authenticated.
+    /// [`KsealCore::load_config`] verifies the full canonical envelope
+    /// (`version || ttl_seconds || key_id || config_bytes`, see
+    /// [`crypto::verify_config_envelope`]); passing a `SignedConfig`'s
+    /// `config_bytes`/`signature` here would not match, by design.
+    #[must_use]
+    pub fn verify_config_signature(
+        config_bytes: &[u8],
+        signature: &[u8],
+        public_key: &[u8],
+    ) -> bool {
+        crypto::verify_ed25519(public_key, config_bytes, signature)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::proto::{Confidence, EnforcementMode, EventType, PolicyConfig};
+    use ed25519_dalek::{Signer, SigningKey};
+
+    fn signed_policy(sk: &SigningKey) -> Vec<u8> {
+        let mut weights = HashMap::new();
+        weights.insert(0, 25); // ROOT
+        let policy = PolicyConfig {
+            default_mode: EnforcementMode::Observe as i32,
+            signal_weights: weights,
+            policy_hash: "ph".into(),
+            ..Default::default()
+        };
+        let config_bytes = policy.encode_to_vec();
+        let (version, ttl_seconds, key_id) = (1i64, 3600i64, "k1");
+        let signature = sk
+            .sign(&crypto::signed_config_preimage(
+                version,
+                ttl_seconds,
+                key_id,
+                &config_bytes,
+            ))
+            .to_bytes()
+            .to_vec();
+        SignedConfig {
+            config_bytes,
+            signature,
+            key_id: key_id.into(),
+            version,
+            ttl_seconds,
+        }
+        .encode_to_vec()
+    }
+
+    fn core_with(sk: &SigningKey) -> KsealCore {
+        KsealCore::new(CoreConfig {
+            config_public_key: sk.verifying_key().as_bytes().to_vec(),
+            proof_key: b"instance-key".to_vec(),
+            platform: Platform::Ios,
+            ..Default::default()
+        })
+    }
+
+    #[test]
+    fn load_config_activates_policy() {
+        let sk = SigningKey::from_bytes(&[1u8; 32]);
+        let core = core_with(&sk);
+        assert!(!core.has_policy());
+        core.load_config_at(&signed_policy(&sk), 100).unwrap();
+        assert!(core.has_policy());
+        let score = core.evaluate_risk(RiskBitset::ROOT);
+        assert_eq!(score.score, 25);
+    }
+
+    #[test]
+    fn load_config_rejects_bad_key() {
+        let sk = SigningKey::from_bytes(&[1u8; 32]);
+        let wrong = SigningKey::from_bytes(&[2u8; 32]);
+        let core = core_with(&wrong);
+        assert!(core.load_config_at(&signed_policy(&sk), 0).is_err());
+    }
+
+    #[test]
+    fn batch_and_compress_roundtrips() {
+        let sk = SigningKey::from_bytes(&[1u8; 32]);
+        let core = core_with(&sk);
+        let ev = core.create_event(EventInput {
+            event_type: EventType::RootRisk,
+            risk_bits: RiskBitset::ROOT,
+            confidence: Confidence::Low,
+            app_build_hash: "b".into(),
+            policy_hash: "p".into(),
+            tenant_scoped_install_key_hash: "h".into(),
+            coarse_time_bucket: 1_700_000_000,
+            country_or_region: None,
+        });
+        let wire = core.batch_and_compress(vec![ev]).unwrap();
+        let batch = transport::decompress_batch(&wire, None).unwrap();
+        assert_eq!(batch.events.len(), 1);
+        assert_eq!(batch.events[0].risk_bits, RiskBitset::ROOT.as_u64());
+    }
+
+    #[test]
+    fn set_privacy_guard_replaces_default() {
+        let sk = SigningKey::from_bytes(&[1u8; 32]);
+        let core = core_with(&sk);
+        // Install a guard that only permits RootRisk events.
+        core.set_privacy_guard(PrivacyGuard::new(
+            [EventType::RootRisk],
+            RiskBitset::from_raw(u64::MAX),
+            true,
+        ));
+        let denied = core.create_event(EventInput {
+            event_type: EventType::Debugger,
+            risk_bits: RiskBitset::DEBUGGER,
+            confidence: Confidence::Low,
+            app_build_hash: "b".into(),
+            policy_hash: "p".into(),
+            tenant_scoped_install_key_hash: "h".into(),
+            coarse_time_bucket: 1_700_000_000,
+            country_or_region: None,
+        });
+        let wire = core.batch_and_compress(vec![denied]).unwrap();
+        let batch = transport::decompress_batch(&wire, None).unwrap();
+        assert!(
+            batch.events.is_empty(),
+            "guard must drop denied event types"
+        );
+    }
+
+    #[test]
+    fn request_proof_uses_instance_key() {
+        let sk = SigningKey::from_bytes(&[1u8; 32]);
+        let core = core_with(&sk);
+        let proof = core.generate_request_proof("tok", b"reqhash", b"nonce", 1);
+        assert!(crypto::verify_request_proof(b"instance-key", &proof));
+        assert_eq!(proof.monotonic_sequence, 1);
+    }
+
+    #[test]
+    fn verify_config_signature_associated_fn() {
+        let sk = SigningKey::from_bytes(&[9u8; 32]);
+        let msg = b"bytes";
+        let sig = sk.sign(msg).to_bytes().to_vec();
+        assert!(KsealCore::verify_config_signature(
+            msg,
+            &sig,
+            sk.verifying_key().as_bytes()
+        ));
+        assert!(!KsealCore::verify_config_signature(
+            b"other",
+            &sig,
+            sk.verifying_key().as_bytes()
+        ));
+    }
+
+    /// A single shared `&KsealCore` is read from many threads while another
+    /// thread reloads config — exercising the internal synchronization that
+    /// makes the FFI handle sound to alias. The borrow checker also enforces
+    /// here that `KsealCore: Sync` (otherwise `thread::scope` would reject the
+    /// shared reference).
+    #[test]
+    fn concurrent_reads_during_reload_are_sound() {
+        let sk = SigningKey::from_bytes(&[1u8; 32]);
+        let core = core_with(&sk);
+        let signed = signed_policy(&sk);
+        std::thread::scope(|s| {
+            // Writer: repeatedly reload the (monotonic, same-version) config.
+            s.spawn(|| {
+                for _ in 0..200 {
+                    // Same version reloads are accepted (>= cached version).
+                    let _ = core.load_config_at(&signed, 1_000);
+                }
+            });
+            // Readers: evaluate risk and build/compress telemetry concurrently.
+            for _ in 0..4 {
+                s.spawn(|| {
+                    for _ in 0..200 {
+                        let _ = core.evaluate_risk(RiskBitset::ROOT | RiskBitset::DEBUGGER);
+                        let _ = core.trust_level_for(RiskBitset::ROOT);
+                        let _ = core.has_policy();
+                    }
+                });
+            }
+        });
+        // After the storm a policy is active and scoring uses its weights.
+        assert!(core.has_policy());
+        assert_eq!(core.evaluate_risk(RiskBitset::ROOT).score, 25);
+    }
+
+    /// `KsealCore` must be `Send + Sync` so the FFI handle can be shared across
+    /// threads (the mobile SDKs hand the same pointer to concurrent callers).
+    #[test]
+    fn core_is_send_and_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<KsealCore>();
+    }
+}
