@@ -32,6 +32,7 @@ package config
 import (
 	"crypto/ed25519"
 	"encoding/binary"
+	"math"
 
 	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
 )
@@ -44,11 +45,17 @@ const SignedConfigDomain = "kseal/v1/signed-config"
 
 // pushLP appends a 4-byte big-endian length prefix followed by field.
 //
-// The length prefix is a uint32; callers must keep each field at or below
-// math.MaxUint32 bytes. Every real field (the 22-byte domain, key_id, and the
-// serialized config bytes) is orders of magnitude smaller, so the cast cannot
-// truncate in practice — mirroring the debug_assert guard on the Rust side.
+// The length prefix is a uint32, so a field longer than math.MaxUint32 bytes
+// would truncate the prefix and silently diverge from the peer's preimage,
+// breaking cross-platform verification. Every real field (the 22-byte domain,
+// key_id, and the serialized config bytes) is orders of magnitude smaller, so
+// this is structurally impossible with well-formed input; we still panic rather
+// than emit a corrupt signature, the fail-loud analogue of the Rust side's
+// debug_assert guard.
 func pushLP(buf []byte, field []byte) []byte {
+	if uint64(len(field)) > math.MaxUint32 {
+		panic("kseal/config: length-prefixed field exceeds u32 prefix")
+	}
 	var prefix [4]byte
 	binary.BigEndian.PutUint32(prefix[:], uint32(len(field)))
 	buf = append(buf, prefix[:]...)
@@ -82,6 +89,17 @@ func SignConfigEnvelope(priv ed25519.PrivateKey, version, ttlSeconds int64, keyI
 // VerifyConfigEnvelope reports whether signature is a valid Ed25519 signature
 // by pub over the canonical envelope preimage. It returns false (never panics)
 // for a malformed public key or signature length.
+//
+// Verification direction matters. In this architecture the server is the sole
+// signer and the Rust device core is the verifier, where it uses the stricter
+// verify_strict (rejects non-canonical points and a non-canonical scalar S).
+// This Go path uses stdlib ed25519.Verify (RFC 8032 cofactored), which is
+// correct here because the server's own ed25519.Sign always produces canonical
+// signatures — so any signature this package accepts, the device also accepts.
+// The asymmetry only matters if the direction were reversed (device-signed,
+// Go-verified): Go's more permissive check could then accept signatures the
+// device's verify_strict would reject. Do not verify externally-produced
+// signatures with this function without switching to a strict verifier.
 func VerifyConfigEnvelope(pub ed25519.PublicKey, version, ttlSeconds int64, keyID string, configBytes, signature []byte) bool {
 	if len(pub) != ed25519.PublicKeySize || len(signature) != ed25519.SignatureSize {
 		return false
@@ -93,6 +111,12 @@ func VerifyConfigEnvelope(pub ed25519.PublicKey, version, ttlSeconds int64, keyI
 // over (version, ttlSeconds, keyID, configBytes) and returns the proto the SDK
 // fetches from the CDN. This is the drop-in entry point for the control plane's
 // config signer.
+//
+// configBytes is retained by reference in the returned proto (standard protobuf
+// convention; no copy), and the signature is computed over its contents at call
+// time. The caller must not mutate configBytes afterwards, or the proto's bytes
+// would diverge from its signature and fail verification on device. Pass an
+// owned/immutable slice.
 func SignConfig(priv ed25519.PrivateKey, version, ttlSeconds int64, keyID string, configBytes []byte) *ksealv1.SignedConfig {
 	return &ksealv1.SignedConfig{
 		ConfigBytes: configBytes,
