@@ -69,6 +69,8 @@ func SignedConfigPreimage(version, ttlSeconds int64, keyID string, configBytes [
 	// 4 + len(DOMAIN) + 8 + 8 + 4 + len(keyID) + 4 + len(configBytes).
 	buf := make([]byte, 0, 4+len(SignedConfigDomain)+8+8+4+len(keyID)+4+len(configBytes))
 	buf = pushLP(buf, []byte(SignedConfigDomain))
+	// uint64(int64) preserves the two's-complement bit pattern for all values
+	// (incl. negatives), so these bytes are identical to Rust's i64::to_be_bytes.
 	var scalar [8]byte
 	binary.BigEndian.PutUint64(scalar[:], uint64(version))
 	buf = append(buf, scalar[:]...)
