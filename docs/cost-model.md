@@ -115,12 +115,20 @@ gap versus good design.
 |---|---|
 | **Ingest bandwidth** | `≈ $0` (ingress free); compressed wire = `daily_raw / 4` |
 | **Compute** | `max(HA_floor, ceil(peak_eps / 2000)) × $30`, `HA_floor = 4 vCPU` |
-| **Streaming (Kafka)** | `$300 + (daily_raw/4 × buffer_days) × $0.10`, `buffer_days = 3` |
+| **Streaming (Kafka)** | `$300 + (daily_raw/4 × buffer_days) × $0.10 + throughput_tier`, `buffer_days = 3` |
 | **Hot storage (ClickHouse)** | `(daily_raw × hot_days / 8) × 1.5 × $0.10`, `hot_days = 30` |
 | **Cold storage (S3)** | `(daily_raw / 4 × cold_days) × $0.0125`, `cold_days = 365` |
 | **CDN config egress** | `DAU × eff_cfg_bytes × $0.05`, `eff_cfg_bytes ≈ 2 KB` (304-dominated) |
 | **KMS** | key rotation + envelope ops only (token signing done in-process with rotated keys) — low |
 | **Redis sessions** | `peak_sessions × 300 B × $35/GB-mo` |
+
+The streaming **`throughput_tier`** term captures broker/partition scaling once
+sustained throughput outgrows the baseline cluster: `+$200 per full 30k peak eps
+above 30k`, i.e. `throughput_tier = floor(peak_eps / 30000) × $200`. It is `$0`
+for every row except **naive 300M** (peak ≈ 62.5k eps → one tier → `+$200`),
+which is why that cell is `$367.50 + $200 ≈ $568` rather than the floor-only
+`$367.50`. All other cells sit at the $300 floor plus negligible buffered
+storage.
 
 Two design choices keep several lines near-floor regardless of event volume:
 
