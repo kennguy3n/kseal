@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package kseal.v1;
+
+import "kseal/v1/config.proto";
+
+option go_package = "github.com/kennguy3n/kseal/server/gen/kseal/v1;ksealv1";
+
+// ConfigService delivers signed, versioned, cacheable policy bundles.
+service ConfigService {
+  // GetConfig returns the signed config for an (tenant, app, platform).
+  rpc GetConfig(ConfigRequest) returns (ConfigResponse);
+  // GetPolicy returns the raw active policy for tooling/inspection.
+  rpc GetPolicy(PolicyRequest) returns (PolicyResponse);
+}

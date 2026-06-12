@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package kseal.v1;
+
+import "kseal/v1/telemetry.proto";
+
+option go_package = "github.com/kennguy3n/kseal/server/gen/kseal/v1;ksealv1";
+
+// SubmitTelemetryRequest carries a zstd-compressed, serialized TelemetryBatch.
+// The batch is kept opaque on the wire so the edge can reject over-quota or
+// malformed payloads before fully decoding them.
+message SubmitTelemetryRequest {
+  string tenant_id = 1;
+  string app_id = 2;
+  // zstd-compressed serialized TelemetryBatch.
+  bytes compressed_batch = 3;
+  Compression compression = 4;
+  string compression_dictionary_id = 5;
+}
+
+// SubmitTelemetryResponse reports how many events were accepted vs rejected.
+message SubmitTelemetryResponse {
+  int32 accepted = 1;
+  int32 rejected = 2;
+  // Reason when the whole batch was rejected (e.g. quota, malformed).
+  string rejection_reason = 3;
+  bool quota_exceeded = 4;
+}

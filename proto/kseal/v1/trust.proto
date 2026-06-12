@@ -1,0 +1,86 @@
+syntax = "proto3";
+
+package kseal.v1;
+
+import "kseal/v1/common.proto";
+
+option go_package = "github.com/kennguy3n/kseal/server/gen/kseal/v1;ksealv1";
+
+// NonceRequest asks the trust service for a fresh single-use challenge.
+message NonceRequest {
+  string tenant_id = 1;
+  string app_id = 2;
+  Platform platform = 3;
+}
+
+// NonceResponse returns an opaque nonce and its expiry.
+message NonceResponse {
+  bytes nonce = 1;
+  int64 expires_at = 2;
+}
+
+// AttestationRequest carries the platform attestation token plus the locally
+// observed risk state. The server verifies the token, fuses risk, and mints a
+// trust token bound to this instance, build, and policy.
+message AttestationRequest {
+  string tenant_id = 1;
+  string app_id = 2;
+  string build_hash = 3;
+  string policy_hash = 4;
+  uint64 risk_bitset = 5;
+  bytes nonce = 6;
+  bytes platform_attestation_token = 7;
+  Platform platform = 8;
+  // Stable per-install identifier (opaque); used to bind the session.
+  string instance_id = 9;
+}
+
+// AttestationResponse returns the minted trust token or a rejection.
+message AttestationResponse {
+  TrustToken trust_token = 1;
+  // Compact signed token bytes for the SDK to attach to subsequent requests.
+  bytes signed_token = 2;
+  bool accepted = 3;
+  string rejection_reason = 4;
+}
+
+// TrustToken is the short-lived capability granted to a verified instance.
+message TrustToken {
+  string token_id = 1;
+  string tenant_id = 2;
+  string app_id = 3;
+  string build_hash = 4;
+  // Capability scopes this token authorizes (e.g. "api:read", "api:write").
+  repeated string capability_scope = 5;
+  int64 ttl_seconds = 6;
+  TrustLevel risk_level = 7;
+  int64 issued_at = 8;
+  int64 expires_at = 9;
+  string policy_hash = 10;
+  // Checks the SDK must satisfy before the next refresh (risk-driven).
+  repeated EventType required_next_checks = 11;
+}
+
+// RequestProof is the per-request signature binding a request to a trust token.
+message RequestProof {
+  string trust_token_id = 1;
+  // Hash of the canonicalized request the proof authorizes.
+  bytes request_hash = 2;
+  bytes nonce = 3;
+  // Instance signature over (token_id || request_hash || nonce || seq).
+  bytes app_instance_signature = 4;
+  // Monotonic counter for anti-replay; must strictly increase per token.
+  int64 monotonic_sequence = 5;
+}
+
+// RequestProofResult is the server's decision after validating a RequestProof.
+message RequestProofResult {
+  enum Decision {
+    DECISION_UNSPECIFIED = 0;
+    DECISION_ALLOW = 1;
+    DECISION_STEP_UP = 2;
+    DECISION_DENY = 3;
+  }
+  Decision decision = 1;
+  string reason = 2;
+}

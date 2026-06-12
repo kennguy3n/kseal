@@ -1,0 +1,17 @@
+[package]
+name = "kseal-ffi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "C ABI FFI exports for the kseal trust core (Android NDK + iOS)."
+
+[lib]
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[dependencies]
+kseal-core = { path = "../kseal-core" }
+
+[build-dependencies]
+cbindgen = "0.27"

@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package kseal.v1;
+
+import "kseal/v1/registry.proto";
+
+option go_package = "github.com/kennguy3n/kseal/server/gen/kseal/v1;ksealv1";
+
+// RegistryService is the control-plane CRUD surface for tenants, apps, builds,
+// policies, and protection profiles. Every RPC is tenant-scoped and enforces
+// isolation at the service and storage layers.
+service RegistryService {
+  rpc CreateTenant(CreateTenantRequest) returns (CreateTenantResponse);
+  rpc GetTenant(GetTenantRequest) returns (GetTenantResponse);
+  rpc ListTenants(ListTenantsRequest) returns (ListTenantsResponse);
+  rpc UpdateTenant(UpdateTenantRequest) returns (UpdateTenantResponse);
+
+  rpc CreateApp(CreateAppRequest) returns (CreateAppResponse);
+  rpc GetApp(GetAppRequest) returns (GetAppResponse);
+  rpc ListApps(ListAppsRequest) returns (ListAppsResponse);
+
+  rpc CreateBuild(CreateBuildRequest) returns (CreateBuildResponse);
+  rpc GetBuild(GetBuildRequest) returns (GetBuildResponse);
+  rpc ListBuilds(ListBuildsRequest) returns (ListBuildsResponse);
+
+  rpc CreatePolicy(CreatePolicyRequest) returns (CreatePolicyResponse);
+  rpc GetActivePolicy(GetActivePolicyRequest) returns (GetActivePolicyResponse);
+  rpc ListPolicies(ListPoliciesRequest) returns (ListPoliciesResponse);
+  rpc ActivatePolicy(ActivatePolicyRequest) returns (ActivatePolicyResponse);
+
+  rpc CreateProtectionProfile(CreateProtectionProfileRequest) returns (CreateProtectionProfileResponse);
+  rpc ListProtectionProfiles(ListProtectionProfilesRequest) returns (ListProtectionProfilesResponse);
+}

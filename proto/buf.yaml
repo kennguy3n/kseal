@@ -1,0 +1,17 @@
+version: v2
+modules:
+  - path: .
+lint:
+  use:
+    - STANDARD
+  except:
+    - PACKAGE_VERSION_SUFFIX
+    # The wire protocol intentionally names request/response messages by their
+    # domain concept (NonceRequest, AttestationRequest, RequestProof, ...) so
+    # the same messages can be shared and referenced from the SDK and docs.
+    - RPC_REQUEST_STANDARD_NAME
+    - RPC_RESPONSE_STANDARD_NAME
+    - RPC_REQUEST_RESPONSE_UNIQUE
+breaking:
+  use:
+    - FILE

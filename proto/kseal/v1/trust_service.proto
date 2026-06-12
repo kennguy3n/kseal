@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package kseal.v1;
+
+import "kseal/v1/trust.proto";
+
+option go_package = "github.com/kennguy3n/kseal/server/gen/kseal/v1;ksealv1";
+
+// TrustService runs in the data plane and owns the challenge -> attest -> token
+// -> signed-proof lifecycle. It holds no long-lived secrets beyond references
+// to the tenant signing keys it loads on demand.
+service TrustService {
+  // GetNonce issues a single-use challenge cached with a short TTL.
+  rpc GetNonce(NonceRequest) returns (NonceResponse);
+  // VerifyAttestation consumes the nonce, verifies the platform attestation,
+  // fuses risk signals, and mints a trust token.
+  rpc VerifyAttestation(AttestationRequest) returns (AttestationResponse);
+  // ValidateRequestProof checks a per-request proof against an active token.
+  rpc ValidateRequestProof(RequestProof) returns (RequestProofResult);
+}

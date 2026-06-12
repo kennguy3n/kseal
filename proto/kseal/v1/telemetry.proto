@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package kseal.v1;
+
+import "kseal/v1/common.proto";
+
+option go_package = "github.com/kennguy3n/kseal/server/gen/kseal/v1;ksealv1";
+
+// TelemetryEvent is a single privacy-minimized signal observation. It carries
+// no raw PII: identity is reduced to a tenant-scoped install-key hash and time
+// is coarsened to a bucket to prevent cross-tenant fingerprinting.
+message TelemetryEvent {
+  EventType event_type = 1;
+  // Packed risk signal bitfield (see RiskBitset).
+  uint64 risk_bits = 2;
+  Confidence confidence = 3;
+  string app_build_hash = 4;
+  string policy_hash = 5;
+  // HMAC of the per-install key, scoped to the tenant. Never the raw install id.
+  string tenant_scoped_install_key_hash = 6;
+  // Unix-millis truncated to a coarse bucket (e.g. hour) for k-anonymity.
+  int64 coarse_time_bucket = 7;
+  // Optional coarse geography; omitted when privacy policy disallows it.
+  optional string country_or_region = 8;
+}
+
+// Compression identifies how a TelemetryBatch payload was compressed.
+enum Compression {
+  COMPRESSION_UNSPECIFIED = 0;
+  COMPRESSION_NONE = 1;
+  COMPRESSION_ZSTD = 2;
+}
+
+// TelemetryBatch is the unit submitted to the ingest service. The wire form is
+// the serialized batch compressed with zstd; this message describes the
+// decompressed contents plus metadata needed to decode it.
+message TelemetryBatch {
+  repeated TelemetryEvent events = 1;
+  string sdk_version = 2;
+  Compression compression = 3;
+  // Identifier of the zstd dictionary used, if any (for shared-dict decode).
+  string compression_dictionary_id = 4;
+  Platform platform = 5;
+}

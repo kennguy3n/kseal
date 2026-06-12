@@ -1,0 +1,79 @@
+syntax = "proto3";
+
+package kseal.v1;
+
+option go_package = "github.com/kennguy3n/kseal/server/gen/kseal/v1;ksealv1";
+
+// Platform identifies the device operating system family.
+enum Platform {
+  PLATFORM_UNSPECIFIED = 0;
+  PLATFORM_ANDROID = 1;
+  PLATFORM_IOS = 2;
+}
+
+// Confidence expresses how strongly a signal or decision is supported.
+enum Confidence {
+  CONFIDENCE_UNSPECIFIED = 0;
+  CONFIDENCE_LOW = 1;
+  CONFIDENCE_MEDIUM = 2;
+  CONFIDENCE_HIGH = 3;
+}
+
+// TrustLevel is the fused trust classification for an app instance.
+enum TrustLevel {
+  TRUST_LEVEL_UNSPECIFIED = 0;
+  TRUST_LEVEL_TRUSTED = 1;
+  TRUST_LEVEL_LOW_RISK = 2;
+  TRUST_LEVEL_MEDIUM_RISK = 3;
+  TRUST_LEVEL_HIGH_RISK = 4;
+  TRUST_LEVEL_CRITICAL = 5;
+}
+
+// EventType enumerates the kinds of telemetry events emitted by the SDK.
+enum EventType {
+  EVENT_TYPE_UNSPECIFIED = 0;
+  EVENT_TYPE_RUNTIME_TAMPER = 1;
+  EVENT_TYPE_DEBUGGER = 2;
+  EVENT_TYPE_ROOT_RISK = 3;
+  EVENT_TYPE_ATTESTATION_FAIL = 4;
+  EVENT_TYPE_NETWORK_MITM = 5;
+  EVENT_TYPE_POLICY_DECISION = 6;
+  EVENT_TYPE_HOOKING_DETECTED = 7;
+  EVENT_TYPE_APP_INTEGRITY_FAIL = 8;
+  EVENT_TYPE_ENVIRONMENT_RISK = 9;
+}
+
+// EnforcementMode is the server-side response posture for a policy.
+enum EnforcementMode {
+  ENFORCEMENT_MODE_UNSPECIFIED = 0;
+  ENFORCEMENT_MODE_OBSERVE = 1;
+  ENFORCEMENT_MODE_STEP_UP = 2;
+  ENFORCEMENT_MODE_BLOCK = 3;
+}
+
+// TenantId is the primary isolation boundary across the platform.
+message TenantId {
+  string value = 1;
+}
+
+// AppId identifies a registered application within a tenant.
+message AppId {
+  string value = 1;
+}
+
+// BuildHash is the content hash of a specific protected build.
+message BuildHash {
+  string value = 1;
+}
+
+// PolicyHash is the content hash of the active signed policy.
+message PolicyHash {
+  string value = 1;
+}
+
+// RiskBitset is a packed 64-bit bitfield of risk signals. Bit positions are
+// defined by the Rust core's RiskBitset and mirrored in docs. Packing keeps
+// telemetry compact (a single uint64 instead of repeated enums).
+message RiskBitset {
+  uint64 bits = 1;
+}
