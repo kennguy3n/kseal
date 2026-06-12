@@ -243,7 +243,11 @@ pub unsafe extern "C" fn kseal_core_free(handle: *mut CoreHandle) {
 ///   types are allowed (so a misconfigured guard never silently drops
 ///   everything). Unrecognized discriminants are skipped (not coerced to
 ///   `Unspecified`), so a stale/garbage value can neither smuggle in
-///   `Unspecified` nor mask the intended type.
+///   `Unspecified` nor mask the intended type. A non-empty list that contains
+///   *no* recognized discriminants is rejected with [`Status::ErrInvalid`]
+///   (the existing guard is left untouched) rather than silently collapsing to
+///   the empty allow-all set — that would invert the caller's restrictive
+///   intent and weaken privacy.
 /// - `allowed_risk_mask` is the set of risk bits permitted on exported events;
 ///   others are masked off. Pass `u64::MAX` (all-ones) for a truly permissive
 ///   mask.
@@ -279,7 +283,18 @@ pub unsafe extern "C" fn kseal_set_privacy_guard(
         // Skip unrecognized discriminants rather than coercing them to
         // `Unspecified`: a stale/wrong enum value from C must not silently add
         // `Unspecified` to the allow-set nor be mistaken for the intended type.
-        let types = raw.iter().filter_map(|&t| EventType::try_from(t).ok());
+        let types: Vec<EventType> = raw
+            .iter()
+            .filter_map(|&t| EventType::try_from(t).ok())
+            .collect();
+        // A non-empty allow-list that resolves to *no* recognized types is a
+        // caller error (e.g. a version-mismatched config sending only stale
+        // discriminants). Installing it would yield an empty => allow-all guard,
+        // inverting the caller's restrictive intent and weakening privacy, so
+        // reject and leave the current guard in place instead of failing open.
+        if allowed_event_types_len > 0 && types.is_empty() {
+            return Status::ErrInvalid;
+        }
         let guard = PrivacyGuard::new(
             types,
             RiskBitset::from_raw(allowed_risk_mask),
@@ -1081,6 +1096,44 @@ mod tests {
             // Only RootRisk survives; Unspecified was denied (not smuggled in).
             assert_eq!(batch.events.len(), 1);
             assert_eq!(batch.events[0].event_type, EventType::RootRisk as i32);
+
+            kseal_core_free(handle);
+        }
+    }
+
+    #[test]
+    fn set_privacy_guard_rejects_all_invalid_discriminants() {
+        unsafe {
+            let sk = signing_key();
+            let handle = new_core(&sk);
+
+            // A non-empty allow-list of only unrecognized discriminants must be
+            // rejected — not silently collapsed to an allow-all guard, which
+            // would invert the caller's restrictive intent.
+            let garbage = [999i32, 12_345i32];
+            assert_eq!(
+                kseal_set_privacy_guard(
+                    handle,
+                    garbage.as_ptr(),
+                    garbage.len(),
+                    RiskBitset::from_raw(u64::MAX).as_u64(),
+                    0,
+                ),
+                Status::ErrInvalid
+            );
+
+            // An explicitly empty list (len == 0) still means allow-all — that
+            // documented fail-open posture is unchanged.
+            assert_eq!(
+                kseal_set_privacy_guard(
+                    handle,
+                    std::ptr::null(),
+                    0,
+                    RiskBitset::from_raw(u64::MAX).as_u64(),
+                    0,
+                ),
+                Status::Ok
+            );
 
             kseal_core_free(handle);
         }
