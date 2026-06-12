@@ -7,7 +7,10 @@
 
 use std::os::raw::c_char;
 
-/// Returns a static, NUL-terminated C string with the core version.
+/// Returns a static, NUL-terminated C string with the FFI crate version.
+///
+/// `concat!` requires literal arguments, so this resolves to `kseal-ffi`'s own
+/// `CARGO_PKG_VERSION`; it shares the workspace version with `kseal-core`.
 ///
 /// # Safety
 /// The returned pointer is valid for the lifetime of the process and must not
