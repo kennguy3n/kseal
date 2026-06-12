@@ -21,26 +21,40 @@ fn find_proto_root(start: &Path) -> PathBuf {
     );
 }
 
+/// Collects every message-bearing `.proto` in `dir`, excluding the `*_service.proto`
+/// gRPC service definitions (server-side concerns the SDK doesn't compile). Returns
+/// a deterministically ordered list so codegen output is stable across builds.
+fn message_protos(dir: &Path) -> Vec<PathBuf> {
+    let mut protos: Vec<PathBuf> = std::fs::read_dir(dir)
+        .unwrap_or_else(|e| panic!("failed to read proto dir {}: {e}", dir.display()))
+        .filter_map(|entry| entry.ok().map(|e| e.path()))
+        .filter(|p| {
+            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+            name.ends_with(".proto") && !name.ends_with("_service.proto")
+        })
+        .collect();
+    protos.sort();
+    protos
+}
+
 fn main() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let proto_root = find_proto_root(&manifest_dir);
+    let proto_dir = proto_root.join("kseal/v1");
 
-    let protos = [
-        "kseal/v1/common.proto",
-        "kseal/v1/telemetry.proto",
-        "kseal/v1/trust.proto",
-        "kseal/v1/config.proto",
-        "kseal/v1/registry.proto",
-        "kseal/v1/webhook.proto",
-        "kseal/v1/ingest.proto",
-    ];
+    // Auto-discover message protos so adding a new schema needs no build.rs edit.
+    let proto_paths = message_protos(&proto_dir);
+    assert!(
+        !proto_paths.is_empty(),
+        "no message protos found under {}",
+        proto_dir.display()
+    );
 
-    let proto_paths: Vec<PathBuf> = protos.iter().map(|p| proto_root.join(p)).collect();
-
+    // Rerun if any individual proto changes, or if a file is added/removed.
     for p in &proto_paths {
         println!("cargo:rerun-if-changed={}", p.display());
     }
-    println!("cargo:rerun-if-changed={}", proto_root.display());
+    println!("cargo:rerun-if-changed={}", proto_dir.display());
 
     prost_build::Config::new()
         .compile_protos(&proto_paths, &[&proto_root])
