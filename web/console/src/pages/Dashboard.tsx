@@ -1,10 +1,8 @@
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import {
-  useApps,
   useTenantOverview,
   useTrustSessionStats,
-  useWebhooks,
 } from "../hooks/queries";
 import { Card, ErrorNotice, Spinner, Stat, Badge, EmptyState } from "../components/ui";
 import {
@@ -16,8 +14,6 @@ import {
 import { sortEventsByTimeDesc } from "../lib/events";
 
 export function DashboardPage() {
-  const apps = useApps();
-  const webhooks = useWebhooks();
   const overview = useTenantOverview();
   const stats = useTrustSessionStats();
 
@@ -39,12 +35,18 @@ export function DashboardPage() {
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
         <Stat
           label="Apps"
-          value={apps.isLoading ? "…" : apps.data ? apps.data.length : "—"}
+          value={
+            overview.isLoading ? "…" : overview.data ? overview.data.appCount : "—"
+          }
         />
         <Stat
           label="Webhooks"
           value={
-            webhooks.isLoading ? "…" : webhooks.data ? webhooks.data.length : "—"
+            overview.isLoading
+              ? "…"
+              : overview.data
+                ? overview.data.webhookCount
+                : "—"
           }
         />
         <Stat

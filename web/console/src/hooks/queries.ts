@@ -233,6 +233,8 @@ export function useRegisterWebhook() {
       }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.webhooks(tenantId) });
+      // The Dashboard reads webhookCount from the overview, so refresh it too.
+      void qc.invalidateQueries({ queryKey: queryKeys.overview(tenantId) });
     },
   });
 }
@@ -245,6 +247,8 @@ export function useDeleteWebhook() {
     mutationFn: (id: string) => clients.webhook.deleteWebhook({ tenantId, id }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.webhooks(tenantId) });
+      // The Dashboard reads webhookCount from the overview, so refresh it too.
+      void qc.invalidateQueries({ queryKey: queryKeys.overview(tenantId) });
     },
   });
 }
