@@ -114,7 +114,7 @@ gap versus good design.
 | Resource | Formula (monthly) |
 |---|---|
 | **Ingest bandwidth** | `≈ $0` (ingress free); compressed wire = `daily_raw / 4` |
-| **Compute** | `max(4, ceil(peak_eps / 2000 × H)) × $30`, `H = 1.5` (HA + burst headroom) |
+| **Compute** | `max(4, ceil((peak_eps / 2000) × H)) × $30`, `H = 1.5` (HA + burst headroom) |
 | **Streaming (Kafka)** | `$300 + (daily_raw/4 × buffer_days) × $0.10 + throughput_tier`, `buffer_days = 3` |
 | **Hot storage (ClickHouse)** | `(daily_raw × hot_days / 8) × 1.5 × $0.10`, `hot_days = 30` |
 | **Cold storage (S3)** | `(daily_raw / 4 × cold_days) × $0.0125`, `cold_days = 365` |
@@ -124,8 +124,8 @@ gap versus good design.
 
 The compute headroom factor `H = 1.5` provisions for HA spread + diurnal burst
 above average peak; `max(4, …)` enforces a 4-vCPU HA floor. Worked example —
-naive 100M (peak ≈ 20,833 eps): `ceil(20833 / 2000 × 1.5) = ceil(15.6) = 16 vCPU
-→ $480`.
+naive 100M (peak ≈ 20,833 eps): `ceil((20833 / 2000) × 1.5) = ceil(15.6) = 16
+vCPU → $480`.
 
 The streaming **`throughput_tier`** term captures broker/partition scaling once
 sustained throughput outgrows the baseline cluster, charged only on the excess
