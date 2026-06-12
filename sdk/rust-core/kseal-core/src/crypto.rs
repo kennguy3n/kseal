@@ -2,15 +2,27 @@
 //!
 //! All primitives delegate to vetted crates — `ed25519-dalek` for signatures,
 //! `hmac` + `sha2` for request proofs, and `getrandom` for nonces. Nothing is
-//! hand-rolled. The request-proof construction is the cross-platform contract:
+//! hand-rolled. The request-proof construction is the cross-platform contract,
+//! using domain separation and length-prefixed framing so the preimage is
+//! canonical (no field-boundary ambiguity from the variable-length `token_id`
+//! or `nonce`):
 //!
 //! ```text
-//! proof = HMAC-SHA256(key, token_id || request_hash || nonce || seq_be)
+//! DOMAIN = "kseal/v1/request-proof"   // ASCII, no NUL terminator
+//!
+//! preimage =
+//!     u32_be(len(DOMAIN))         || DOMAIN
+//!   || u32_be(len(token_id_utf8)) || token_id_utf8
+//!   || u32_be(len(request_hash))  || request_hash
+//!   || u32_be(len(nonce))         || nonce
+//!   || i64_be(monotonic_sequence)            // fixed 8 bytes, no length prefix
+//!
+//! tag = HMAC-SHA256(instance_key, preimage)
 //! ```
 //!
-//! where `seq_be` is the monotonic sequence as 8 big-endian bytes. The same
-//! byte ordering is recomputed server-side, so any deviation breaks
-//! verification.
+//! Every length prefix is a 4-byte big-endian `u32`; the trailing sequence is a
+//! fixed-width 8-byte big-endian `i64`. The Go server (S1) recomputes this exact
+//! byte layout to verify, so any deviation breaks verification.
 
 use crate::proto::RequestProof;
 use crate::{Error, Result};
@@ -77,14 +89,37 @@ pub fn generate_nonce(len: usize) -> Result<Vec<u8>> {
     Ok(buf)
 }
 
-/// Builds the canonical proof preimage `token_id || request_hash || nonce || seq_be`.
+/// Domain-separation tag for the request-proof preimage (ASCII, no NUL).
+const PROOF_DOMAIN: &[u8] = b"kseal/v1/request-proof";
+
+/// Appends a 4-byte big-endian length prefix followed by `field` bytes.
+fn push_lp(buf: &mut Vec<u8>, field: &[u8]) {
+    buf.extend_from_slice(&(field.len() as u32).to_be_bytes());
+    buf.extend_from_slice(field);
+}
+
+/// Builds the canonical, domain-separated, length-prefixed proof preimage:
+///
+/// `u32_be(len(DOMAIN)) || DOMAIN || u32_be(len(token_id)) || token_id ||
+///  u32_be(len(request_hash)) || request_hash || u32_be(len(nonce)) || nonce ||
+///  i64_be(seq)`
+///
+/// The trailing sequence is a fixed-width 8-byte big-endian `i64` with no length
+/// prefix. See the [module docs](self) — the server mirrors this exactly.
 fn proof_preimage(token_id: &str, request_hash: &[u8], nonce: &[u8], seq: i64) -> Vec<u8> {
+    // 4 length-prefixed fields (4 bytes each) + their payloads + 8-byte seq.
     let mut msg = Vec::with_capacity(
-        token_id.len() + request_hash.len() + nonce.len() + core::mem::size_of::<i64>(),
+        4 * core::mem::size_of::<u32>()
+            + PROOF_DOMAIN.len()
+            + token_id.len()
+            + request_hash.len()
+            + nonce.len()
+            + core::mem::size_of::<i64>(),
     );
-    msg.extend_from_slice(token_id.as_bytes());
-    msg.extend_from_slice(request_hash);
-    msg.extend_from_slice(nonce);
+    push_lp(&mut msg, PROOF_DOMAIN);
+    push_lp(&mut msg, token_id.as_bytes());
+    push_lp(&mut msg, request_hash);
+    push_lp(&mut msg, nonce);
     msg.extend_from_slice(&seq.to_be_bytes());
     msg
 }
@@ -200,5 +235,56 @@ mod tests {
 
         // A different key fails.
         assert!(!verify_request_proof(b"other-key", &proof));
+    }
+
+    #[test]
+    fn proof_domain_is_exact() {
+        assert_eq!(PROOF_DOMAIN, b"kseal/v1/request-proof");
+        assert_eq!(PROOF_DOMAIN.len(), 22);
+    }
+
+    /// Golden cross-platform vector: the exact preimage byte layout for a fixed
+    /// input. The Go server (S1) MUST produce the identical bytes. Layout:
+    /// `u32_be(len)||DOMAIN || u32_be(len)||token_id || u32_be(len)||request_hash
+    ///  || u32_be(len)||nonce || i64_be(seq)`.
+    #[test]
+    fn proof_preimage_exact_byte_layout() {
+        // Fixed, easily-reproduced inputs.
+        let token_id = "tok"; // 3 bytes: 74 6f 6b
+        let request_hash = [0x01u8, 0x02, 0x03, 0x04]; // 4 bytes
+        let nonce = [0xAAu8, 0xBB]; // 2 bytes
+        let seq: i64 = 1;
+
+        let mut expected = Vec::new();
+        // u32_be(22) || "kseal/v1/request-proof"
+        expected.extend_from_slice(&[0x00, 0x00, 0x00, 0x16]);
+        expected.extend_from_slice(b"kseal/v1/request-proof");
+        // u32_be(3) || "tok"
+        expected.extend_from_slice(&[0x00, 0x00, 0x00, 0x03]);
+        expected.extend_from_slice(&[0x74, 0x6f, 0x6b]);
+        // u32_be(4) || 01 02 03 04
+        expected.extend_from_slice(&[0x00, 0x00, 0x00, 0x04]);
+        expected.extend_from_slice(&[0x01, 0x02, 0x03, 0x04]);
+        // u32_be(2) || AA BB
+        expected.extend_from_slice(&[0x00, 0x00, 0x00, 0x02]);
+        expected.extend_from_slice(&[0xAA, 0xBB]);
+        // i64_be(1)
+        expected.extend_from_slice(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01]);
+
+        let actual = proof_preimage(token_id, &request_hash, &nonce, seq);
+        assert_eq!(actual, expected, "preimage byte layout must match the spec");
+
+        // Total length = 4*(4 len prefixes) + 22 + 3 + 4 + 2 + 8.
+        assert_eq!(actual.len(), 16 + 22 + 3 + 4 + 2 + 8);
+
+        // Golden HMAC tag over this preimage with a fixed key, for S1 to match.
+        let key = b"kseal-test-instance-key";
+        let tag = hmac_sha256(key, &actual);
+        let tag_hex: String = tag.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(
+            tag_hex,
+            "718bb06df45dc4bbc5bf483bd65acf7609429966adba8baff66fa965857ebd0d",
+            "golden HMAC tag for the fixed vector"
+        );
     }
 }
