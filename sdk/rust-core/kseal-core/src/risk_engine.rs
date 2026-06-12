@@ -112,11 +112,18 @@ impl RiskEngine {
     }
 
     /// Appends an observation, evicting the oldest once the window is full.
+    ///
+    /// Appends *before* trimming so the window is never left under-filled by a
+    /// partial update: if anything interrupted the call between the two steps
+    /// the window would only ever be transiently one entry *over* capacity
+    /// (self-corrected on the next call), which can only widen
+    /// [`window_union`](Self::window_union) and therefore never fabricates a
+    /// spurious "emerged" anomaly.
     fn record(&mut self, bits: RiskBitset) {
-        if self.history.len() == self.window {
+        self.history.push_back(bits);
+        while self.history.len() > self.window {
             self.history.pop_front();
         }
-        self.history.push_back(bits);
     }
 }
 

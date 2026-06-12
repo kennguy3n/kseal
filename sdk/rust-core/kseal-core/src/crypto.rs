@@ -93,7 +93,17 @@ pub fn generate_nonce(len: usize) -> Result<Vec<u8>> {
 const PROOF_DOMAIN: &[u8] = b"kseal/v1/request-proof";
 
 /// Appends a 4-byte big-endian length prefix followed by `field` bytes.
+///
+/// The length prefix is a `u32`, so `field` must be at most `u32::MAX` bytes;
+/// a longer field would truncate the prefix and silently diverge from the
+/// server's preimage. Every real field (22-byte domain, token id, 32-byte
+/// hash, 16-byte nonce) is orders of magnitude under that, so this is purely an
+/// explicit-contract guard, debug-asserted at zero release cost.
 fn push_lp(buf: &mut Vec<u8>, field: &[u8]) {
+    debug_assert!(
+        field.len() <= u32::MAX as usize,
+        "request-proof field exceeds u32 length prefix",
+    );
     buf.extend_from_slice(&(field.len() as u32).to_be_bytes());
     buf.extend_from_slice(field);
 }
