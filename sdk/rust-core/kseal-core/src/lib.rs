@@ -40,12 +40,12 @@ pub mod transport;
 
 use crate::config::ConfigCache;
 use crate::events::{EventBatch, EventInput, PrivacyGuard};
-use crate::policy::Policy;
-use crate::proto::{Compression, Platform, RequestProof, SignedConfig, TelemetryEvent};
+use crate::proto::{Compression, Platform, RequestProof, SignedConfig, TelemetryEvent, TrustLevel};
 use crate::risk::{RiskBitset, RiskScore};
 use crate::risk_engine::{FusedRisk, RiskEngine};
 use prost::Message;
 use std::collections::HashMap;
+use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 /// Crate-wide error type.
 #[derive(Debug, thiserror::Error)]
@@ -131,11 +131,46 @@ impl Default for CoreConfig {
 /// The device-side trust core: holds the verified policy cache and the local
 /// risk engine, and exposes the operations consumed by the platform SDKs (and,
 /// via `kseal-ffi`, by C callers).
-#[derive(Debug, Clone)]
+///
+/// # Thread-safety
+///
+/// `KsealCore` is internally synchronized and therefore `Sync`: every method
+/// takes `&self`, including the mutating ones ([`load_config`](Self::load_config),
+/// [`set_privacy_guard`](Self::set_privacy_guard),
+/// [`fuse_risk`](Self::fuse_risk)). The mutable runtime state lives behind a
+/// [`RwLock`] ([`CoreState`]) so a single shared instance — e.g. the one behind
+/// the C ABI's opaque handle — can be read concurrently from many threads while
+/// a config reload happens on another, with no external locking and no data
+/// race. Reads take a shared lock; the three writers take the exclusive lock,
+/// which also serializes concurrent reloads.
+///
+/// `RwLock` (rather than `ArcSwap`/lock-free snapshots) is deliberate: it adds
+/// no dependency, correctly serializes the rare writers, and lets the stateful
+/// anomaly-detection window in [`fuse_risk`](Self::fuse_risk) be updated
+/// in place under the write lock. The per-request hot paths stay cheap — an
+/// uncontended read lock on the mobile single-reader workload — and
+/// [`generate_request_proof`](Self::generate_request_proof) reads only immutable
+/// config, so it takes no lock at all.
+#[derive(Debug)]
 pub struct KsealCore {
+    /// Immutable per-instance configuration (verification key, proof key, SDK
+    /// version, platform, batch/zstd parameters). The privacy guard is mutable
+    /// and lives in [`CoreState`] instead; the copy here is only the seed.
     config: CoreConfig,
+    /// Mutable runtime state behind a lock so the core is `Sync` and the FFI
+    /// handle can be shared across threads. See the type-level docs.
+    state: RwLock<CoreState>,
+}
+
+/// Mutable runtime state of a [`KsealCore`], guarded by its `RwLock`.
+#[derive(Debug)]
+struct CoreState {
+    /// TTL-bounded cache of the active verified config (rollback-protected).
     cache: ConfigCache,
+    /// Local fusion engine; `None` until a config is loaded.
     engine: Option<RiskEngine>,
+    /// Active data-minimization guard applied when batching telemetry.
+    privacy_guard: PrivacyGuard,
 }
 
 impl KsealCore {
@@ -143,11 +178,32 @@ impl KsealCore {
     /// [`KsealCore::load_config`] succeeds.
     #[must_use]
     pub fn new(config: CoreConfig) -> Self {
+        let privacy_guard = config.privacy_guard.clone();
         Self {
             config,
-            cache: ConfigCache::new(),
-            engine: None,
+            state: RwLock::new(CoreState {
+                cache: ConfigCache::new(),
+                engine: None,
+                privacy_guard,
+            }),
         }
+    }
+
+    /// Acquires the shared (read) lock over [`CoreState`], recovering from a
+    /// poisoned lock.
+    ///
+    /// Poisoning would only occur if a thread panicked mid-critical-section;
+    /// our sections are short and leave the state consistent, and the FFI
+    /// boundary already converts panics into an error code, so recovering keeps
+    /// a security-critical core usable rather than wedging every later call.
+    fn read_state(&self) -> RwLockReadGuard<'_, CoreState> {
+        self.state.read().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Acquires the exclusive (write) lock over [`CoreState`], recovering from
+    /// a poisoned lock (see [`read_state`](Self::read_state)).
+    fn write_state(&self) -> RwLockWriteGuard<'_, CoreState> {
+        self.state.write().unwrap_or_else(|e| e.into_inner())
     }
 
     /// Installs the tenant's [`PrivacyGuard`], replacing the one set at
@@ -156,8 +212,10 @@ impl KsealCore {
     /// `kseal_core_new` (FFI) starts with [`PrivacyGuard::permissive`]; the
     /// platform SDK calls this once the tenant's privacy policy is known so the
     /// data-minimization rules actually apply to telemetry batched afterward.
-    pub fn set_privacy_guard(&mut self, guard: PrivacyGuard) {
-        self.config.privacy_guard = guard;
+    /// Takes `&self` (interior mutability) so it is sound to call on a shared
+    /// instance concurrently with reads from other threads.
+    pub fn set_privacy_guard(&self, guard: PrivacyGuard) {
+        self.write_state().privacy_guard = guard;
     }
 
     /// Verifies and installs a signed config from its protobuf bytes, stamped
@@ -165,7 +223,7 @@ impl KsealCore {
     ///
     /// # Errors
     /// Propagates decode/verification/rollback failures.
-    pub fn load_config(&mut self, signed_bytes: &[u8]) -> Result<()> {
+    pub fn load_config(&self, signed_bytes: &[u8]) -> Result<()> {
         self.load_config_at(signed_bytes, now_unix_secs())
     }
 
@@ -174,15 +232,17 @@ impl KsealCore {
     ///
     /// # Errors
     /// Propagates decode/verification/rollback failures.
-    pub fn load_config_at(&mut self, signed_bytes: &[u8], now: i64) -> Result<()> {
+    pub fn load_config_at(&self, signed_bytes: &[u8], now: i64) -> Result<()> {
         let signed = SignedConfig::decode(signed_bytes)?;
-        let cached = self
+        let mut state = self.write_state();
+        let policy = state
             .cache
-            .update(&signed, &self.config.config_public_key, now)?;
-        let policy = cached.policy.clone();
-        match self.engine.as_mut() {
+            .update(&signed, &self.config.config_public_key, now)?
+            .policy
+            .clone();
+        match state.engine.as_mut() {
             Some(engine) => engine.set_policy(policy),
-            None => self.engine = Some(RiskEngine::new(policy, self.config.risk_window)),
+            None => state.engine = Some(RiskEngine::new(policy, self.config.risk_window)),
         }
         Ok(())
     }
@@ -190,20 +250,14 @@ impl KsealCore {
     /// Whether a verified policy is currently active.
     #[must_use]
     pub fn has_policy(&self) -> bool {
-        self.engine.is_some()
-    }
-
-    /// The active policy, if a config has been loaded.
-    #[must_use]
-    pub fn policy(&self) -> Option<&Policy> {
-        self.engine.as_ref().map(RiskEngine::policy)
+        self.read_state().engine.is_some()
     }
 
     /// Scores `signals` against the active policy's weights. Without a loaded
     /// policy, default per-signal weights apply (and no module filtering).
     #[must_use]
     pub fn evaluate_risk(&self, signals: RiskBitset) -> RiskScore {
-        match self.engine.as_ref() {
+        match self.read_state().engine.as_ref() {
             Some(engine) => {
                 let p = engine.policy();
                 RiskScore::compute(p.filter_signals(signals), &p.config().signal_weights)
@@ -212,10 +266,33 @@ impl KsealCore {
         }
     }
 
+    /// Maps `signals` to the composite [`TrustLevel`] under the active policy's
+    /// thresholds, or [`TrustLevel::Unspecified`] when no config is loaded.
+    ///
+    /// Unlike [`evaluate_risk`](Self::evaluate_risk), which always yields a
+    /// numeric score (default weights when unconfigured), a trust *level*
+    /// requires configured thresholds, so it reports `Unspecified` until a
+    /// policy is active.
+    #[must_use]
+    pub fn trust_level_for(&self, signals: RiskBitset) -> TrustLevel {
+        match self.read_state().engine.as_ref() {
+            Some(engine) => {
+                let p = engine.policy();
+                let score =
+                    RiskScore::compute(p.filter_signals(signals), &p.config().signal_weights).score;
+                p.trust_level_for_score(score)
+            }
+            None => TrustLevel::Unspecified,
+        }
+    }
+
     /// Fuses `signals` through the local risk engine (Phase 2). Returns `None`
     /// until a policy is loaded.
-    pub fn fuse_risk(&mut self, signals: RiskBitset) -> Option<FusedRisk> {
-        self.engine.as_mut().map(|e| e.fuse(signals))
+    ///
+    /// Takes `&self` (the sliding anomaly-detection window is updated under the
+    /// exclusive lock), so it is sound on a shared instance.
+    pub fn fuse_risk(&self, signals: RiskBitset) -> Option<FusedRisk> {
+        self.write_state().engine.as_mut().map(|e| e.fuse(signals))
     }
 
     /// Builds a [`TelemetryEvent`] from raw signals. Field-level minimization
@@ -232,8 +309,11 @@ impl KsealCore {
     /// # Errors
     /// [`Error::Transport`] if compression fails.
     pub fn batch_and_compress(&self, events: Vec<TelemetryEvent>) -> Result<Vec<u8>> {
+        // Snapshot the guard under the read lock, then release it before the
+        // (relatively slow) zstd compression so reloads aren't blocked on it.
+        let privacy_guard = self.read_state().privacy_guard.clone();
         let mut batch = EventBatch::new(
-            self.config.privacy_guard.clone(),
+            privacy_guard,
             self.config.max_batch_events,
             self.config.sdk_version.clone(),
             self.config.platform,
@@ -316,7 +396,7 @@ mod tests {
     #[test]
     fn load_config_activates_policy() {
         let sk = SigningKey::from_bytes(&[1u8; 32]);
-        let mut core = core_with(&sk);
+        let core = core_with(&sk);
         assert!(!core.has_policy());
         core.load_config_at(&signed_policy(&sk), 100).unwrap();
         assert!(core.has_policy());
@@ -328,7 +408,7 @@ mod tests {
     fn load_config_rejects_bad_key() {
         let sk = SigningKey::from_bytes(&[1u8; 32]);
         let wrong = SigningKey::from_bytes(&[2u8; 32]);
-        let mut core = core_with(&wrong);
+        let core = core_with(&wrong);
         assert!(core.load_config_at(&signed_policy(&sk), 0).is_err());
     }
 
@@ -355,7 +435,7 @@ mod tests {
     #[test]
     fn set_privacy_guard_replaces_default() {
         let sk = SigningKey::from_bytes(&[1u8; 32]);
-        let mut core = core_with(&sk);
+        let core = core_with(&sk);
         // Install a guard that only permits RootRisk events.
         core.set_privacy_guard(PrivacyGuard::new(
             [EventType::RootRisk],
@@ -404,5 +484,47 @@ mod tests {
             &sig,
             sk.verifying_key().as_bytes()
         ));
+    }
+
+    /// A single shared `&KsealCore` is read from many threads while another
+    /// thread reloads config — exercising the internal synchronization that
+    /// makes the FFI handle sound to alias. The borrow checker also enforces
+    /// here that `KsealCore: Sync` (otherwise `thread::scope` would reject the
+    /// shared reference).
+    #[test]
+    fn concurrent_reads_during_reload_are_sound() {
+        let sk = SigningKey::from_bytes(&[1u8; 32]);
+        let core = core_with(&sk);
+        let signed = signed_policy(&sk);
+        std::thread::scope(|s| {
+            // Writer: repeatedly reload the (monotonic, same-version) config.
+            s.spawn(|| {
+                for _ in 0..200 {
+                    // Same version reloads are accepted (>= cached version).
+                    let _ = core.load_config_at(&signed, 1_000);
+                }
+            });
+            // Readers: evaluate risk and build/compress telemetry concurrently.
+            for _ in 0..4 {
+                s.spawn(|| {
+                    for _ in 0..200 {
+                        let _ = core.evaluate_risk(RiskBitset::ROOT | RiskBitset::DEBUGGER);
+                        let _ = core.trust_level_for(RiskBitset::ROOT);
+                        let _ = core.has_policy();
+                    }
+                });
+            }
+        });
+        // After the storm a policy is active and scoring uses its weights.
+        assert!(core.has_policy());
+        assert_eq!(core.evaluate_risk(RiskBitset::ROOT).score, 25);
+    }
+
+    /// `KsealCore` must be `Send + Sync` so the FFI handle can be shared across
+    /// threads (the mobile SDKs hand the same pointer to concurrent callers).
+    #[test]
+    fn core_is_send_and_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<KsealCore>();
     }
 }

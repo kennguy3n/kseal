@@ -110,15 +110,20 @@ impl RiskBitset {
     /// `weights` maps a bit *index* (0-based) to its weight; bits without an
     /// entry contribute [`DEFAULT_SIGNAL_WEIGHT`]. Addition saturates so a
     /// hostile policy can never overflow the score.
+    ///
+    /// Iterates only the *set* bits (clearing the lowest set bit each step via
+    /// `bits & (bits - 1)`) rather than scanning all 64 positions, so the cost
+    /// scales with the number of active signals — typically a handful — on this
+    /// per-evaluation hot path.
     #[must_use]
     pub fn weighted_score(self, weights: &HashMap<u32, u32>) -> u32 {
-        let bits = self.bits();
+        let mut bits = self.bits();
         let mut score: u32 = 0;
-        for idx in 0..64u32 {
-            if bits & (1u64 << idx) != 0 {
-                let w = weights.get(&idx).copied().unwrap_or(DEFAULT_SIGNAL_WEIGHT);
-                score = score.saturating_add(w);
-            }
+        while bits != 0 {
+            let idx = bits.trailing_zeros();
+            let w = weights.get(&idx).copied().unwrap_or(DEFAULT_SIGNAL_WEIGHT);
+            score = score.saturating_add(w);
+            bits &= bits - 1; // clear the lowest set bit
         }
         score
     }

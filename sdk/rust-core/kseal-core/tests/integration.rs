@@ -318,7 +318,7 @@ fn config_cache_rejects_rollback_and_tracks_refresh() {
 #[test]
 fn core_lifecycle_end_to_end() {
     let sk = SigningKey::from_bytes(&[21u8; 32]);
-    let mut core = KsealCore::new(CoreConfig {
+    let core = KsealCore::new(CoreConfig {
         config_public_key: sk.verifying_key().as_bytes().to_vec(),
         proof_key: b"proof-key".to_vec(),
         platform: Platform::Android,

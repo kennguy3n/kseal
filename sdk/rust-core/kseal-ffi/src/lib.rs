@@ -18,9 +18,7 @@
 //!   A null pointer with length 0 is treated as an empty slice.
 
 use kseal_core::events::{EventInput, PrivacyGuard};
-use kseal_core::proto::{
-    Confidence, EventType, Platform, RequestProof, TelemetryEvent, TrustLevel,
-};
+use kseal_core::proto::{Confidence, EventType, Platform, RequestProof, TelemetryEvent};
 use kseal_core::risk::RiskBitset;
 use kseal_core::{transport, CoreConfig, KsealCore};
 use prost::Message;
@@ -250,19 +248,22 @@ pub unsafe extern "C" fn kseal_core_free(handle: *mut CoreHandle) {
 /// - `allow_country` (nonzero = true) controls whether coarse geography is
 ///   retained.
 ///
+/// The core is internally synchronized, so this may be called on a handle
+/// shared with concurrent readers on other threads (`*const`, shared access).
+///
 /// # Safety
 /// `handle` must be valid; `allowed_event_types` must be valid for
 /// `allowed_event_types_len` `i32`s (or null with length 0).
 #[no_mangle]
 pub unsafe extern "C" fn kseal_set_privacy_guard(
-    handle: *mut CoreHandle,
+    handle: *const CoreHandle,
     allowed_event_types: *const i32,
     allowed_event_types_len: usize,
     allowed_risk_mask: u64,
     allow_country: i32,
 ) -> Status {
     ffi_catch(Status::ErrPanic, || {
-        let Some(handle) = handle.as_mut() else {
+        let Some(handle) = handle.as_ref() else {
             return Status::ErrNull;
         };
         if allowed_event_types.is_null() && allowed_event_types_len > 0 {
@@ -288,16 +289,21 @@ pub unsafe extern "C" fn kseal_set_privacy_guard(
 
 /// Verifies and installs a signed config from protobuf bytes.
 ///
+/// The core is internally synchronized: this reload takes the core's exclusive
+/// lock internally, so it is sound to call on a handle shared (`*const`) with
+/// concurrent readers (risk evaluation, proof generation) on other threads —
+/// no external locking by the caller is required.
+///
 /// # Safety
 /// `handle` must be valid; `bytes` must be valid for `len`.
 #[no_mangle]
 pub unsafe extern "C" fn kseal_load_config(
-    handle: *mut CoreHandle,
+    handle: *const CoreHandle,
     bytes: *const u8,
     len: usize,
 ) -> Status {
     ffi_catch(Status::ErrPanic, || {
-        let Some(handle) = handle.as_mut() else {
+        let Some(handle) = handle.as_ref() else {
             return Status::ErrNull;
         };
         let Some(slice) = as_slice(bytes, len) else {
@@ -341,9 +347,10 @@ pub unsafe extern "C" fn kseal_evaluate_risk(
     })
 }
 
-/// Returns the composite [`TrustLevel`] discriminant for `risk_bits` under the
-/// active policy thresholds, or [`TrustLevel::Unspecified`] (0) when no policy
-/// is loaded. Returns a negative [`Status`] value for a null handle.
+/// Returns the composite [`TrustLevel`](kseal_core::proto::TrustLevel)
+/// discriminant for `risk_bits` under the active policy thresholds, or
+/// `TrustLevel::Unspecified` (0) when no policy is loaded. Returns a negative
+/// [`Status`] value for a null handle.
 ///
 /// Note: unlike [`kseal_evaluate_risk`], which always returns a numeric score
 /// (using default weights when no policy is loaded), a trust *level* requires
@@ -361,13 +368,7 @@ pub unsafe extern "C" fn kseal_compute_risk_level(
         let Some(handle) = handle.as_ref() else {
             return Status::ErrNull as i32;
         };
-        let bits = RiskBitset::from_raw(risk_bits);
-        let score = handle.core.evaluate_risk(bits).score;
-        let level = match handle.core.policy() {
-            Some(p) => p.trust_level_for_score(score),
-            None => TrustLevel::Unspecified,
-        };
-        level as i32
+        handle.core.trust_level_for(RiskBitset::from_raw(risk_bits)) as i32
     })
 }
 
@@ -638,7 +639,7 @@ pub unsafe extern "C" fn kseal_buffer_free(buffer: Buffer) {
 mod tests {
     use super::*;
     use ed25519_dalek::{Signer, SigningKey};
-    use kseal_core::proto::{EnforcementMode, PolicyConfig, SignedConfig};
+    use kseal_core::proto::{EnforcementMode, PolicyConfig, SignedConfig, TrustLevel};
     use prost::Message;
     use std::collections::HashMap;
     use std::ffi::CString;
@@ -986,10 +987,72 @@ mod tests {
 
             // Null handle is reported, not a crash.
             assert_eq!(
-                kseal_set_privacy_guard(std::ptr::null_mut(), std::ptr::null(), 0, 0, 0),
+                kseal_set_privacy_guard(std::ptr::null(), std::ptr::null(), 0, 0, 0),
                 Status::ErrNull
             );
 
+            kseal_core_free(handle);
+        }
+    }
+
+    /// The same opaque handle is shared across threads — a config reload runs
+    /// on one thread while several others evaluate risk — mirroring how the
+    /// mobile SDKs use a single core. Because the core is internally
+    /// synchronized, the now-uniform shared (`*const`) access is sound without
+    /// the caller holding any lock. (Run under a sanitizer/Miri this also
+    /// exercises the absence of a data race.)
+    #[test]
+    fn shared_handle_concurrent_load_and_eval() {
+        unsafe {
+            let sk = signing_key();
+            let handle = new_core(&sk);
+            let cfg = signed_config_bytes(&sk);
+
+            // Raw pointers aren't `Send`; sharing the handle is sound here
+            // because the core synchronizes internally, so wrap it to move a
+            // copy into each thread.
+            #[derive(Clone, Copy)]
+            struct SharedHandle(*const CoreHandle);
+            unsafe impl Send for SharedHandle {}
+            unsafe impl Sync for SharedHandle {}
+            let shared = SharedHandle(handle);
+            let cfg_ref = &cfg;
+
+            std::thread::scope(|s| {
+                s.spawn(move || {
+                    let h = shared; // capture the whole `Send` wrapper, not its raw field
+                    for _ in 0..200 {
+                        let _ = kseal_load_config(h.0, cfg_ref.as_ptr(), cfg_ref.len());
+                    }
+                });
+                for _ in 0..4 {
+                    s.spawn(move || {
+                        let h = shared;
+                        let bits = (RiskBitset::ROOT | RiskBitset::DEBUGGER).as_u64();
+                        for _ in 0..200 {
+                            let mut score = 0u32;
+                            let mut conf = 0i32;
+                            let _ = kseal_evaluate_risk(h.0, bits, &mut score, &mut conf);
+                            let _ = kseal_compute_risk_level(h.0, bits);
+                        }
+                    });
+                }
+            });
+
+            // Config is loaded; a final evaluation reflects the policy weights
+            // (ROOT 25 + DEBUGGER 30 = 55).
+            let mut score = 0u32;
+            let mut conf = 0i32;
+            assert_eq!(
+                kseal_evaluate_risk(
+                    shared.0,
+                    (RiskBitset::ROOT | RiskBitset::DEBUGGER).as_u64(),
+                    &mut score,
+                    &mut conf,
+                ),
+                Status::Ok
+            );
+            assert_eq!(score, 55);
             kseal_core_free(handle);
         }
     }
