@@ -30,6 +30,11 @@ proto: ## Generate Go + Connect bindings from proto schemas.
 proto-lint: ## Lint protobuf schemas.
 	cd proto && buf lint
 
+.PHONY: proto-check
+proto-check: proto ## Verify committed generated bindings are up to date.
+	git diff --exit-code -- server/gen \
+		|| { echo "server/gen is stale; run 'make proto' and commit"; exit 1; }
+
 ## ---- build ----
 
 .PHONY: build-server

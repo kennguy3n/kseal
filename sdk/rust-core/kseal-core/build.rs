@@ -4,18 +4,26 @@
 //! under `proto/`. We only compile the message-bearing schemas (the SDK does
 //! not need the gRPC service definitions, which are server-side concerns).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+/// Walks up from `start` to find the ancestor that contains `proto/kseal/v1`,
+/// so the build doesn't depend on a fixed directory depth.
+fn find_proto_root(start: &Path) -> PathBuf {
+    for dir in start.ancestors() {
+        let candidate = dir.join("proto");
+        if candidate.join("kseal/v1/common.proto").is_file() {
+            return candidate;
+        }
+    }
+    panic!(
+        "could not locate the kseal `proto/` directory above {}",
+        start.display()
+    );
+}
 
 fn main() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    // kseal-core -> rust-core -> sdk -> repo root.
-    let repo_root = manifest_dir
-        .parent()
-        .and_then(|p| p.parent())
-        .and_then(|p| p.parent())
-        .expect("repo root")
-        .to_path_buf();
-    let proto_root = repo_root.join("proto");
+    let proto_root = find_proto_root(&manifest_dir);
 
     let protos = [
         "kseal/v1/common.proto",
