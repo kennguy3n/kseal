@@ -82,7 +82,10 @@ pub fn now_unix_secs() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
+        // Saturate rather than wrap: a clock past i64::MAX seconds (~year 2262)
+        // must never produce a negative timestamp, which would make every cached
+        // config look prematurely expired.
+        .map(|d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
         .unwrap_or(0)
 }
 

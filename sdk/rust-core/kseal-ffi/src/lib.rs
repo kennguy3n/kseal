@@ -241,7 +241,9 @@ pub unsafe extern "C" fn kseal_core_free(handle: *mut CoreHandle) {
 /// - `allowed_event_types` points to `allowed_event_types_len` [`EventType`]
 ///   discriminants permitted to leave the device; a length of 0 means *all*
 ///   types are allowed (so a misconfigured guard never silently drops
-///   everything).
+///   everything). Unrecognized discriminants are skipped (not coerced to
+///   `Unspecified`), so a stale/garbage value can neither smuggle in
+///   `Unspecified` nor mask the intended type.
 /// - `allowed_risk_mask` is the set of risk bits permitted on exported events;
 ///   others are masked off. Pass `u64::MAX` (all-ones) for a truly permissive
 ///   mask.
@@ -274,9 +276,10 @@ pub unsafe extern "C" fn kseal_set_privacy_guard(
         } else {
             std::slice::from_raw_parts(allowed_event_types, allowed_event_types_len)
         };
-        let types = raw
-            .iter()
-            .map(|&t| EventType::try_from(t).unwrap_or(EventType::Unspecified));
+        // Skip unrecognized discriminants rather than coercing them to
+        // `Unspecified`: a stale/wrong enum value from C must not silently add
+        // `Unspecified` to the allow-set nor be mistaken for the intended type.
+        let types = raw.iter().filter_map(|&t| EventType::try_from(t).ok());
         let guard = PrivacyGuard::new(
             types,
             RiskBitset::from_raw(allowed_risk_mask),
@@ -990,6 +993,94 @@ mod tests {
                 kseal_set_privacy_guard(std::ptr::null(), std::ptr::null(), 0, 0, 0),
                 Status::ErrNull
             );
+
+            kseal_core_free(handle);
+        }
+    }
+
+    #[test]
+    fn set_privacy_guard_skips_invalid_event_discriminants() {
+        unsafe {
+            let sk = signing_key();
+            let handle = new_core(&sk);
+
+            // Allow-list mixes a garbage discriminant with a valid one. The
+            // garbage value must be skipped (not coerced to `Unspecified`), so
+            // the effective allow-set is exactly {RootRisk} — `Unspecified`
+            // events stay denied.
+            let allowed = [999i32, EventType::RootRisk as i32];
+            assert_eq!(
+                kseal_set_privacy_guard(
+                    handle,
+                    allowed.as_ptr(),
+                    allowed.len(),
+                    RiskBitset::from_raw(u64::MAX).as_u64(),
+                    0,
+                ),
+                Status::Ok
+            );
+
+            let s = CString::new("x").unwrap();
+
+            // An `Unspecified`-typed event would only survive if the old
+            // map-to-`Unspecified` behavior had smuggled it into the allow-set.
+            let mut unspec_ev = Buffer::empty();
+            assert_eq!(
+                kseal_create_event(
+                    handle,
+                    EventType::Unspecified as i32,
+                    RiskBitset::ROOT.as_u64(),
+                    Confidence::Low as i32,
+                    s.as_ptr(),
+                    s.as_ptr(),
+                    s.as_ptr(),
+                    1_700_000_000,
+                    std::ptr::null(),
+                    &mut unspec_ev,
+                ),
+                Status::Ok
+            );
+            let unspec_bytes = take_buffer(unspec_ev);
+
+            // A RootRisk event must still survive (the valid discriminant applied).
+            let mut root_ev = Buffer::empty();
+            assert_eq!(
+                kseal_create_event(
+                    handle,
+                    EventType::RootRisk as i32,
+                    RiskBitset::ROOT.as_u64(),
+                    Confidence::Low as i32,
+                    s.as_ptr(),
+                    s.as_ptr(),
+                    s.as_ptr(),
+                    1_700_000_000,
+                    std::ptr::null(),
+                    &mut root_ev,
+                ),
+                Status::Ok
+            );
+            let root_bytes = take_buffer(root_ev);
+
+            let views = [
+                BytesView {
+                    data: unspec_bytes.as_ptr(),
+                    len: unspec_bytes.len(),
+                },
+                BytesView {
+                    data: root_bytes.as_ptr(),
+                    len: root_bytes.len(),
+                },
+            ];
+            let mut wire = Buffer::empty();
+            assert_eq!(
+                kseal_batch_and_compress(handle, views.as_ptr(), views.len(), &mut wire),
+                Status::Ok
+            );
+            let batch = transport::decompress_batch(&take_buffer(wire), None).unwrap();
+
+            // Only RootRisk survives; Unspecified was denied (not smuggled in).
+            assert_eq!(batch.events.len(), 1);
+            assert_eq!(batch.events[0].event_type, EventType::RootRisk as i32);
 
             kseal_core_free(handle);
         }
