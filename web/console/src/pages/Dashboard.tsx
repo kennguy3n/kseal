@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import {
   useApps,
@@ -20,9 +21,11 @@ export function DashboardPage() {
   const overview = useTenantOverview();
   const stats = useTrustSessionStats();
 
-  const recent = overview.data
-    ? sortEventsByTimeDesc(overview.data.recentEvents)
-    : [];
+  const recent = useMemo(
+    () =>
+      overview.data ? sortEventsByTimeDesc(overview.data.recentEvents) : [],
+    [overview.data],
+  );
 
   return (
     <div className="space-y-6">
