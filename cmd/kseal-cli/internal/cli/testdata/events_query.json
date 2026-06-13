@@ -1,0 +1,28 @@
+{
+  "events": [
+    {
+      "app_build_hash": "",
+      "app_id": "\u003capp\u003e",
+      "confidence": "CONFIDENCE_UNSPECIFIED",
+      "event_type": "EVENT_TYPE_POLICY_DECISION",
+      "id": "\u003cid\u003e",
+      "policy_hash": "",
+      "risk_bits": 0,
+      "risk_level": "TRUST_LEVEL_LOW_RISK",
+      "tenant_id": "\u003ctenant\u003e",
+      "timestamp": 1001000
+    },
+    {
+      "app_build_hash": "",
+      "app_id": "\u003capp\u003e",
+      "confidence": "CONFIDENCE_UNSPECIFIED",
+      "event_type": "EVENT_TYPE_POLICY_DECISION",
+      "id": "\u003cid\u003e",
+      "policy_hash": "",
+      "risk_bits": 1,
+      "risk_level": "TRUST_LEVEL_LOW_RISK",
+      "tenant_id": "\u003ctenant\u003e",
+      "timestamp": 1000000
+    }
+  ]
+}
