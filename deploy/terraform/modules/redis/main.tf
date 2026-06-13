@@ -1,7 +1,10 @@
 # Managed Redis 7 for kseal nonce store, rate limiting, and quotas. Encryption
 # in transit + at rest, AUTH token, Multi-AZ automatic failover, private only.
 
+# Only generate an AUTH token when AUTH is actually used (requires transit
+# encryption); otherwise no secret is created and none lands in state.
 resource "random_password" "auth" {
+  count   = var.auth_enabled && var.transit_encryption_enabled ? 1 : 0
   length  = 48
   special = false # ElastiCache AUTH tokens reject most special chars.
 }
@@ -80,7 +83,7 @@ resource "aws_elasticache_replication_group" "this" {
   transit_encryption_enabled = var.transit_encryption_enabled
   kms_key_id                 = var.kms_key_arn != "" ? var.kms_key_arn : null
   # AUTH requires transit encryption; only set when both are on.
-  auth_token                 = var.auth_enabled && var.transit_encryption_enabled ? random_password.auth.result : null
+  auth_token                 = var.auth_enabled && var.transit_encryption_enabled ? one(random_password.auth[*].result) : null
   auth_token_update_strategy = var.auth_enabled && var.transit_encryption_enabled ? "ROTATE" : null
 
   snapshot_retention_limit   = var.snapshot_retention_days

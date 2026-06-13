@@ -31,10 +31,12 @@ output "security_group_id" {
 output "dsn" {
   description = "KSEAL_POSTGRES_DSN connection string (sslmode=require)."
   sensitive   = true
+  # URL-encode the userinfo so special characters in the generated password
+  # (e.g. # % / @) cannot corrupt the URL when parsed by pgx/net.url.
   value = format(
     "postgres://%s:%s@%s:%d/%s?sslmode=require",
-    aws_db_instance.this.username,
-    random_password.master.result,
+    urlencode(aws_db_instance.this.username),
+    urlencode(random_password.master.result),
     aws_db_instance.this.address,
     aws_db_instance.this.port,
     aws_db_instance.this.db_name,

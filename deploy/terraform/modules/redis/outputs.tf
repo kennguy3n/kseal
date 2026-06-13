@@ -26,5 +26,5 @@ output "security_group_id" {
 output "auth_token" {
   description = "AUTH token (empty unless auth_enabled + transit encryption)."
   sensitive   = true
-  value       = var.auth_enabled && var.transit_encryption_enabled ? random_password.auth.result : ""
+  value       = var.auth_enabled && var.transit_encryption_enabled ? one(random_password.auth[*].result) : ""
 }

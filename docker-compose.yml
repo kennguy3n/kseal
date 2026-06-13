@@ -8,7 +8,7 @@
 # needed.
 #
 # Overridable via the environment (see .env): KSEAL_KEK, KSEAL_RATE_LIMIT_RPS,
-# KSEAL_INGEST_QUOTA_PER_MINUTE, image tags, etc.
+# KSEAL_INGEST_QUOTA_PER_MIN, image tags, etc.
 
 name: kseal
 
@@ -99,7 +99,7 @@ services:
       KSEAL_CORS_ORIGINS: "${KSEAL_CORS_ORIGINS:-http://localhost:5173}"
       KSEAL_RATE_LIMIT_RPS: "${KSEAL_RATE_LIMIT_RPS:-200}"
       KSEAL_RATE_LIMIT_BURST: "${KSEAL_RATE_LIMIT_BURST:-400}"
-      KSEAL_INGEST_QUOTA_PER_MINUTE: "${KSEAL_INGEST_QUOTA_PER_MINUTE:-6000}"
+      KSEAL_INGEST_QUOTA_PER_MIN: "${KSEAL_INGEST_QUOTA_PER_MIN:-6000}"
     ports:
       - "8080:8080"
     networks: [kseal]
