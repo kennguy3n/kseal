@@ -12,6 +12,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"net/url"
 	"sync/atomic"
 
 	"github.com/google/uuid"
@@ -62,7 +63,7 @@ type Env struct {
 func Connect(ctx context.Context, dsn, redisAddr string) (*Env, error) {
 	database, err := db.New(ctx, dsn)
 	if err != nil {
-		return nil, fmt.Errorf("connect postgres (%s): %w", dsn, err)
+		return nil, fmt.Errorf("connect postgres (%s): %w", redactDSN(dsn), err)
 	}
 	if err := database.Migrate(ctx, migrations.FS); err != nil {
 		database.Close()
@@ -374,6 +375,17 @@ var slugCounter atomic.Uint64
 
 func uniqueSlug(prefix string) string {
 	return fmt.Sprintf("%s-%s-%d", prefix, uuid.NewString()[:8], slugCounter.Add(1))
+}
+
+// redactDSN masks any password in a database DSN so it is safe to embed in
+// errors/logs. url.URL.Redacted() replaces the password with "xxxxx"; if the
+// DSN can't be parsed we drop it entirely rather than risk leaking it.
+func redactDSN(dsn string) string {
+	u, err := url.Parse(dsn)
+	if err != nil {
+		return "<unparseable dsn>"
+	}
+	return u.Redacted()
 }
 
 func trustLevelName(l ksealv1.TrustLevel) string {
