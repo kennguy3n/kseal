@@ -127,8 +127,12 @@ export function useIssueKillSwitch() {
         queryKey: complianceKeys.killSwitch(tenantId, input.appId),
       });
       // A signed kill-switch change is itself an audited control-plane
-      // mutation, so refresh the audit trail too.
+      // mutation: it appends to the audit trail and advances the chain head,
+      // so refresh both the event list and the chain verification.
       void qc.invalidateQueries({ queryKey: ["audit", tenantId] });
+      void qc.invalidateQueries({
+        queryKey: complianceKeys.auditChain(tenantId),
+      });
     },
   });
 }
