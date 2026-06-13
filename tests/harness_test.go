@@ -18,9 +18,11 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"github.com/testcontainers/testcontainers-go"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
@@ -192,10 +194,20 @@ func newRedis(t *testing.T) *redis.Client {
 	return rc
 }
 
-// uniqueSlug yields a tenant slug unique to this test so concurrently-developed
-// tests never collide in the shared database.
+// runID makes identifiers unique across process runs so the suite can run
+// repeatedly against a persisted Postgres database without collisions. Mirrors
+// the convention in server/control-plane/registry/store_test.go.
+var runID = uuid.NewString()[:8]
+
+// slugCounter is bumped atomically so uniqueSlug stays collision-free even if a
+// future test opts into t.Parallel() (nanosecond timestamps could otherwise
+// collide under fast concurrent execution).
+var slugCounter atomic.Uint64
+
+// uniqueSlug yields an identifier unique to this call (and process run) so tests
+// sharing the single Postgres database never collide.
 func uniqueSlug(prefix string) string {
-	return fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())
+	return fmt.Sprintf("%s-%s-%d", prefix, runID, slugCounter.Add(1))
 }
 
 // makeTenant creates a tenant with a unique slug.
@@ -243,7 +255,7 @@ func activatePolicy(t *testing.T, store registry.Store, tenantID, appID string, 
 	t.Helper()
 	ctx := context.Background()
 	p, err := store.CreatePolicy(ctx, registry.CreatePolicyInput{
-		TenantID: tenantID, AppID: appID, Name: "v1",
+		TenantID: tenantID, AppID: appID, Name: uniqueSlug("policy"),
 		EnforcementMode: mode, Rules: rules, RiskThresholds: thresholds,
 		ModulesEnabled: []string{"root", "debugger"},
 	})
