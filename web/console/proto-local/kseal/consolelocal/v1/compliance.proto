@@ -1,0 +1,243 @@
+syntax = "proto3";
+
+// Console-local compliance & ops surface. See proto-local/buf.yaml for why this
+// lives under web/console/ and not in the canonical //proto module. The package
+// is deliberately distinct from kseal.v1 so generated symbols never collide
+// with the canonical client; the parent re-points the console at canonical
+// kseal.v1 RPCs once WS-K merges them.
+package kseal.consolelocal.v1;
+
+// ---------------------------------------------------------------------------
+// Audit trail (hash-chained control-plane mutation log)
+// ---------------------------------------------------------------------------
+
+// AuditEvent is one entry in a tenant's tamper-evident, hash-chained audit log.
+// Each entry's entry_hash = H(prev_hash || canonical(entry fields)), so a
+// verifier can replay the chain and detect any insertion, deletion, or edit.
+message AuditEvent {
+  string id = 1;
+  string tenant_id = 2;
+  // Monotonic per-tenant sequence number (1-based).
+  uint64 sequence = 3;
+  // Actor that performed the mutation (operator principal or service identity).
+  // Never an end-user PII identifier.
+  string actor = 4;
+  // Machine action key, e.g. "policy.activate", "killswitch.disable".
+  string action = 5;
+  // Resource the action targeted, e.g. "policy" / "app" / "killswitch".
+  string resource_type = 6;
+  string resource_id = 7;
+  // Event time in unix milliseconds.
+  int64 timestamp = 8;
+  // Hex-encoded chain hashes (entry_hash links to the previous entry_hash).
+  string entry_hash = 9;
+  string prev_hash = 10;
+  // Small, non-PII structured context (e.g. {"from":"OBSERVE","to":"BLOCK"}).
+  map<string, string> metadata = 11;
+}
+
+message ListAuditEventsRequest {
+  string tenant_id = 1;
+  // Optional action-key filter; empty means all actions.
+  repeated string actions = 2;
+  // Optional actor filter; empty means all actors.
+  string actor = 3;
+  // Optional resource-type filter; empty means all resource types.
+  string resource_type = 4;
+  // Inclusive time bounds in unix millis (0 means unbounded).
+  int64 start_time = 5;
+  int64 end_time = 6;
+  int32 page_size = 7;
+  string page_token = 8;
+}
+
+message ListAuditEventsResponse {
+  repeated AuditEvent events = 1;
+  string next_page_token = 2;
+  // Server-side result of verifying the returned slice against the chain. When
+  // false, chain_error explains what failed (e.g. a broken link), so the UI can
+  // warn that the audit log integrity could not be confirmed.
+  bool chain_verified = 3;
+  string chain_error = 4;
+}
+
+service AuditService {
+  // ListAuditEvents returns hash-chained audit entries for a tenant with
+  // keyset pagination, newest first. Tenant-scoped and isolation-enforced
+  // server-side.
+  rpc ListAuditEvents(ListAuditEventsRequest) returns (ListAuditEventsResponse);
+}
+
+// ---------------------------------------------------------------------------
+// Data-processing registry (what data each app/SDK processes)
+// ---------------------------------------------------------------------------
+
+// DataProcessingRecord declares one category of data an app/SDK processes, with
+// the purpose, retention, and legal basis — the inventory a DPO needs for a
+// processing register / privacy review.
+message DataProcessingRecord {
+  string id = 1;
+  string tenant_id = 2;
+  // Empty app_id means the record applies tenant-wide (e.g. the SDK baseline).
+  string app_id = 3;
+  // Human category, e.g. "Device integrity signals".
+  string category = 4;
+  // Processing purpose, e.g. "Runtime risk scoring".
+  string purpose = 5;
+  // Retention statement, e.g. "30 days, then aggregated".
+  string retention = 6;
+  // Lawful basis, e.g. "Legitimate interest (fraud prevention)".
+  string legal_basis = 7;
+  // Whether this category includes personal data.
+  bool personal_data = 8;
+  // Concrete (non-PII) field names processed in this category.
+  repeated string data_fields = 9;
+  int64 updated_at = 10;
+}
+
+message ListDataProcessingRecordsRequest {
+  string tenant_id = 1;
+  // Optional app filter; empty means all apps + tenant-wide records.
+  string app_id = 2;
+  int32 page_size = 3;
+  string page_token = 4;
+}
+
+message ListDataProcessingRecordsResponse {
+  repeated DataProcessingRecord records = 1;
+  string next_page_token = 2;
+}
+
+service DataProcessingRegistryService {
+  // ListDataProcessingRecords returns the tenant's data-processing inventory.
+  rpc ListDataProcessingRecords(ListDataProcessingRecordsRequest)
+      returns (ListDataProcessingRecordsResponse);
+}
+
+// ---------------------------------------------------------------------------
+// Kill switch (emergency enable/disable of protection enforcement)
+// ---------------------------------------------------------------------------
+
+enum KillSwitchStatus {
+  KILL_SWITCH_STATUS_UNSPECIFIED = 0;
+  // Protection is armed and enforcing normally.
+  KILL_SWITCH_STATUS_ARMED = 1;
+  // Protection enforcement is disabled (observe-only) by a signed kill switch.
+  KILL_SWITCH_STATUS_DISABLED = 2;
+}
+
+message KillSwitchState {
+  string tenant_id = 1;
+  // Empty app_id means the tenant-wide kill switch.
+  string app_id = 2;
+  KillSwitchStatus status = 3;
+  // Operator that last changed the state, and when (unix millis).
+  string last_changed_by = 4;
+  int64 last_changed_at = 5;
+  // Reason recorded with the last change.
+  string reason = 6;
+  // Identifier of the signing key/authority that authorized the current state
+  // (the console never sees private key material; signing is server-side).
+  string signing_key_id = 7;
+}
+
+message GetKillSwitchStateRequest {
+  string tenant_id = 1;
+  string app_id = 2;
+}
+
+message GetKillSwitchStateResponse {
+  KillSwitchState state = 1;
+}
+
+message RequestKillSwitchChangeRequest {
+  string tenant_id = 1;
+  string app_id = 2;
+  // Desired status (ARMED to re-enable, DISABLED to trip the switch).
+  KillSwitchStatus desired_status = 3;
+  // Operator-supplied justification, recorded in the audit log.
+  string reason = 4;
+}
+
+message RequestKillSwitchChangeResponse {
+  // The new authoritative state after the server signed and applied the change.
+  KillSwitchState state = 1;
+  // Opaque server-issued reference to the signed change record (for audit
+  // cross-reference). Never contains key material.
+  string signed_change_ref = 2;
+}
+
+service KillSwitchService {
+  // GetKillSwitchState returns the current (signed) kill-switch state.
+  rpc GetKillSwitchState(GetKillSwitchStateRequest)
+      returns (GetKillSwitchStateResponse);
+  // RequestKillSwitchChange asks the control plane to sign and apply a state
+  // change. Authority/signing is entirely server-side; the console only
+  // requests it.
+  rpc RequestKillSwitchChange(RequestKillSwitchChangeRequest)
+      returns (RequestKillSwitchChangeResponse);
+}
+
+// ---------------------------------------------------------------------------
+// Canary monitor (staged rollout health + auto-rollback)
+// ---------------------------------------------------------------------------
+
+enum CanaryHealth {
+  CANARY_HEALTH_UNSPECIFIED = 0;
+  CANARY_HEALTH_HEALTHY = 1;
+  CANARY_HEALTH_DEGRADED = 2;
+  CANARY_HEALTH_ROLLED_BACK = 3;
+}
+
+// CanaryMetrics summarizes the signal the auto-rollback decision is based on.
+message CanaryMetrics {
+  // Events observed in the canary cohort during the evaluation window.
+  int64 sample_events = 1;
+  // Distinct instances in the canary cohort.
+  int64 cohort_instances = 2;
+  // Observed error/abort rate in the canary cohort, 0..1.
+  double error_rate = 3;
+  // Baseline (stable cohort) error rate for comparison, 0..1.
+  double baseline_error_rate = 4;
+}
+
+// CanaryRollout is a staged rollout of a policy/config version to a percentage
+// of a tenant's fleet, with health and auto-rollback status.
+message CanaryRollout {
+  string id = 1;
+  string tenant_id = 2;
+  string app_id = 3;
+  // The policy/config version being rolled out.
+  string policy_id = 4;
+  string policy_name = 5;
+  // Current staged percentage (0..100).
+  int32 percentage = 6;
+  CanaryHealth health = 7;
+  // Whether auto-rollback is armed for this rollout.
+  bool auto_rollback_armed = 8;
+  // Set when the rollout was automatically rolled back, with the reason.
+  bool rolled_back = 9;
+  string rollback_reason = 10;
+  int64 started_at = 11;
+  int64 updated_at = 12;
+  CanaryMetrics metrics = 13;
+}
+
+message ListCanaryRolloutsRequest {
+  string tenant_id = 1;
+  // Optional app filter; empty means all apps in the tenant.
+  string app_id = 2;
+  int32 page_size = 3;
+  string page_token = 4;
+}
+
+message ListCanaryRolloutsResponse {
+  repeated CanaryRollout rollouts = 1;
+  string next_page_token = 2;
+}
+
+service CanaryService {
+  // ListCanaryRollouts returns active/recent staged rollouts for a tenant.
+  rpc ListCanaryRollouts(ListCanaryRolloutsRequest)
+      returns (ListCanaryRolloutsResponse);
+}

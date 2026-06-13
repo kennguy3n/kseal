@@ -94,6 +94,31 @@ export function LoadMore({
   );
 }
 
+// Graceful-degradation state for console-local RPCs that the server has not
+// deployed yet (returns UNIMPLEMENTED/UNAVAILABLE). Distinct from ErrorNotice:
+// this is an expected, non-alarming "coming soon" state, not a failure.
+export function UnavailableNotice({
+  feature,
+  children,
+}: {
+  feature: string;
+  children?: ReactNode;
+}) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="rounded-lg border border-dashed border-amber-700/40 bg-amber-900/10 p-5 text-sm text-amber-200/90"
+    >
+      <div className="font-medium text-amber-100">{feature} is not available yet</div>
+      <p className="mt-1 text-amber-200/70">
+        {children ??
+          "This view depends on a control-plane capability that has not been deployed to your environment yet. It will populate automatically once available."}
+      </p>
+    </div>
+  );
+}
+
 // Renders a Connect error as a thin, defensive fallback for transient failures
 // (the read RPCs are implemented server-side, so this is no longer a "pending
 // support" degrade path).

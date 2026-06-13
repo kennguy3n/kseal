@@ -5,6 +5,10 @@ import {
   Platform,
   TrustLevel,
 } from "../gen/kseal/v1/common_pb";
+import {
+  CanaryHealth,
+  KillSwitchStatus,
+} from "../gen-local/kseal/consolelocal/v1/compliance_pb";
 
 export const platformLabels: Record<Platform, string> = {
   [Platform.UNSPECIFIED]: "Unspecified",
@@ -64,6 +68,50 @@ export function riskLevelTone(level: TrustLevel): string {
     default:
       return "bg-slate-500/15 text-slate-300 border-slate-500/30";
   }
+}
+
+export const killSwitchStatusLabels: Record<KillSwitchStatus, string> = {
+  [KillSwitchStatus.UNSPECIFIED]: "Unknown",
+  [KillSwitchStatus.ARMED]: "Armed",
+  [KillSwitchStatus.DISABLED]: "Disabled",
+};
+
+// Tone for a kill-switch status badge: armed (enforcing) is the healthy state.
+export function killSwitchStatusTone(status: KillSwitchStatus): string {
+  switch (status) {
+    case KillSwitchStatus.ARMED:
+      return "bg-emerald-500/15 text-emerald-300 border-emerald-500/30";
+    case KillSwitchStatus.DISABLED:
+      return "bg-rose-500/15 text-rose-300 border-rose-500/30";
+    default:
+      return "bg-slate-500/15 text-slate-300 border-slate-500/30";
+  }
+}
+
+export const canaryHealthLabels: Record<CanaryHealth, string> = {
+  [CanaryHealth.UNSPECIFIED]: "Unknown",
+  [CanaryHealth.HEALTHY]: "Healthy",
+  [CanaryHealth.DEGRADED]: "Degraded",
+  [CanaryHealth.ROLLED_BACK]: "Rolled back",
+};
+
+export function canaryHealthTone(health: CanaryHealth): string {
+  switch (health) {
+    case CanaryHealth.HEALTHY:
+      return "bg-emerald-500/15 text-emerald-300 border-emerald-500/30";
+    case CanaryHealth.DEGRADED:
+      return "bg-amber-500/15 text-amber-300 border-amber-500/30";
+    case CanaryHealth.ROLLED_BACK:
+      return "bg-rose-500/15 text-rose-300 border-rose-500/30";
+    default:
+      return "bg-slate-500/15 text-slate-300 border-slate-500/30";
+  }
+}
+
+// Formats a 0..1 rate as a percentage with one decimal (e.g. 0.0123 -> "1.2%").
+export function formatRate(rate: number): string {
+  if (!Number.isFinite(rate)) return "—";
+  return `${(rate * 100).toFixed(1)}%`;
 }
 
 // Accepts unix-millis as bigint (proto int64) or number and renders a stable,

@@ -1,10 +1,12 @@
 import { createContext, useContext } from "react";
 import type { Session } from "../api/auth";
 import type { KsealClients } from "../api/clients";
+import type { LocalClients } from "../api/localClients";
 
 export interface AuthContextValue {
   session: Session | null;
   clients: KsealClients;
+  localClients: LocalClients;
   login: (session: Session) => void;
   logout: () => void;
 }
@@ -19,6 +21,10 @@ export function useAuth(): AuthContextValue {
 
 export function useClients(): KsealClients {
   return useAuth().clients;
+}
+
+export function useLocalClients(): LocalClients {
+  return useAuth().localClients;
 }
 
 export function useSession(): Session {
