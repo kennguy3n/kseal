@@ -1,0 +1,56 @@
+site_name: kseal documentation
+site_description: Mobile & desktop app shielding — RASP, API attestation, build hardening, NoOps ops.
+docs_dir: .staging
+site_dir: build
+use_directory_urls: true
+theme:
+  name: readthedocs
+  highlightjs: true
+
+# .staging is assembled by build.sh from the canonical Markdown (symlinks, so no
+# doc body is duplicated). Links from docs/*.md to ../ARCHITECTURE.md etc. resolve
+# because build.sh mirrors the repo layout into .staging.
+nav:
+  - Home: index.md
+  - Getting started:
+      - Project overview: project-overview.md
+      - Threat model: docs/threat-model.md
+  - Architecture:
+      - Architecture overview: ARCHITECTURE.md
+      - Design proposal: PROPOSAL.md
+  - SDK guides:
+      - Android build hardening: docs/build-hardening-android.md
+      - iOS build hardening: docs/build-hardening-ios.md
+      - Desktop SDK (macOS + Windows): docs/desktop-sdk.md
+      - CLI: docs/cli.md
+      - Policy packs: docs/policy-packs.md
+  - Server & ops:
+      - Deployment: docs/deployment.md
+      - On-prem: docs/deployment-onprem.md
+      - Private link: docs/deployment-private-link.md
+      - Disaster recovery: docs/deployment-disaster-recovery.md
+      - Multi-region: docs/multi-region.md
+      - BYOK / CMK: docs/byok.md
+      - SIEM integration: docs/siem-integration.md
+      - MSSP console: docs/mssp-console.md
+      - Cost model: docs/cost-model.md
+  - Compliance:
+      - MASVS mapping: docs/masvs-mapping.md
+      - MASVS evidence report: docs/masvs-evidence.md
+      - Android policy review: docs/android-policy-review.md
+      - iOS app review: docs/ios-app-review.md
+  - Parity matrix: docs/feature-parity-matrix.md
+
+markdown_extensions:
+  - admonition
+  - tables
+  # GitHub-compatible heading slugs so the docs' hand-written #anchor links
+  # (e.g. #compliance--evidence) resolve in the rendered site.
+  - toc:
+      permalink: true
+      slugify: !!python/object/apply:pymdownx.slugs.slugify
+        kwds:
+          case: lower
+  - fenced_code
+  - codehilite
+  - pymdownx.superfences
