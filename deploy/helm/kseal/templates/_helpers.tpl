@@ -125,3 +125,22 @@ podAntiAffinity:
 {{ $labels | indent 12 }}
 {{- end -}}
 {{- end -}}
+
+{{/*
+Render topologySpreadConstraints from values, injecting the component selector
+as the labelSelector for any constraint that doesn't define its own. Keeps every
+other field the user sets (maxSkew, topologyKey, minDomains, ...) intact.
+Args: (dict "constraints" <list> "selector" <selectorLabels-yaml>).
+*/}}
+{{- define "kseal.topologySpreadConstraints" -}}
+{{- $selector := fromYaml (index . "selector") -}}
+{{- $out := list -}}
+{{- range (index . "constraints") -}}
+{{- $c := deepCopy . -}}
+{{- if not $c.labelSelector -}}
+{{- $_ := set $c "labelSelector" (dict "matchLabels" $selector) -}}
+{{- end -}}
+{{- $out = append $out $c -}}
+{{- end -}}
+{{- toYaml $out -}}
+{{- end -}}

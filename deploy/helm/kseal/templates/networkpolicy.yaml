@@ -56,16 +56,6 @@ spec:
       ports:
         - protocol: TCP
           port: {{ .Values.server.port }}
-    {{- if .Values.console.enabled }}
-    # Allow the console pods to reach the API in-cluster (server-side checks).
-    - from:
-        - podSelector:
-            matchLabels:
-              {{- include "kseal.console.selectorLabels" . | nindent 14 }}
-      ports:
-        - protocol: TCP
-          port: {{ .Values.server.port }}
-    {{- end }}
 ---
 # 3) Server egress: DNS, Postgres, Redis, OTel collector, and SIEM/webhook sinks.
 apiVersion: networking.k8s.io/v1
@@ -147,6 +137,11 @@ spec:
         - namespaceSelector:
             matchLabels:
               {{- toYaml .Values.networkPolicy.ingressController.namespaceSelector | nindent 14 }}
+          {{- with .Values.networkPolicy.ingressController.podSelector }}
+          podSelector:
+            matchLabels:
+              {{- toYaml . | nindent 14 }}
+          {{- end }}
       ports:
         - protocol: TCP
           port: {{ .Values.console.port }}
