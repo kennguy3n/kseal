@@ -15,6 +15,22 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+// Options configures the tracing pipeline. The zero value disables span export
+// (current behavior) and samples every span.
+type Options struct {
+	// OTLPEndpoint is the OTLP/gRPC collector address (host:port). Empty means
+	// no exporter is attached and spans are not shipped anywhere.
+	OTLPEndpoint string
+	// OTLPSampleRatio is the head-sampling probability in [0,1]. Values <= 0 or
+	// >= 1 sample everything. Only meaningful when an exporter is attached.
+	OTLPSampleRatio float64
+	// OTLPInsecure disables transport security to the collector. The zero value
+	// (false) keeps TLS, so a caller that omits this field fails closed to a
+	// secured connection. The config layer sets it from KSEAL_OTLP_INSECURE,
+	// which defaults to true for the typical in-cluster collector behind a mesh.
+	OTLPInsecure bool
+}
+
 // Telemetry holds the configured providers and exposes a Shutdown hook.
 type Telemetry struct {
 	Tracer   trace.Tracer
@@ -22,10 +38,11 @@ type Telemetry struct {
 	provider *sdktrace.TracerProvider
 }
 
-// Setup configures a global tracer provider and the Prometheus metrics. Spans
-// are sampled and propagated; an exporter can be attached in production without
-// touching call sites since the global provider is used.
-func Setup(serviceName, env string) (*Telemetry, error) {
+// Setup configures a global tracer provider and the Prometheus metrics. When
+// opts.OTLPEndpoint is set, a batched OTLP/gRPC span exporter is attached and
+// the configured sampling ratio applied; otherwise spans are sampled but not
+// exported (no collector dependency for local/dev).
+func Setup(serviceName, env string, opts Options) (*Telemetry, error) {
 	// Use a schemaless resource for our attributes so merging with the SDK's
 	// default resource (which carries its own, newer schema URL) does not fail
 	// with a schema-conflict error.
@@ -36,10 +53,20 @@ func Setup(serviceName, env string) (*Telemetry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("build resource: %w", err)
 	}
-	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.AlwaysSample())),
+
+	tpOpts := []sdktrace.TracerProviderOption{
+		sdktrace.WithSampler(newSampler(opts.OTLPEndpoint, opts.OTLPSampleRatio)),
 		sdktrace.WithResource(res),
-	)
+	}
+	if opts.OTLPEndpoint != "" {
+		exporter, err := newOTLPExporter(context.Background(), opts.OTLPEndpoint, opts.OTLPInsecure)
+		if err != nil {
+			return nil, fmt.Errorf("otlp exporter: %w", err)
+		}
+		tpOpts = append(tpOpts, sdktrace.WithBatcher(exporter))
+	}
+
+	tp := sdktrace.NewTracerProvider(tpOpts...)
 	otel.SetTracerProvider(tp)
 
 	metrics, err := NewMetrics()

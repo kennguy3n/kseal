@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -53,7 +54,11 @@ func run() error {
 	logger := middleware.NewLogger(cfg.LogLevel, cfg.Env)
 	logger.Info().Str("env", cfg.Env).Str("addr", cfg.HTTPAddr).Msg("starting kseal-server")
 
-	tel, err := telemetry.Setup("kseal-server", cfg.Env)
+	tel, err := telemetry.Setup("kseal-server", cfg.Env, telemetry.Options{
+		OTLPEndpoint:    cfg.OTLPEndpoint,
+		OTLPSampleRatio: cfg.OTLPSampleRatio,
+		OTLPInsecure:    cfg.OTLPInsecure,
+	})
 	if err != nil {
 		return err
 	}
@@ -76,8 +81,14 @@ func run() error {
 	}
 	logger.Info().Msg("migrations applied")
 
-	// Redis.
-	rdb, err := middleware.NewRedis(rootCtx, cfg.RedisAddr, cfg.RedisDB)
+	// Redis (TLS + AUTH optional, default plaintext).
+	rdb, err := middleware.NewRedis(rootCtx, middleware.RedisConfig{
+		Addr:     cfg.RedisAddr,
+		DB:       cfg.RedisDB,
+		Password: cfg.RedisPassword,
+		TLS:      cfg.RedisTLS,
+		CAFile:   cfg.RedisCAFile,
+	})
 	if err != nil {
 		return err
 	}
@@ -87,7 +98,13 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	store := registry.NewPostgresStore(database, enc)
+	// Tenant sealer: platform KEK by default, or per-tenant customer-managed
+	// keys (BYOK/CMK) when KSEAL_CMK_KMS_URI is configured.
+	sealer, err := buildTenantSealer(cfg, enc, database)
+	if err != nil {
+		return err
+	}
+	store := registry.NewPostgresStore(database, sealer)
 
 	// Build services.
 	registrySvc := registry.NewService(store)
@@ -133,6 +150,19 @@ func run() error {
 	}
 
 	querySvc := query.NewService(store, analytics)
+
+	// Raw-telemetry retention: purge per-tenant raw events past their window
+	// (platform default KSEAL_RAW_RETENTION_DAYS), retaining aggregates. Tracked
+	// in bg so it drains before the DB pool closes on shutdown.
+	var bg sync.WaitGroup
+	purger := ingest.NewPurger(analytics, registry.NewRetentionResolver(database), cfg.RawRetentionDays)
+	bg.Add(1)
+	go func() {
+		defer bg.Done()
+		purger.Run(rootCtx, time.Hour, func(err error) {
+			logger.Error().Err(err).Msg("raw-event retention purge failed")
+		})
+	}()
 
 	// Interceptors.
 	limiter := middleware.NewRedisRateLimiter(rdb, cfg.RateLimitPerSecond, cfg.RateLimitBurst, "rl")
@@ -182,12 +212,41 @@ func run() error {
 	case <-rootCtx.Done():
 		logger.Info().Msg("shutdown signal received")
 	case err := <-errCh:
+		stop()
+		bg.Wait()
 		return err
 	}
+
+	// Cancel background workers and let them drain before the deferred Postgres /
+	// Redis closes run, so an in-flight retention purge cannot race the pool
+	// shutdown and emit a spurious error.
+	stop()
+	bg.Wait()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return srv.Shutdown(shutdownCtx)
+}
+
+// buildTenantSealer selects how tenant secret material is sealed at rest. When
+// KSEAL_CMK_KMS_URI is empty (default) every tenant uses the platform KEK and
+// behavior is unchanged. When set, customer-managed keys (BYOK/CMK) are enabled:
+// tenants with a configured cmk_kms_uri get per-tenant DEKs wrapped by their own
+// KMS key, and the rest still fall back to the platform KEK.
+func buildTenantSealer(cfg *cfgpkg.Config, platform *crypto.Encryptor, database *db.DB) (crypto.TenantSealer, error) {
+	if cfg.CMKKMSURI == "" {
+		return platform, nil
+	}
+	var kmsOpts []crypto.HTTPKMSOption
+	if cfg.CMKKMSAuthToken != "" {
+		kmsOpts = append(kmsOpts, crypto.WithAuthToken(cfg.CMKKMSAuthToken))
+	}
+	kms, err := crypto.NewHTTPKMSClient(cfg.CMKKMSURI, kmsOpts...)
+	if err != nil {
+		return nil, err
+	}
+	resolver := registry.NewCMKResolver(database, registry.DefaultCMKCacheTTL)
+	return crypto.NewCMKKeyManager(platform, kms, resolver)
 }
 
 // webhookSink adapts the ingest write path to the webhook dispatcher, fanning

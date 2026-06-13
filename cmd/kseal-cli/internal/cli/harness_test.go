@@ -56,7 +56,7 @@ func newTestServer(t *testing.T) *testServer {
 	webhookSvc := webhook.NewService(store)
 	querySvc := query.NewService(store, analytics)
 
-	tel, err := telemetry.Setup("kseal-cli-test", "test")
+	tel, err := telemetry.Setup("kseal-cli-test", "test", telemetry.Options{})
 	if err != nil {
 		t.Fatalf("telemetry setup: %v", err)
 	}

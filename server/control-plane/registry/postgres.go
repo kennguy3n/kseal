@@ -20,16 +20,20 @@ import (
 )
 
 // PostgresStore is the production Store backed by Postgres with row-level
-// security. Signing-key private material and webhook secrets are sealed with the
-// configured envelope encryptor before they touch the database.
+// security. Signing-key private material and webhook secrets are sealed by the
+// configured TenantSealer before they touch the database. The sealer is either
+// the platform KEK (default) or, for tenants with customer-managed keys
+// configured, a per-tenant KMS-wrapped DEK (BYOK/CMK).
 type PostgresStore struct {
-	db  *db.DB
-	enc *crypto.Encryptor
+	db     *db.DB
+	sealer crypto.TenantSealer
 }
 
-// NewPostgresStore builds a Postgres-backed store.
-func NewPostgresStore(database *db.DB, enc *crypto.Encryptor) *PostgresStore {
-	return &PostgresStore{db: database, enc: enc}
+// NewPostgresStore builds a Postgres-backed store. sealer protects tenant
+// secret material at rest; pass a *crypto.Encryptor for plain platform-KEK
+// sealing or a *crypto.CMKKeyManager to enable per-tenant customer-managed keys.
+func NewPostgresStore(database *db.DB, sealer crypto.TenantSealer) *PostgresStore {
+	return &PostgresStore{db: database, sealer: sealer}
 }
 
 // Close is a no-op; the pool lifecycle is owned by the caller.
@@ -569,7 +573,7 @@ func (s *PostgresStore) CreateSigningKey(ctx context.Context, tenantID string) (
 	if err != nil {
 		return nil, err
 	}
-	sealed, err := s.enc.Seal(kp.Private)
+	sealed, err := s.sealer.SealForTenant(ctx, tenantID, kp.Private)
 	if err != nil {
 		return nil, err
 	}
@@ -621,7 +625,7 @@ func (s *PostgresStore) loadSigningKey(ctx context.Context, tenantID, query stri
 	if err != nil {
 		return nil, wrapPgErr(err)
 	}
-	priv, err := s.enc.Open(privEnc)
+	priv, err := s.sealer.OpenForTenant(ctx, tenantID, privEnc)
 	if err != nil {
 		return nil, fmt.Errorf("decrypt signing key: %w", err)
 	}
@@ -635,7 +639,7 @@ func (s *PostgresStore) RotateSigningKey(ctx context.Context, tenantID string) (
 	if err != nil {
 		return nil, err
 	}
-	sealed, err := s.enc.Seal(kp.Private)
+	sealed, err := s.sealer.SealForTenant(ctx, tenantID, kp.Private)
 	if err != nil {
 		return nil, err
 	}
@@ -668,7 +672,7 @@ func (s *PostgresStore) CreateWebhook(ctx context.Context, tenantID, url string,
 	if err != nil {
 		return nil, err
 	}
-	sealed, err := s.enc.Seal(secret)
+	sealed, err := s.sealer.SealForTenant(ctx, tenantID, secret)
 	if err != nil {
 		return nil, err
 	}
@@ -760,7 +764,7 @@ func (s *PostgresStore) ListWebhooksForEvent(ctx context.Context, tenantID strin
 			if err := rows.Scan(&wh.Id, &wh.TenantId, &wh.Url, &ev, &wh.SigningKeyId, &wh.IsActive, &wh.CreatedAt, &sealed); err != nil {
 				return err
 			}
-			secret, err := s.enc.Open(sealed)
+			secret, err := s.sealer.OpenForTenant(ctx, tenantID, sealed)
 			if err != nil {
 				return fmt.Errorf("decrypt webhook secret: %w", err)
 			}
