@@ -182,6 +182,13 @@ func (s *Service) ValidateRequestProof(ctx context.Context, req *connect.Request
 	if m.TrustTokenId == "" {
 		return deny("missing trust token id"), nil
 	}
+	// Token ids are minted as UUIDs, so a malformed id can never match a stored
+	// session. Fail closed here without a DB round-trip; this also prevents a
+	// uuid-typed column from raising a 22P02 error that would surface as a 500
+	// for attacker-controlled input.
+	if _, perr := uuid.Parse(m.TrustTokenId); perr != nil {
+		return deny("unknown trust token"), nil
+	}
 	sess, err := s.store.GetTrustSession(ctx, m.TrustTokenId)
 	if errors.Is(err, registry.ErrNotFound) {
 		return deny("unknown trust token"), nil

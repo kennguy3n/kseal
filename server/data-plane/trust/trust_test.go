@@ -2,6 +2,7 @@ package trust
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -161,6 +162,40 @@ func TestTrustFlowEndToEnd(t *testing.T) {
 	rBad, _ := svc.ValidateRequestProof(ctx, connect.NewRequest(bad))
 	if rBad.Msg.Decision != ksealv1.RequestProofResult_DECISION_DENY {
 		t.Fatal("bad signature not denied")
+	}
+}
+
+// failingSessionStore embeds a real Store but makes GetTrustSession return a
+// non-ErrNotFound error, mimicking the Postgres uuid-typed column raising a
+// 22P02 (invalid_text_representation) for a malformed token id.
+type failingSessionStore struct {
+	registry.Store
+}
+
+func (failingSessionStore) GetTrustSession(context.Context, string) (*registry.TrustSession, error) {
+	return nil, errors.New("simulated 22P02 invalid_text_representation")
+}
+
+// A malformed (non-UUID) trust token id must fail closed to a clean DENY rather
+// than surfacing the store error as a Connect Internal (500). The UUID pre-check
+// short-circuits before the store is consulted, so the simulated store error is
+// never reached.
+func TestValidateRequestProofMalformedTokenIDFailsClosed(t *testing.T) {
+	verifier := attestation.NewVerifier(stubVerifier{nil}, stubVerifier{nil})
+	svc := NewService(failingSessionStore{registry.NewMemStore()}, NewNonceStore(newRedis(t), time.Minute), verifier, time.Minute)
+	ctx := context.Background()
+
+	res, err := svc.ValidateRequestProof(ctx, connect.NewRequest(&ksealv1.RequestProof{
+		TrustTokenId:         "not-a-uuid",
+		RequestHash:          []byte("req"),
+		MonotonicSequence:    1,
+		AppInstanceSignature: []byte("irrelevant"),
+	}))
+	if err != nil {
+		t.Fatalf("malformed token id must fail closed (DENY), got error %v", err)
+	}
+	if res.Msg.Decision != ksealv1.RequestProofResult_DECISION_DENY {
+		t.Fatalf("expected DENY for malformed token id, got %v", res.Msg.Decision)
 	}
 }
 
