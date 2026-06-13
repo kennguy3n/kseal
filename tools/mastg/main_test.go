@@ -9,7 +9,7 @@ import (
 
 const fixtureCatalog = "mastg/testdata/catalog.md"
 
-func TestRunTableNoEvidence(t *testing.T) {
+func TestRunMarkdownNoEvidence(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "report.md")
 	code, err := run([]string{"-catalog", fixtureCatalog, "-out", out}, os.Stdout, os.Stderr)
 	if err != nil {

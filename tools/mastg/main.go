@@ -35,7 +35,7 @@ func run(args []string, stdout, stderr *os.File) (int, error) {
 	catalogPath := fs.String("catalog", "docs/masvs-mapping.md", "path to the MASVS control catalog markdown")
 	evidencePath := fs.String("evidence", "", "path to a per-release evidence JSON (explicit MASTG assertions)")
 	masvsReportPath := fs.String("masvs-report", "", "path to a tools/masvs-report JSON to overlay as build evidence")
-	format := fs.String("format", "table", "output format: table|json")
+	format := fs.String("format", "md", "output format: md|json")
 	out := fs.String("out", "", "write report to this path (default stdout)")
 	requirePass := fs.Bool("require-pass", false, "strict mode: pending device procedures also block the release")
 	fs.Usage = func() {
@@ -46,8 +46,8 @@ func run(args []string, stdout, stderr *os.File) (int, error) {
 	if err := fs.Parse(args); err != nil {
 		return exitErr, nil // flag already printed the error/usage
 	}
-	if *format != "table" && *format != "json" {
-		return exitErr, fmt.Errorf("invalid -format %q (want table|json)", *format)
+	if *format != "md" && *format != "json" {
+		return exitErr, fmt.Errorf("invalid -format %q (want md|json)", *format)
 	}
 
 	resolved, err := locateCatalog(*catalogPath)
