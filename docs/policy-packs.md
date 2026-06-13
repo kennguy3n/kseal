@@ -15,7 +15,7 @@ hand-authored one and is validated and scored by the server identically.
 |------------|----------|-------------|---------|
 | `fintech`  | Banking / payments / wallets | `block` | Strict, fail-closed; heavy weight on attestation, network MITM, and account-takeover signals. |
 | `gaming`   | Games / real-money gaming    | `step_up` | Anti-cheat / anti-tamper focus; step-up rather than hard-block to protect conversion. |
-| `health`   | Health / regulated           | `block` | Privacy + integrity focus for regulated data; blocks on critical risk. |
+| `health`   | Health / regulated           | `step_up` | Privacy + integrity focus for regulated data; steps up on elevated risk rather than hard-blocking legitimate access. |
 | `media`    | Media / content protection   | `step_up` | Anti-piracy / content-protection focus; step-up on elevated risk. |
 
 The packs live as embedded JSON under

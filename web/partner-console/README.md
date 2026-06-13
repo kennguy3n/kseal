@@ -28,8 +28,12 @@ The login form takes:
 - **Partner API key** — a bearer credential authorized for those tenants. It is
   attached to every Connect call and is never logged.
 
-The session (key + tenant set + base URL) is persisted to `localStorage`; the
-key is held only in memory for the transport interceptor.
+The full session — including the API key, the tenant set, and the base URL — is
+persisted to `localStorage` so a reload stays signed in, and the key is also held
+in memory and attached as a bearer token by the transport interceptor. As with
+the sibling admin console, the key therefore lives in `localStorage` (an
+XSS-accessible surface); the strict `script-src 'self'` CSP is the mitigation.
+Sign out (`clearSession`) removes it.
 
 ## Runtime configuration (NoOps)
 

@@ -1,5 +1,5 @@
-import { useCallback, useMemo } from "react";
-import { useQueries } from "@tanstack/react-query";
+import { useCallback } from "react";
+import { useQueries, useQueryClient } from "@tanstack/react-query";
 import { ConnectError, type Client } from "@connectrpc/connect";
 import type { QueryService } from "../gen/kseal/v1/query_service_pb";
 import { useClients, useSession } from "../state/useAuth";
@@ -102,28 +102,42 @@ function placeholderSnapshot(tenantId: string): TenantSnapshot {
 export function useFleet(): UseFleetResult {
   const { query } = useClients();
   const { tenantIds, apiBaseUrl } = useSession();
+  const queryClient = useQueryClient();
 
-  const results = useQueries({
+  // `combine` is memoized by react-query against the underlying query results,
+  // so the snapshot fan-out and the fleet aggregation (potentially thousands of
+  // tenants) only recompute when a tenant's result actually changes — not on
+  // every render, which a plain useMemo over the `useQueries` array would do
+  // (that array is a fresh reference each render in v5).
+  const combine = useCallback(
+    (results: { data?: TenantSnapshot; isLoading: boolean; isFetching: boolean }[]) => {
+      const snapshots = results.map(
+        (r, i) => r.data ?? placeholderSnapshot(tenantIds[i]),
+      );
+      return {
+        rollup: computeFleetRollup(snapshots),
+        snapshots,
+        isLoading: results.some((r) => r.isLoading),
+        isFetching: results.some((r) => r.isFetching),
+      };
+    },
+    [tenantIds],
+  );
+
+  const { rollup, snapshots, isLoading, isFetching } = useQueries({
     queries: tenantIds.map((tenantId) => ({
       queryKey: ["fleet-tenant", apiBaseUrl, tenantId] as const,
       queryFn: () => fetchTenantSnapshot(query, tenantId),
       staleTime: 15_000,
     })),
+    combine,
   });
 
-  const snapshots = useMemo<TenantSnapshot[]>(
-    () => results.map((r, i) => r.data ?? placeholderSnapshot(tenantIds[i])),
-    [results, tenantIds],
-  );
-
-  const rollup = useMemo(() => computeFleetRollup(snapshots), [snapshots]);
-
-  const isLoading = results.some((r) => r.isLoading);
-  const isFetching = results.some((r) => r.isFetching);
-
   const refetch = useCallback(() => {
-    for (const r of results) void r.refetch();
-  }, [results]);
+    // Refetch the whole fleet by key prefix so we don't retain per-result
+    // handles (which would defeat the `combine` memoization above).
+    void queryClient.refetchQueries({ queryKey: ["fleet-tenant", apiBaseUrl] });
+  }, [queryClient, apiBaseUrl]);
 
   return { rollup, snapshots, isLoading, isFetching, refetch };
 }
