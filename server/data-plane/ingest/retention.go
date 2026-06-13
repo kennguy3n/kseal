@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -22,7 +23,8 @@ func (realClock) Now() time.Time { return time.Now() }
 
 // RetentionResolver reports a tenant's raw-telemetry retention window in days.
 // ok=false means the tenant has no explicit override and the platform default
-// applies.
+// applies. ok=true makes the returned days authoritative for that tenant,
+// including 0 which means "retain indefinitely".
 type RetentionResolver interface {
 	RawRetentionDays(ctx context.Context, tenantID string) (days int, ok bool, err error)
 }
@@ -87,21 +89,27 @@ type PurgeReport struct {
 	EventsPurged   int
 }
 
-// retentionDaysFor resolves the effective window for a tenant: the per-tenant
-// override when set and positive, otherwise the platform default. A non-positive
-// result means "retain indefinitely".
+// retentionDaysFor resolves the effective window for a tenant. An explicit
+// per-tenant override is authoritative: a positive value sets that tenant's
+// window, and 0 (or negative) means "retain indefinitely" for that tenant,
+// overriding the platform default. Tenants without an override inherit the
+// platform default. A non-positive result means "retain indefinitely".
 func (p *Purger) retentionDaysFor(ctx context.Context, tenantID string) (int, error) {
 	days, ok, err := p.resolver.RawRetentionDays(ctx, tenantID)
 	if err != nil {
 		return 0, err
 	}
-	if ok && days > 0 {
+	if ok {
 		return days, nil
 	}
 	return p.defaultDays, nil
 }
 
-// PurgeOnce runs a single retention pass over every tenant with raw events.
+// PurgeOnce runs a single retention pass over every tenant with raw events. A
+// per-tenant failure (resolver or store error) is recorded but does not abort
+// the pass, so one misbehaving tenant cannot block retention for the rest; the
+// joined error is returned alongside the partial report. Context cancellation
+// stops the pass immediately.
 func (p *Purger) PurgeOnce(ctx context.Context) (PurgeReport, error) {
 	tenants, err := p.store.TenantIDs(ctx)
 	if err != nil {
@@ -109,13 +117,15 @@ func (p *Purger) PurgeOnce(ctx context.Context) (PurgeReport, error) {
 	}
 	now := p.clock.Now().Unix()
 	report := PurgeReport{TenantsScanned: len(tenants)}
+	var errs []error
 	for _, tenantID := range tenants {
 		if ctx.Err() != nil {
-			return report, ctx.Err()
+			return report, errors.Join(append(errs, ctx.Err())...)
 		}
 		days, err := p.retentionDaysFor(ctx, tenantID)
 		if err != nil {
-			return report, fmt.Errorf("retention for tenant %s: %w", tenantID, err)
+			errs = append(errs, fmt.Errorf("retention for tenant %s: %w", tenantID, err))
+			continue
 		}
 		if days <= 0 {
 			// Retain indefinitely for this tenant.
@@ -124,11 +134,12 @@ func (p *Purger) PurgeOnce(ctx context.Context) (PurgeReport, error) {
 		cutoff := now - int64(days)*secondsPerDay
 		purged, err := p.store.PurgeRawEventsOlderThan(ctx, tenantID, cutoff)
 		if err != nil {
-			return report, fmt.Errorf("purge tenant %s: %w", tenantID, err)
+			errs = append(errs, fmt.Errorf("purge tenant %s: %w", tenantID, err))
+			continue
 		}
 		report.EventsPurged += purged
 	}
-	return report, nil
+	return report, errors.Join(errs...)
 }
 
 // Run purges on the given interval until the context is cancelled. Errors are

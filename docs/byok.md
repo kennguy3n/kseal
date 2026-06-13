@@ -120,7 +120,9 @@ purging never crosses tenants.
 - Per-tenant override lives in the `tenants.raw_retention_days` column (migration
   `011_raw_retention.sql`), managed via
   `registry.RetentionResolver.SetTenantRawRetentionDays`. `NULL` means "use the
-  platform default".
+  platform default"; an explicit override is authoritative, where a positive
+  value sets that tenant's window and `0` means "retain indefinitely" for that
+  tenant regardless of the platform default.
 
 The purger is interface-driven (`RawEventStore`, `RetentionResolver`, `Clock`)
 and unit-tested with a fake clock; the server runs it hourly.

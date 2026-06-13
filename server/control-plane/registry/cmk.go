@@ -24,8 +24,9 @@ type CMKResolver struct {
 	db  *db.DB
 	ttl time.Duration
 
-	mu    sync.RWMutex
-	cache map[string]cmkCacheEntry
+	mu        sync.RWMutex
+	cache     map[string]cmkCacheEntry
+	lastSweep time.Time
 }
 
 type cmkCacheEntry struct {
@@ -78,8 +79,24 @@ func (r *CMKResolver) KMSKeyURI(ctx context.Context, tenantID string) (string, b
 	}
 	r.mu.Lock()
 	r.cache[tenantID] = cmkCacheEntry{uri: value, enabled: enabled, expiresAt: now.Add(r.ttl)}
+	r.sweepLocked(now)
 	r.mu.Unlock()
 	return value, enabled, nil
+}
+
+// sweepLocked drops expired entries at most once per TTL so the cache stays
+// bounded by the tenants seen within the window rather than every tenant ever
+// queried. The caller must hold the write lock.
+func (r *CMKResolver) sweepLocked(now time.Time) {
+	if now.Sub(r.lastSweep) < r.ttl {
+		return
+	}
+	for id, e := range r.cache {
+		if !now.Before(e.expiresAt) {
+			delete(r.cache, id)
+		}
+	}
+	r.lastSweep = now
 }
 
 // SetTenantCMKKeyURI configures (uri != "") or clears (uri == "") a tenant's

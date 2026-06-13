@@ -24,8 +24,10 @@ type Options struct {
 	// OTLPSampleRatio is the head-sampling probability in [0,1]. Values <= 0 or
 	// >= 1 sample everything. Only meaningful when an exporter is attached.
 	OTLPSampleRatio float64
-	// OTLPInsecure disables transport security to the collector (typical for an
-	// in-cluster collector behind a service mesh). Defaults to true.
+	// OTLPInsecure disables transport security to the collector. The zero value
+	// (false) keeps TLS, so a caller that omits this field fails closed to a
+	// secured connection. The config layer sets it from KSEAL_OTLP_INSECURE,
+	// which defaults to true for the typical in-cluster collector behind a mesh.
 	OTLPInsecure bool
 }
 

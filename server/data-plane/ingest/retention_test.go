@@ -131,22 +131,23 @@ func TestPurgeDisabledWhenNoWindow(t *testing.T) {
 	}
 }
 
-func TestPurgePerTenantOverrideZeroDisables(t *testing.T) {
+func TestPurgePerTenantOverrideZeroRetainsIndefinitely(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 6, 13, 0, 0, 0, 0, time.UTC)
 	store := NewInMemoryAnalyticsStore()
 	_ = store.Write(ctx, []StoredEvent{
 		{ID: "old", TenantID: "tenant-x", TimeBucket: ageBucket(now, 90)},
 	})
-	// Override of 0 is treated as "not set" -> platform default applies.
+	// An explicit override of 0 is authoritative: retain indefinitely for this
+	// tenant even though the platform default (30) would otherwise purge.
 	resolver := fakeRetentionResolver{days: map[string]int{"tenant-x": 0}}
 	p := NewPurger(store, resolver, 30, WithClock(fakeClock{now}))
 	report, err := p.PurgeOnce(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.EventsPurged != 1 {
-		t.Fatalf("expected default window to purge the 90-day event, got %d", report.EventsPurged)
+	if report.EventsPurged != 0 {
+		t.Fatalf("expected per-tenant 0 override to retain everything, got %d purged", report.EventsPurged)
 	}
 }
 
@@ -157,6 +158,50 @@ func TestPurgePropagatesResolverError(t *testing.T) {
 	p := NewPurger(store, fakeRetentionResolver{err: context.DeadlineExceeded}, 30)
 	if _, err := p.PurgeOnce(ctx); err == nil {
 		t.Fatal("expected resolver error to propagate")
+	}
+}
+
+// errOnTenantResolver fails only for a specific tenant, exercising the
+// continue-on-error behavior: a single bad tenant must not block the rest.
+type errOnTenantResolver struct {
+	days    map[string]int
+	failFor string
+}
+
+func (r errOnTenantResolver) RawRetentionDays(_ context.Context, tenantID string) (int, bool, error) {
+	if tenantID == r.failFor {
+		return 0, false, context.DeadlineExceeded
+	}
+	d, ok := r.days[tenantID]
+	return d, ok, nil
+}
+
+func TestPurgeContinuesPastPerTenantError(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 6, 13, 0, 0, 0, 0, time.UTC)
+	store := NewInMemoryAnalyticsStore()
+	_ = store.Write(ctx, []StoredEvent{
+		{ID: "bad-old", TenantID: "tenant-bad", TimeBucket: ageBucket(now, 90)},
+		{ID: "good-old", TenantID: "tenant-good", TimeBucket: ageBucket(now, 90)},
+		{ID: "good-new", TenantID: "tenant-good", TimeBucket: ageBucket(now, 1)},
+	})
+	resolver := errOnTenantResolver{days: map[string]int{"tenant-good": 30}, failFor: "tenant-bad"}
+	p := NewPurger(store, resolver, 30, WithClock(fakeClock{now}))
+
+	report, err := p.PurgeOnce(ctx)
+	if err == nil {
+		t.Fatal("expected the failing tenant's error to be reported")
+	}
+	// Despite tenant-bad failing, tenant-good's stale event is still purged.
+	if report.EventsPurged != 1 {
+		t.Fatalf("expected 1 purged for the healthy tenant, got %d", report.EventsPurged)
+	}
+	remaining := idsByTenant(t, store)
+	if got := remaining["tenant-good"]; len(got) != 1 || got[0] != "good-new" {
+		t.Fatalf("tenant-good should keep only good-new, got %v", got)
+	}
+	if got := remaining["tenant-bad"]; len(got) != 1 {
+		t.Fatalf("tenant-bad events must be untouched on error, got %v", got)
 	}
 }
 
