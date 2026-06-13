@@ -48,17 +48,15 @@ services:
     restart: unless-stopped
     # Match prod eviction semantics: TTL'd nonces/rate-limit keys, no persistence.
     command:
-      [
-        "redis-server",
-        "--save",
-        "",
-        "--appendonly",
-        "no",
-        "--maxmemory",
-        "256mb",
-        "--maxmemory-policy",
-        "volatile-lru",
-      ]
+      - redis-server
+      - --save
+      - ""
+      - --appendonly
+      - "no"
+      - --maxmemory
+      - 256mb
+      - --maxmemory-policy
+      - volatile-lru
     ports:
       - "6379:6379"
     networks: [kseal]
