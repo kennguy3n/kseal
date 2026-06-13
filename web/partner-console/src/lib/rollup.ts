@@ -53,7 +53,7 @@ export interface TenantSnapshot {
   status: TenantLoadStatus;
   overview?: TenantOverviewData;
   trust?: TrustSessionData;
-  errors: string[];
+  errors: readonly string[];
 }
 
 export type HealthBand = "healthy" | "watch" | "at-risk" | "unknown";
@@ -70,7 +70,7 @@ export interface TenantHealth {
   mediumRiskRate: number;
   healthScore: number;
   band: HealthBand;
-  errors: string[];
+  errors: readonly string[];
 }
 
 /** Fleet-wide aggregate across all managed tenants. */
