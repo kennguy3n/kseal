@@ -272,7 +272,10 @@ func (s *PostgresStore) SearchApps(ctx context.Context, tenantID, query string, 
 			  -- $2 is '%%' only when the query is empty (match-all); compare it as a
 			  -- plain string to skip the per-row LIKE that would match everything.
 			  AND ($2 = '%%' OR lower(name) LIKE $2 ESCAPE '\' OR lower(package_id) LIKE $2 ESCAPE '\')
-			ORDER BY name, id
+			-- COLLATE "C" gives a byte-wise ordering that matches MemStore's Go
+			-- string comparison, so both stores paginate results identically
+			-- regardless of the database's locale collation.
+			ORDER BY name COLLATE "C", id
 			LIMIT $3 OFFSET $4`, tenantID, pattern, size+1, offset)
 		if err != nil {
 			return err

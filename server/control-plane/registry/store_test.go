@@ -165,6 +165,30 @@ func runStoreSuite(t *testing.T, store Store) {
 		}
 	})
 
+	t.Run("app search ordering is byte-wise and store-consistent", func(t *testing.T) {
+		// Both stores must order identically regardless of the database locale
+		// collation: MemStore uses Go's byte-wise string compare and Postgres
+		// uses COLLATE "C". Under byte ordering uppercase (0x41-) sorts before
+		// lowercase (0x61-), which a locale collation like en_US would not do.
+		a := mustTenant(t, store)
+		for _, name := range []string{"apple", "Banana", "Cherry", "apricot"} {
+			if _, err := store.CreateApp(ctx, CreateAppInput{TenantID: a.Id, Name: name, PackageID: uniqueSlug("com.ord"), Platform: ksealv1.Platform_PLATFORM_ANDROID}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		got, _, err := store.SearchApps(ctx, a.Id, "", Page{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := make([]string, len(got))
+		for i, ap := range got {
+			out[i] = ap.Name
+		}
+		if want := "Banana,Cherry,apple,apricot"; strings.Join(out, ",") != want {
+			t.Fatalf("byte-wise ordering: got %q want %q", strings.Join(out, ","), want)
+		}
+	})
+
 	t.Run("policy activation", func(t *testing.T) {
 		a := mustTenant(t, store)
 		app := mustApp(t, store, a.Id)
