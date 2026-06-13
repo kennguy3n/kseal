@@ -8,8 +8,8 @@ This document tracks delivery against the six-phase roadmap. Status values: **NO
 |---|---|---|---|
 | [Phase 0](#phase-0-research--threat-model-6-8-weeks) | Research & Threat Model | 6–8 weeks | **DONE \| 100%** |
 | [Phase 1](#phase-1-api-trust-product-3-4-months) | API Trust Product | 3–4 months | **DONE \| 100%** |
-| [Phase 2](#phase-2-runtime-protection-4-6-months) | Runtime Protection | 4–6 months | **IN PROGRESS \| ~88%** |
-| [Phase 3](#phase-3-build-time-hardening-6-9-months) | Build-Time Hardening | 6–9 months | **NOT STARTED** |
+| [Phase 2](#phase-2-runtime-protection-4-6-months) | Runtime Protection | 4–6 months | **DONE \| 100%** |
+| [Phase 3](#phase-3-build-time-hardening-6-9-months) | Build-Time Hardening | 6–9 months | **IN PROGRESS \| ~78%** |
 | [Phase 4](#phase-4-enterprise-scale-9-12-months) | Enterprise Scale | 9–12 months | **NOT STARTED** |
 | [Phase 5](#phase-5-desktop-6-months-after-mobile-maturity) | Desktop | 6+ months post-mobile | **NOT STARTED** |
 
@@ -71,7 +71,7 @@ Validate the threat model, standards mapping, platform constraints, and cost mod
 
 ## Phase 2: Runtime Protection (4-6 months)
 
-**Status: IN PROGRESS | ~88%**
+**Status: DONE | 100%**
 
 > **Default response order = `observe → step-up → block` (block only after simulation).**
 
@@ -86,26 +86,26 @@ Validate the threat model, standards mapping, platform constraints, and cost mod
 | Local risk engine | DONE | | `sdk/rust-core/kseal-core/src/risk_engine.rs` — signal fusion in the Rust core |
 | Policy simulator | DONE | | `server/data-plane/simulator` — replay traffic vs candidate policy |
 | False-positive guardrails | DONE | | `server/data-plane/guardrails` — auto-detect anomalous block rates |
-| SIEM integration | NOT STARTED | | Splunk / Sentinel / Elastic templates |
+| SIEM integration | DONE | | `server/data-plane/siem` — per-tenant export to Splunk HEC / Microsoft Sentinel (DCR) / Elastic (ECS); backpressured, batched, at-least-once with idempotency keys + per-tenant circuit breaker; privacy allow-list (no PII); connector templates under `server/data-plane/siem/templates` |
 
 ---
 
 ## Phase 3: Build-Time Hardening (6-9 months)
 
-**Status: NOT STARTED**
+**Status: IN PROGRESS | ~78%**
 
 ### Modules
 
 | Module | Status | Assignee | Notes |
 |---|---|---|---|
-| Gradle plugin | NOT STARTED | | R8-compatible integration |
-| Xcode plugin | NOT STARTED | | XCFramework + SwiftPM + build plugin |
-| Android obfuscation / resource / string encryption | NOT STARTED | | Layered on R8, mapping-file aware |
-| iOS string / symbol hardening | NOT STARTED | | Metadata stripping |
+| Gradle plugin | DONE | | `plugins/gradle` — `io.kseal.android.harden`, R8-aware; all tasks incremental + cacheable + config-cache compatible; Gradle TestKit functional tests |
+| Xcode plugin | DONE | | `plugins/xcode` — XCFramework build + SwiftPM build-tool plugin + `kseal-harden` CLI; public-APIs-only (App Store safe) |
+| Android obfuscation / resource / string encryption | DONE | | AES-256-GCM string/resource sealing + ASM debug-metadata stripping, R8 mapping-file aware |
+| iOS string / symbol hardening | DONE | | Seed-XOR string hardening + `strip`/`nm`/`otool` symbol stripping + metadata stripping |
 | Native library hardening | NOT STARTED | | .so/Mach-O hardening, CFI/MTE |
-| Per-build polymorphism | NOT STARTED | | Randomized structure per build |
-| Build proof | NOT STARTED | | Build hash/manifest provenance |
-| CI release gate | NOT STARTED | | Block release on policy/compat failure |
+| Per-build polymorphism | DONE | | Per-build HKDF-SHA256 polymorphism seed in both plugins (randomizes keys/structure per build) |
+| Build proof | DONE | | `kseal.build-proof/v1` manifest (build hash + tool versions + seed digest), identical schema across Android/iOS; registered via `RegistryService.CreateBuild` with offline fallback |
+| CI release gate | DONE | | `.github/workflows/release-gate.yml` — proto-drift, buf-breaking, build + unit/integration tests, container build + image scan; blocks release on failure |
 | MASVS evidence report | NOT STARTED | | Auto-generated per release |
 
 ---
@@ -153,3 +153,4 @@ Validate the threat model, standards mapping, platform constraints, and cost mod
 |---|---|
 | 2026-06-12 | Initial documentation set created: README, PROPOSAL, ARCHITECTURE, PROGRESS, and project scaffold. Phase 0 marked IN PROGRESS. |
 | 2026-06-13 | Full platform delivery merged to `main` and verified end-to-end. **Phase 0 → DONE** (threat model, MASVS mapping, iOS/Android policy reviews, parity matrix, cost model, Rust startup benches, attestation prototype). **Phase 1 → DONE** (all 11 server + SDK modules: registry, trust sessions, Play Integrity + App Attest verifiers, signed request proof, signed config, ingest, query, webhooks, Android/iOS SDKs, Rust trust core, React console). **Phase 2 → IN PROGRESS ~88%** (7 runtime-protection modules done across the Rust core + mobile probes + policy simulator + false-positive guardrails; SIEM integration not started). Added the real end-to-end integration suite under `tests/` (trust flow + anti-replay, telemetry ingest/query with quota, signed config, webhook delivery + retry, query overview + cross-tenant isolation, privacy contract) running against Postgres 16 + Redis 7 via testcontainers. |
+| 2026-06-13 | Second delivery wave (5 parallel workstreams) merged to `main`. **Phase 2 → DONE** — SIEM integration (`server/data-plane/siem`): per-tenant export to Splunk HEC / Microsoft Sentinel / Elastic, backpressured + batched + at-least-once with per-tenant circuit breaker, privacy allow-list (no PII), connector templates. **Phase 3 → IN PROGRESS ~78%** — Gradle (`plugins/gradle`) + Xcode (`plugins/xcode`) build-time hardening plugins (R8-aware obfuscation, AES-GCM string/resource sealing, symbol/metadata stripping, per-build HKDF polymorphism seed), shared `kseal.build-proof/v1` manifest registered via `RegistryService.CreateBuild`, and the CI release gate (`.github/workflows/release-gate.yml`); native CFI/MTE hardening + MASVS evidence report still pending. Added the **`cmd/kseal-cli`** operator CLI (tenant/app/build/policy/simulate/webhook/events) and the **`deploy/`** foundation (Helm chart with HPA/PDB/NetworkPolicy, Terraform modules, Prometheus/Grafana observability) as enabling infrastructure. Fixed a server bug surfaced by the CLI: the observability interceptor dereferenced a typed-nil `*connect.Response` on the error path, masking every errored RPC as `Internal`. |
