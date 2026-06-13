@@ -23,6 +23,9 @@
   <ItemGroup>
     <!-- Authenticode timestamp (countersignature) inspection via SignedCms. -->
     <PackageReference Include="System.Security.Cryptography.Pkcs" Version="8.0.1" />
+    <!-- Windows-only registry read for MDM/GPO-delivered enterprise policy;
+         guarded by [SupportedOSPlatform] so the package builds on any host. -->
+    <PackageReference Include="Microsoft.Win32.Registry" Version="5.0.0" />
   </ItemGroup>
 
 </Project>

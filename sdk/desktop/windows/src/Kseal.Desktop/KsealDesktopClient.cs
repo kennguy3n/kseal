@@ -17,6 +17,13 @@ public sealed record KsealDesktopOptions
 
     /// <summary>Telemetry events buffered before a batch is flushed.</summary>
     public int MaxBatchEvents { get; init; } = 32;
+
+    /// <summary>
+    /// Enterprise compatibility controls. When null, the SDK reads the OS-managed
+    /// configuration (GPO/MDM registry policy on Windows); a non-null value
+    /// overrides it. The strict default relaxes nothing.
+    /// </summary>
+    public EnterprisePolicy? EnterprisePolicy { get; init; }
 }
 
 /// <summary>
@@ -41,7 +48,17 @@ public sealed class KsealDesktopClient : IDisposable
     private readonly ICodeIntegrityAttestor _attestor;
     private readonly string _installIdentityHash;
     private readonly IClock _clock;
+    private readonly bool _proofKeyIsHardwareBacked;
     private readonly IReadOnlyList<IProbe> _probes;
+
+    /// <summary>The effective enterprise compatibility controls in force.</summary>
+    public EnterprisePolicy EnterprisePolicy { get; }
+
+    /// <summary>
+    /// Whether the request-proof key is sealed by a hardware-backed element
+    /// (TPM). False on hosts that fall back to the software store.
+    /// </summary>
+    public bool ProofKeyIsHardwareBacked => _proofKeyIsHardwareBacked;
 
     private readonly object _gate = new();
     private readonly List<byte[]> _pendingEvents = [];
@@ -59,7 +76,9 @@ public sealed class KsealDesktopClient : IDisposable
         ITelemetrySink telemetrySink,
         ICodeIntegrityAttestor attestor,
         string installIdentityHash,
-        IClock clock)
+        IClock clock,
+        bool proofKeyIsHardwareBacked = false,
+        EnterprisePolicy? enterprisePolicy = null)
     {
         _core = core;
         _env = env;
@@ -69,7 +88,9 @@ public sealed class KsealDesktopClient : IDisposable
         _attestor = attestor;
         _installIdentityHash = installIdentityHash;
         _clock = clock;
-        _probes = BuildProbes(env, options);
+        _proofKeyIsHardwareBacked = proofKeyIsHardwareBacked;
+        EnterprisePolicy = enterprisePolicy ?? EnterprisePolicy.Strict;
+        _probes = BuildProbes(env, options, EnterprisePolicy);
     }
 
     /// <summary>The Rust trust core version string.</summary>
@@ -154,6 +175,9 @@ public sealed class KsealDesktopClient : IDisposable
     public void ReportEvent(EventType eventType)
     {
         ulong bits = RiskSignals.Pack(RunProbes());
+        // Minimal telemetry verbosity drops clean (no-signal) events to cut
+        // volume; standard/verbose record everything the host reports.
+        if (EnterprisePolicy.TelemetryVerbosity == TelemetryVerbosity.Minimal && bits == 0) return;
         byte[]? evt = TryMakeEvent(eventType, bits);
         if (evt is null) return;
 
@@ -238,6 +262,13 @@ public sealed class KsealDesktopClient : IDisposable
     {
         var signals = new HashSet<RiskSignal>();
         foreach (var probe in _probes) signals.UnionWith(probe.Evaluate());
+        // Fail closed for regulated deployments: if hardware-backed proof keys
+        // are required but unavailable, surface the missing-secure-hardware
+        // signal so the server can adjudicate it. Off by default.
+        if (EnterprisePolicy.RequireHardwareBackedProofKey && !_proofKeyIsHardwareBacked)
+        {
+            signals.Add(RiskSignal.SecureHwMissing);
+        }
         return signals;
     }
 
@@ -247,14 +278,15 @@ public sealed class KsealDesktopClient : IDisposable
         return _clock.NowMillis() / hourMillis * hourMillis;
     }
 
-    private static IReadOnlyList<IProbe> BuildProbes(IWindowsEnvironment env, KsealDesktopOptions options)
+    private static IReadOnlyList<IProbe> BuildProbes(
+        IWindowsEnvironment env, KsealDesktopOptions options, EnterprisePolicy enterprise)
     {
         var policy = options.IntegrityPolicy;
         IProbe[] all =
         [
             new AuthenticodeProbe(env, policy),
             new PeIntegrityProbe(env, policy),
-            new DllInjectionProbe(env),
+            new DllInjectionProbe(env, enterprise.AllowsModule),
             new DebuggerProbe(env),
         ];
         // Default desktop set omits the aggressive anti-debug probe; the host opts
@@ -262,6 +294,9 @@ public sealed class KsealDesktopClient : IDisposable
         IEnumerable<IProbe> selected = options.EnabledProbes is { } enabled
             ? all.Where(p => enabled.Contains(p.Id))
             : all.Where(p => p.Id != "windows.debugger");
+        // A managed developer machine may permit debugging: drop the debugger
+        // probe so legitimate debugging does not raise a signal.
+        if (enterprise.PermitDebugger) selected = selected.Where(p => p.Id != "windows.debugger");
         return [.. selected];
     }
 
@@ -296,15 +331,21 @@ public sealed class KsealDesktopClient : IDisposable
             var opts = options ?? new KsealDesktopOptions();
             string storageDir = StorageDirectory(tenantId, appId);
             var env = DesktopEnvironmentFactory.Create();
-            byte[] proofKey = new DefaultProofKeyProvider(storageDir).ProofKey();
+            IHardwareKeyStore keyStore = HardwareKeyStoreFactory.Create(StorageScope.Component(tenantId, appId));
+            var proofKeyProvider = new HardwareBoundProofKeyProvider(storageDir, keyStore);
+            byte[] proofKey = proofKeyProvider.ProofKey();
             var core = NativeTrustCore.Create(
                 opts.ConfigPublicKey, proofKey, Platform.Unspecified, opts.MaxBatchEvents);
             var configProvider = new FileConfigProvider(storageDir);
             string installHash = new InstallIdentity(storageDir).TenantScopedHash(tenantId, appId);
+            // Read the OS-managed enterprise configuration unless the host supplied
+            // one directly; absent any managed config this is the strict baseline.
+            EnterprisePolicy enterprisePolicy = opts.EnterprisePolicy ?? EnterprisePolicyFactory.CreateDefault().CurrentPolicy();
 
             var sdk = new KsealDesktopClient(
                 core, env, opts, configProvider, new BufferingTelemetrySink(),
-                attestor ?? new LocalCodeIntegrityAttestor(), installHash, new SystemClock());
+                attestor ?? new LocalCodeIntegrityAttestor(), installHash, new SystemClock(),
+                proofKeyProvider.IsHardwareBacked, enterprisePolicy);
 
             byte[]? cached = configProvider.CachedConfig();
             if (cached is not null) core.TryLoadConfig(cached);

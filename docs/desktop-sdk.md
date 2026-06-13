@@ -20,6 +20,9 @@ it raises attacker cost and feeds signals; the **server decides**
 - [Public-API-only / store-safety rationale](#public-api-only--store-safety-rationale)
 - [Mock boundaries](#mock-boundaries)
 - [Threat model: desktop caution](#threat-model-desktop-caution)
+- [Enterprise compatibility controls](#enterprise-compatibility-controls)
+- [Hardware-bound request proofs](#hardware-bound-request-proofs)
+- [Secure software updates](#secure-software-updates)
 - [Performance & footprint budget](#performance--footprint-budget)
 - [Privacy & multi-tenant isolation](#privacy--multi-tenant-isolation)
 - [Integration guide — macOS](#integration-guide--macos)
@@ -83,6 +86,9 @@ ecosystem.)
 | Binary structure integrity | code-signature validity (covers Mach-O) | `PeImage` PE header/section parser + section SHA-256 | **Real** |
 | Injection / hooking | `DYLD_INSERT_LIBRARIES` + foreign dylibs | foreign loaded modules (outside app/OS dirs) | **Real** |
 | Debugger attached (opt-in) | `sysctl(P_TRACED)` seam | `IsDebuggerPresent` / `Debugger.IsAttached` | **Real**, off by default |
+| Hardware-bound proof key | Keychain / Secure Enclave (`SecKey`, P-256) | TPM via CNG Platform Crypto Provider (`RSACng`) | **Real** (software fallback) |
+| Secure-update signature | Sparkle EdDSA appcast (Ed25519 over archive) | Ed25519-signed manifest + optional Authenticode payload check | **Real** verification, mocked feed |
+| Enterprise policy source | managed preferences (`CFPreferences`, `io.kseal.desktop`) | GPO/MDM registry (`HKLM\…\Policies\Kseal\Desktop`) / JSON | **Real** |
 | Risk scoring / trust level | Rust core via FFI | Rust core via FFI | **Real** core |
 | Trust session RPCs | `TrustService` over Connect | `TrustService` over Connect | **Real** contract |
 | External attestation token source | `CodeIntegrityAttestor` interface | `ICodeIntegrityAttestor` interface | **Mocked boundary** (real default + test fake) |
@@ -123,6 +129,20 @@ as an interface with a **real default implementation** and a **test fake**:
 - Windows: `ICodeIntegrityAttestor` (default `LocalCodeIntegrityAttestor`) and
   the `IWindowsEnvironment` seam (default `WindowsEnvironment`).
 
+Three further external boundaries added with the Phase-5 modules follow the same
+real-default-plus-fake pattern:
+
+- **Secure-update feed** — `AppcastFeed` (macOS) / `IUpdateFeed` (Windows): the
+  third-party update channel. The signature/length/notarization/Authenticode
+  verification on top of it is **real**; only the feed transport is mocked
+  (`InMemoryAppcastFeed` / `InMemoryUpdateFeed`).
+- **Secure element** — `HardwareKeyStore` (macOS) / `IHardwareKeyStore`
+  (Windows): the Keychain/TPM seam used to seal the request-proof key. A test
+  fake exercises the seal/unseal logic without real hardware.
+- **Notary / payload verifier** — `UpdateNotaryVerifier` (macOS) /
+  `IUpdatePackageVerifier` (Windows): the Gatekeeper/Authenticode payload check,
+  consulted only when policy requires it.
+
 The default attestor derives a compact, **non-PII** local attestation from the
 verified code-signing identity (team/publisher + cdhash/thumbprint). There is no
 first-party desktop remote-attestation service comparable to Play Integrity /
@@ -148,6 +168,88 @@ foreign module as hostile would generate false positives. Therefore:
   and adjudicated server-side, where per-tenant policy decides tolerance.
 - Security-relevant ambiguity **fails closed**: an app that cannot read/parse its
   own signature or PE image raises tamper/app-integrity rather than passing.
+
+## Enterprise compatibility controls
+
+Desktop deployments span locked-down kiosks, managed developer fleets, and
+regulated tiers. The SDK reads an **MDM-friendly, auditable policy** so an
+enterprise can relax or tighten posture without a code change. **Every default
+is strict**: an unconfigured policy (`EnterprisePolicy.strict`) relaxes nothing
+and is byte-for-byte the pre-existing behavior, so this never changes the default
+behavior on `main`. The effective policy is surfaced
+(`KsealDesktop.enterprisePolicy` / `KsealDesktopClient.EnterprisePolicy`) so a
+deployment can audit exactly what was relaxed.
+
+| Control | Effect | Strict default |
+|---|---|---|
+| `permitDebugger` | Drops the debugger probe even if explicitly enabled — for managed dev machines where debugging is legitimate | `false` |
+| `injectionAllowlist` | Module paths (exact match or directory prefix ending in a path separator) that are sanctioned plugins/agents and do **not** raise the injection signal | `[]` |
+| `telemetryVerbosity` | `minimal` drops clean (no-signal) events to cut volume; `standard` records everything; `verbose` reserved for extra diagnostics | `standard` |
+| `requireHardwareBackedProofKey` | When the proof key is **not** hardware-backed, raise `secureHwMissing` so the server can fail closed for a regulated tier | `false` |
+
+**Where it is read (managed configuration):**
+
+- **macOS** — managed preferences for domain `io.kseal.desktop` (a configuration
+  profile pushed by MDM), via the public `CFPreferences` API. Keys:
+  `PermitDebugger` (bool), `InjectionAllowlist` (array of string),
+  `TelemetryVerbosity` (string), `RequireHardwareBackedProofKey` (bool). A JSON
+  drop file (`FileEnterprisePolicyProvider`) is the fallback/test seam.
+- **Windows** — GPO/MDM-delivered machine policy under
+  `HKLM\SOFTWARE\Policies\Kseal\Desktop`: `PermitDebugger` /
+  `RequireHardwareBackedProofKey` (REG_DWORD, non-zero = true),
+  `InjectionAllowlist` (REG_MULTI_SZ), `TelemetryVerbosity` (REG_SZ). A JSON drop
+  file is the cross-platform fallback/test seam.
+
+Unset keys keep the strict default, so a partial managed config only relaxes the
+keys it explicitly sets. A missing or malformed config yields the strict
+baseline (fail safe). Hosts that manage policy themselves can inject one directly
+via `KsealDesktopOptions.enterprisePolicy`.
+
+## Hardware-bound request proofs
+
+The per-request proof is `HMAC(proofKey, …)` computed by the shared core; the
+**byte layout is identical across every SDK** (mobile and desktop) and is
+unchanged by this module — only *how the `proofKey` is protected at rest* gains a
+hardware binding.
+
+- **macOS** — `HardwareKeyStore` seals the key with a Keychain / Secure-Enclave
+  P-256 key (ECIES) before it is persisted.
+- **Windows** — `TpmHardwareKeyStore` seals it with a non-exportable RSA key in
+  the **Microsoft Platform Crypto Provider** (TPM); unsealing decrypts inside the
+  TPM, so the on-disk blob is useless on another machine.
+
+Both wrap a **clean software fallback** (`SoftwareKeyStore` / passthrough) used
+when no secure element is present (CI, virtualized hosts). Continuity is
+preserved: a legacy *raw* key already on disk is adopted and re-sealed in place,
+and if hardware sealing fails the SDK persists the raw key (software-equivalent)
+rather than bricking the host. When `requireHardwareBackedProofKey` is set and
+the binding is unavailable, the SDK raises `secureHwMissing` (fail closed). The
+binding plugs in at the `ProofKeyProvider` / `IProofKeyProvider` seam
+(`HardwareBoundProofKeyProvider`).
+
+## Secure software updates
+
+A self-updating desktop app is a high-value supply-chain target: an unverified
+update channel is remote code execution. The SDK verifies an update channel
+**before anything is applied** and **fails closed** on any verification failure.
+See [desktop-secure-update.md](desktop-secure-update.md) for the full design,
+threat model, and feed formats.
+
+- **macOS** — `SecureUpdateChannel` parses a **Sparkle-style signed appcast**
+  (`AppcastParser`, namespace-aware `XMLParser`), selects the newest applicable
+  item, length-checks the archive, and verifies its **Ed25519 (EdDSA)** signature
+  against the channel key using the **same Rust-core primitive** as config
+  verification. Optional notarization is checked via the `UpdateNotaryVerifier`
+  seam.
+- **Windows** — `SecureUpdateChannel` parses an **Ed25519-signed JSON manifest**,
+  applies the same length + signature verification, and (when
+  `RequireAuthenticode` is set) verifies the **Authenticode** signature of the
+  downloaded payload via the `IUpdatePackageVerifier` seam.
+
+The external **feed** is mocked behind `AppcastFeed` / `IUpdateFeed`; all
+verification logic is real and unit-tested against the real Ed25519 verifier with
+fixed test vectors. Cryptographic failures never return an update; a
+network/parse failure is treated as "no update available".
 
 ## Performance & footprint budget
 
@@ -177,9 +279,11 @@ foreign module as hostile would generate false positives. Therefore:
   schema, consistent with the ~5000-SME model in
   [ARCHITECTURE.md](../ARCHITECTURE.md).
 - The request-proof HMAC key is generated locally and persisted in app-private
-  storage; production should bind it to the platform key store (macOS
-  Keychain/Secure Enclave, Windows TPM via CNG/`NCrypt`). That binding plugs in
-  at the `ProofKeyProvider` / `IProofKeyProvider` seam.
+  storage, **sealed by the platform key store** where available (macOS
+  Keychain/Secure Enclave, Windows TPM via CNG), with a software fallback — see
+  [Hardware-bound request proofs](#hardware-bound-request-proofs). The on-disk
+  bytes for the software fallback are byte-identical to the prior default, so
+  existing installs keep their key and their server-side trust continuity.
 
 ## Integration guide — macOS
 
@@ -223,7 +327,20 @@ let session = try kseal.establishTrustSession(using: client)
 // 4. Bind sensitive requests to the trust token.
 let proof = try kseal.getRequestProof(requestHash: sha256(ofRequest))
 // attach proof.proofBytes to the outbound request; server validates it.
+
+// 5. Verify a signed update channel before applying (fails closed).
+let channel = SecureUpdateChannel(
+    policy: .init(publicKey: appcastPublicKey, currentVersion: .init("1.4.0"),
+                  requireNotarization: true),
+    feed: myAppcastFeed)              // your transport behind the AppcastFeed seam
+switch try channel.checkForUpdate() {
+case .upToDate: break
+case .updateAvailable(let verified): apply(verified.archive)   // signature + notarization already verified
+}
 ```
+
+The effective enterprise policy is read from managed preferences automatically;
+to inject one explicitly: `options = .init(..., enterprisePolicy: .init(permitDebugger: true))`.
 
 ## Integration guide — Windows
 
@@ -277,6 +394,27 @@ options = options with { EnabledProbes = new HashSet<string>
     { "windows.authenticode", "windows.peIntegrity", "windows.dllInjection", "windows.debugger" } };
 ```
 
+To verify a signed update channel before applying it (fails closed):
+
+```csharp
+var channel = new SecureUpdateChannel(
+    new UpdateChannelPolicy
+    {
+        PublicKey = updatePublicKey,                 // Ed25519, 32 bytes
+        CurrentVersion = new UpdateVersion("1.4.0"),
+        RequireAuthenticode = true,                  // also verify the payload's Authenticode
+    },
+    myUpdateFeed);                                   // your transport behind the IUpdateFeed seam
+switch (channel.CheckForUpdate())
+{
+    case SecureUpdateResult.UpToDate: break;
+    case SecureUpdateResult.UpdateAvailable a: Apply(a.Update.Archive); break; // already fully verified
+}
+```
+
+The effective enterprise policy is read from GPO/MDM registry automatically; to
+inject one explicitly: `options with { EnterprisePolicy = new EnterprisePolicy { PermitDebugger = true } }`.
+
 ## Building & testing
 
 ### macOS (SwiftPM)
@@ -311,16 +449,19 @@ logic is unit-tested via the `IWindowsEnvironment` fake.
 
 | SDK | Toolchain | How validated | Result |
 |---|---|---|---|
-| macOS | SwiftPM (Swift 6) on Linux | `swift build` + `swift test` against the real `libkseal_ffi.so` over the C ABI | **52 tests pass** |
-| Windows | .NET 8 SDK on Linux | `dotnet build` (warnings-as-errors) + `dotnet test` against the real `libkseal_ffi.so` via P/Invoke | **72 tests pass** |
+| macOS | SwiftPM (Swift 5.10) on Linux | `swift build` + `swift test` against the real `libkseal_ffi.so` over the C ABI | **91 tests pass** |
+| Windows | .NET 8 SDK on Linux | `dotnet build` (warnings-as-errors) + `dotnet test` against the real `libkseal_ffi.so` via P/Invoke | **119 tests pass** |
 
 What is **real** in the test runs: the Rust trust core (FFI), risk
 packing/scoring, request-proof generation/determinism, telemetry
 batch/compress, PE parsing + section hashing, the Connect trust-flow
-encode/decode, and all probe decision logic. What is **mocked**: the external OS
-attestation/notary boundary (`CodeIntegrityAttestor` / `ICodeIntegrityAttestor`)
-and the OS environment seam, so signature/PE/injection scenarios are driven
-deterministically.
+encode/decode, all probe decision logic, the **secure-update signature/length
+verification** (real Ed25519 over the FFI with fixed test vectors), the
+**proof-key seal/unseal** logic (via a fake secure element), and the
+**enterprise-policy** parsing/wiring. What is **mocked**: the external OS
+attestation/notary boundary (`CodeIntegrityAttestor` / `ICodeIntegrityAttestor`),
+the OS environment seam, the secure-update *feed*, and the secure element /
+notary, so all scenarios are driven deterministically.
 
 > The Windows `WinVerifyTrust` and macOS Security-framework calls are the
 > production code paths; they are necessarily exercised against a real signed
