@@ -33,6 +33,11 @@ func (f FeatureFlags) Enabled(tenantID, flag string) bool {
 	return false
 }
 
+// ParseFeatureFlags parses a feature-flag spec into FeatureFlags. It is the
+// exported entry point for tooling and tests that build flags directly without
+// loading the full environment; Load uses it for KSEAL_FEATURE_FLAGS.
+func ParseFeatureFlags(spec string) (FeatureFlags, error) { return parseFeatureFlags(spec) }
+
 // parseFeatureFlags parses a spec of the form:
 //
 //	"flagA=true,tenantX:flagB=true,*:flagC=false"

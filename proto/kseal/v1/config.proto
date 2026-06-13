@@ -3,6 +3,7 @@ syntax = "proto3";
 package kseal.v1;
 
 import "kseal/v1/common.proto";
+import "kseal/v1/compliance.proto";
 
 option go_package = "github.com/kennguy3n/kseal/server/gen/kseal/v1;ksealv1";
 
@@ -63,6 +64,10 @@ message ConfigRequest {
   string app_id = 2;
   Platform platform = 3;
   string sdk_version = 4;
+  // Opaque, tenant-scoped rotating instance identifier used for deterministic
+  // canary bucketing. Empty disables candidate selection for the caller
+  // (fail-safe: it stays on the stable config). Never a device fingerprint.
+  string instance_id = 5;
 }
 
 // ConfigResponse returns the signed config plus cache validators.
@@ -70,6 +75,11 @@ message ConfigResponse {
   SignedConfig config = 1;
   string etag = 2;
   int64 last_modified = 3;
+  // Signed remote kill switch in effect for the scope, when one is active and
+  // the kill-switch feature is enabled for the tenant. Absent by default. The
+  // SDK verifies the Ed25519 signature before acting; an absent or invalid
+  // command never disables (fail-safe).
+  SignedKillSwitch kill_switch = 4;
 }
 
 // PolicyRequest fetches the raw (unsigned) active policy, for tooling.

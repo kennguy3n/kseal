@@ -296,6 +296,16 @@ func (m *MemStore) GetActivePolicy(_ context.Context, tenantID, appID string) (*
 	return nil, ErrNotFound
 }
 
+func (m *MemStore) GetPolicy(_ context.Context, tenantID, id string) (*ksealv1.Policy, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	p, ok := m.policies[id]
+	if !ok || p.TenantId != tenantID {
+		return nil, ErrNotFound
+	}
+	return clonePolicy(p), nil
+}
+
 func (m *MemStore) ListPolicies(_ context.Context, tenantID, appID string) ([]*ksealv1.Policy, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

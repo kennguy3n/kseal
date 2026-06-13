@@ -58,6 +58,13 @@ type Config struct {
 	// CMKKMSAuthToken is an optional bearer token presented to the KMS endpoint.
 	CMKKMSAuthToken string
 
+	// DedicatedIsolation enables the dedicated/regulated isolation tier
+	// (KSEAL_DEDICATED_ISOLATION). When off (default) every tenant uses the
+	// shared logical isolation under the platform KEK (unchanged behavior). When
+	// on, tenants flagged dedicated_isolation (and without a customer-managed
+	// key) get a per-tenant HKDF-derived key domain.
+	DedicatedIsolation bool
+
 	// RedisTLS enables TLS to Redis (default false, plaintext).
 	RedisTLS bool
 	// RedisCAFile optionally pins the Redis server CA (PEM). Empty uses system
@@ -123,6 +130,9 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	if c.OTLPInsecure, err = boolDefault("KSEAL_OTLP_INSECURE", true); err != nil {
+		return nil, err
+	}
+	if c.DedicatedIsolation, err = boolDefault("KSEAL_DEDICATED_ISOLATION", false); err != nil {
 		return nil, err
 	}
 	if c.RawRetentionDays, err = atoiDefault("KSEAL_RAW_RETENTION_DAYS", 30); err != nil {

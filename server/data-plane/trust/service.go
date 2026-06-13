@@ -12,10 +12,14 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 
+	"github.com/kennguy3n/kseal/server/control-plane/compliance"
 	"github.com/kennguy3n/kseal/server/control-plane/registry"
 	"github.com/kennguy3n/kseal/server/data-plane/attestation"
+	"github.com/kennguy3n/kseal/server/data-plane/canary"
+	"github.com/kennguy3n/kseal/server/data-plane/guardrails"
 	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
 	"github.com/kennguy3n/kseal/server/gen/kseal/v1/ksealv1connect"
+	appconfig "github.com/kennguy3n/kseal/server/shared/config"
 	"github.com/kennguy3n/kseal/server/shared/crypto"
 	"github.com/kennguy3n/kseal/server/shared/risk"
 )
@@ -28,6 +32,11 @@ type Service struct {
 	nonces   *NonceStore
 	verifier *attestation.Verifier
 	tokenTTL time.Duration
+
+	// Optional canary health feed; nil disables it (default behavior).
+	detector *guardrails.Detector
+	canary   *canary.Registry
+	flags    appconfig.FeatureFlags
 }
 
 // NewService builds a TrustService.
@@ -36,6 +45,34 @@ func NewService(store registry.Store, nonces *NonceStore, verifier *attestation.
 		tokenTTL = 15 * time.Minute
 	}
 	return &Service{store: store, nonces: nonces, verifier: verifier, tokenTTL: tokenTTL}
+}
+
+// AttachCanaryHealth wires the guardrail health feed for canary auto-rollback.
+// Each validated request's allow/deny outcome is recorded against the cohort's
+// policy id (candidate or stable), so the controller can detect a candidate that
+// degrades. Flag-gated per tenant (compliance.FlagCanaryRollout); a nil detector
+// or registry disables it entirely.
+func (s *Service) AttachCanaryHealth(detector *guardrails.Detector, reg *canary.Registry, flags appconfig.FeatureFlags) {
+	s.detector = detector
+	s.canary = reg
+	s.flags = flags
+}
+
+// recordCanaryHealth attributes one decision to the instance's canary cohort.
+// It is cheap (in-memory) and no-ops unless the feature is enabled and a rollout
+// is active for the scope.
+func (s *Service) recordCanaryHealth(tenantID, appID, instanceID string, decision ksealv1.RequestProofResult_Decision) {
+	if s.detector == nil || s.canary == nil || instanceID == "" {
+		return
+	}
+	if !s.flags.Enabled(tenantID, compliance.FlagCanaryRollout) {
+		return
+	}
+	policyID, _ := s.canary.Cohort(tenantID, appID, instanceID)
+	if policyID == "" {
+		return
+	}
+	s.detector.RecordDecision(tenantID, appID, policyID, decision == ksealv1.RequestProofResult_DECISION_DENY)
 }
 
 // GetNonce issues a single-use challenge nonce for the attestation step.
@@ -223,6 +260,7 @@ func (s *Service) ValidateRequestProof(ctx context.Context, req *connect.Request
 		mode = policy.EnforcementMode
 	}
 	decision := risk.Decision(ksealv1.TrustLevel(sess.RiskLevel), mode)
+	s.recordCanaryHealth(sess.TenantID, sess.AppID, sess.InstanceID, decision)
 	return connect.NewResponse(&ksealv1.RequestProofResult{
 		Decision: decision,
 		Reason:   decisionReason(decision),

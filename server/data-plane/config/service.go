@@ -10,10 +10,19 @@ import (
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/kennguy3n/kseal/server/control-plane/compliance"
 	"github.com/kennguy3n/kseal/server/control-plane/registry"
+	"github.com/kennguy3n/kseal/server/data-plane/canary"
 	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
 	"github.com/kennguy3n/kseal/server/gen/kseal/v1/ksealv1connect"
+	appconfig "github.com/kennguy3n/kseal/server/shared/config"
 )
+
+// KillSwitchSource supplies a tenant's signed kill switches for delivery in the
+// config envelope. The compliance store satisfies it.
+type KillSwitchSource interface {
+	ListKillSwitches(ctx context.Context, tenantID string) ([]*ksealv1.SignedKillSwitch, error)
+}
 
 // Service implements the Connect ConfigService.
 type Service struct {
@@ -22,6 +31,11 @@ type Service struct {
 	store  registry.Store
 	signer *Signer
 	ttl    time.Duration
+
+	// Optional enterprise wiring; nil disables the feature (default behavior).
+	canary     *canary.Registry
+	killSwitch KillSwitchSource
+	flags      appconfig.FeatureFlags
 }
 
 // NewService builds a ConfigService with the given signed-config TTL.
@@ -32,13 +46,23 @@ func NewService(store registry.Store, signer *Signer, ttl time.Duration) *Servic
 	return &Service{store: store, signer: signer, ttl: ttl}
 }
 
+// AttachCompliance wires the optional canary rollout and signed kill-switch
+// delivery into config assembly. Both are flag-gated per tenant
+// (compliance.FlagCanaryRollout / FlagKillSwitch); when a flag is off the
+// config served is identical to the baseline.
+func (s *Service) AttachCompliance(reg *canary.Registry, killSwitch KillSwitchSource, flags appconfig.FeatureFlags) {
+	s.canary = reg
+	s.killSwitch = killSwitch
+	s.flags = flags
+}
+
 // GetConfig assembles the active policy into a signed, cacheable config bundle.
 func (s *Service) GetConfig(ctx context.Context, req *connect.Request[ksealv1.ConfigRequest]) (*connect.Response[ksealv1.ConfigResponse], error) {
 	m := req.Msg
 	if m.TenantId == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("tenant_id required"))
 	}
-	policy, err := s.store.GetActivePolicy(ctx, m.TenantId, m.AppId)
+	policy, err := s.resolvePolicy(ctx, m)
 	if errors.Is(err, registry.ErrNotFound) {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("no active policy"))
 	}
@@ -46,12 +70,16 @@ func (s *Service) GetConfig(ctx context.Context, req *connect.Request[ksealv1.Co
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
+	killSwitch := s.resolveKillSwitch(ctx, m)
+
 	pc := buildPolicyConfig(policy)
 	// PolicyHash is a hex-encoded SHA-256 digest (registry.HashPolicy), so it
-	// contains only token-safe characters. Wrap it in literal double quotes per
-	// RFC 7232 (a strong ETag) rather than fmt.Sprintf("%q", ...), which would
-	// Go-escape any special characters and could confuse CDN ETag parsers.
-	etag := `"` + pc.PolicyHash + `"`
+	// contains only token-safe characters. Fold in the kill-switch identity so a
+	// newly issued/updated switch busts a cached config within the TTL rather
+	// than waiting for it to expire. Wrap in literal double quotes per RFC 7232
+	// (a strong ETag) rather than fmt.Sprintf("%q", ...), which would Go-escape
+	// special characters and could confuse CDN ETag parsers.
+	etag := `"` + pc.PolicyHash + killSwitchEtag(killSwitch) + `"`
 	// If the client already holds this exact policy, advertise a cache hit by
 	// returning the same ETag before doing any marshal/sign work; the SDK/CDN
 	// compares against If-None-Match.
@@ -80,10 +108,59 @@ func (s *Service) GetConfig(ctx context.Context, req *connect.Request[ksealv1.Co
 		},
 		Etag:         etag,
 		LastModified: policy.UpdatedAt,
+		KillSwitch:   killSwitch,
 	})
 	resp.Header().Set("ETag", etag)
 	resp.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", int(s.ttl.Seconds())))
 	return resp, nil
+}
+
+// resolvePolicy returns the policy to serve: the candidate when the instance
+// falls in an active canary cohort and the feature is enabled for the tenant,
+// otherwise the active (stable) policy. It is fail-safe — any error resolving a
+// candidate falls back to the active policy so a rollout misconfiguration never
+// denies config.
+func (s *Service) resolvePolicy(ctx context.Context, m *ksealv1.ConfigRequest) (*ksealv1.Policy, error) {
+	active, err := s.store.GetActivePolicy(ctx, m.TenantId, m.AppId)
+	if err != nil {
+		return nil, err
+	}
+	if s.canary == nil || m.InstanceId == "" || !s.flags.Enabled(m.TenantId, compliance.FlagCanaryRollout) {
+		return active, nil
+	}
+	policyID, candidate := s.canary.Cohort(m.TenantId, m.AppId, m.InstanceId)
+	if !candidate || policyID == "" {
+		return active, nil
+	}
+	cand, err := s.store.GetPolicy(ctx, m.TenantId, policyID)
+	if err != nil || cand == nil {
+		return active, nil
+	}
+	return cand, nil
+}
+
+// resolveKillSwitch returns the signed kill switch in effect for the scope when
+// the feature is enabled for the tenant, or nil. It is fail-safe: any lookup
+// error yields nil (no kill switch delivered) rather than failing the config.
+func (s *Service) resolveKillSwitch(ctx context.Context, m *ksealv1.ConfigRequest) *ksealv1.SignedKillSwitch {
+	if s.killSwitch == nil || !s.flags.Enabled(m.TenantId, compliance.FlagKillSwitch) {
+		return nil
+	}
+	switches, err := s.killSwitch.ListKillSwitches(ctx, m.TenantId)
+	if err != nil {
+		return nil
+	}
+	_, active := compliance.GetKillSwitchState(switches, m.AppId, "")
+	return active
+}
+
+// killSwitchEtag derives a short cache-busting suffix from the kill switch's
+// scope and version so a changed switch invalidates a cached config.
+func killSwitchEtag(ks *ksealv1.SignedKillSwitch) string {
+	if ks == nil {
+		return ""
+	}
+	return fmt.Sprintf(":ks%d.%d", int32(ks.Command), ks.Version)
 }
 
 // GetPolicy returns the raw assembled policy without signing — for dashboards

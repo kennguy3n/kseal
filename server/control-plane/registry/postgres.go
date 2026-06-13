@@ -369,6 +369,24 @@ func (s *PostgresStore) GetActivePolicy(ctx context.Context, tenantID, appID str
 	return &p, nil
 }
 
+func (s *PostgresStore) GetPolicy(ctx context.Context, tenantID, id string) (*ksealv1.Policy, error) {
+	if tenantID == "" || id == "" {
+		return nil, fmt.Errorf("%w: tenant_id and id required", ErrInvalidInput)
+	}
+	var p ksealv1.Policy
+	err := s.db.WithTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
+		return scanPolicy(tx.QueryRow(ctx, `
+			SELECT id, tenant_id, app_id, name, version, enforcement_mode, rules, risk_thresholds, modules_enabled, is_active,
+			       EXTRACT(EPOCH FROM created_at)::bigint,
+			       EXTRACT(EPOCH FROM updated_at)::bigint
+			FROM policies WHERE tenant_id = $1 AND id = $2`, tenantID, id), &p)
+	})
+	if err != nil {
+		return nil, wrapPgErr(err)
+	}
+	return &p, nil
+}
+
 func (s *PostgresStore) ListPolicies(ctx context.Context, tenantID, appID string) ([]*ksealv1.Policy, error) {
 	var out []*ksealv1.Policy
 	err := s.db.WithTenantTx(ctx, tenantID, func(tx pgx.Tx) error {

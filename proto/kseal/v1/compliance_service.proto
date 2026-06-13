@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package kseal.v1;
+
+import "kseal/v1/compliance.proto";
+
+option go_package = "github.com/kennguy3n/kseal/server/gen/kseal/v1;ksealv1";
+
+// ComplianceService is the control-plane surface for enterprise trust &
+// compliance: the tamper-evident audit trail, the data-processing registry, the
+// signed kill switch, and canary rollout. Every RPC requires a valid API key
+// and is tenant-scoped — the caller's authenticated tenant must match the
+// request tenant_id, and all reads/writes filter on that tenant.
+//
+// Read RPCs (consumed by the compliance console WS-M and store-disclosure
+// tooling WS-L): ListAuditEvents, VerifyAuditChain, GetDataProcessingRegistry,
+// GetKillSwitchState, ListKillSwitches, GetCanaryStatus.
+service ComplianceService {
+  // ListAuditEvents returns a newest-first, keyset-paginated page of audit
+  // events for the caller's tenant, filtered by action / resource_type / time.
+  rpc ListAuditEvents(ListAuditEventsRequest) returns (ListAuditEventsResponse);
+  // VerifyAuditChain recomputes the tenant's hash chain and reports whether it
+  // is intact, the count verified, and the first broken sequence if any.
+  rpc VerifyAuditChain(VerifyAuditChainRequest) returns (VerifyAuditChainResponse);
+
+  // GetDataProcessingRegistry returns every data-processing record for a tenant.
+  rpc GetDataProcessingRegistry(GetDataProcessingRegistryRequest) returns (GetDataProcessingRegistryResponse);
+  // PutDataProcessingRecord creates or updates a tenant's per-app disclosure.
+  rpc PutDataProcessingRecord(PutDataProcessingRecordRequest) returns (PutDataProcessingRecordResponse);
+
+  // IssueKillSwitch signs and stores a remote disable/enable command for a
+  // scope and records it in the audit log. Returns the signed command.
+  rpc IssueKillSwitch(IssueKillSwitchRequest) returns (IssueKillSwitchResponse);
+  // GetKillSwitchState resolves the effective command for a scope and returns
+  // the signed command in effect (verifiable by clients).
+  rpc GetKillSwitchState(GetKillSwitchStateRequest) returns (GetKillSwitchStateResponse);
+  // ListKillSwitches returns every kill switch configured for a tenant.
+  rpc ListKillSwitches(ListKillSwitchesRequest) returns (ListKillSwitchesResponse);
+
+  // SetCanaryRollout configures or updates a staged rollout for an app.
+  rpc SetCanaryRollout(SetCanaryRolloutRequest) returns (SetCanaryRolloutResponse);
+  // GetCanaryStatus returns the current rollout state and observed health.
+  rpc GetCanaryStatus(GetCanaryStatusRequest) returns (GetCanaryStatusResponse);
+  // PromoteCanary fully promotes the candidate to stable.
+  rpc PromoteCanary(PromoteCanaryRequest) returns (PromoteCanaryResponse);
+  // RollbackCanary withdraws the candidate, reverting to last-known-good.
+  rpc RollbackCanary(RollbackCanaryRequest) returns (RollbackCanaryResponse);
+}
