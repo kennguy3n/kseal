@@ -5,6 +5,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -32,6 +33,7 @@ import (
 	cfgsvc "github.com/kennguy3n/kseal/server/data-plane/config"
 	"github.com/kennguy3n/kseal/server/data-plane/ingest"
 	"github.com/kennguy3n/kseal/server/data-plane/query"
+	"github.com/kennguy3n/kseal/server/data-plane/siem"
 	"github.com/kennguy3n/kseal/server/data-plane/trust"
 	"github.com/kennguy3n/kseal/server/data-plane/webhook"
 )
@@ -101,13 +103,30 @@ func run() error {
 	dispatcher := webhook.NewDispatcher(store, webhook.DispatcherConfig{}, tel.Metrics)
 	defer dispatcher.Stop()
 
+	// SIEM export: per-tenant connector store (RLS-isolated, secrets sealed) and
+	// the async, backpressured exporter fed from the same ingest write path.
+	siemMetrics, err := siem.NewMetrics()
+	if err != nil {
+		return err
+	}
+	siemStore := siem.NewPostgresConnectorStore(database, enc)
+	if err := siemStore.EnsureSchema(rootCtx); err != nil {
+		return err
+	}
+	siemExporter := siem.NewExporter(siemStore, siem.ExporterConfig{}, siemMetrics)
+	defer siemExporter.Stop()
+	siemSvc := siem.NewService(siemStore)
+
 	validator := ingest.NewCachedAppValidator(store, 30*time.Second)
 	quota := ingest.NewQuota(rdb, cfg.IngestQuotaPerMinute)
 	broker := ingest.NewChannelBroker(0)
 	analytics := ingest.NewInMemoryAnalyticsStore()
 	writer := ingest.NewWriter(broker, analytics, 0, 0)
-	// Fan validated telemetry out to registered webhook subscribers.
-	writer.SetEventSink(webhookSink{dispatcher})
+	// Fan validated telemetry out to webhook subscribers AND the SIEM exporter.
+	writer.SetEventSink(fanoutSink{[]ingest.EventSink{
+		webhookSink{dispatcher},
+		siemSink{siemExporter},
+	}})
 	go writer.Run(rootCtx)
 	ingestSvc, err := ingest.NewService(validator, quota, broker)
 	if err != nil {
@@ -135,8 +154,10 @@ func run() error {
 	mux.Handle(ksealv1connect.NewIngestServiceHandler(ingestSvc, opts))
 	mux.Handle(ksealv1connect.NewWebhookServiceHandler(webhookSvc, opts))
 	mux.Handle(ksealv1connect.NewQueryServiceHandler(querySvc, opts))
+	mux.Handle(ksealv1connect.NewSiemServiceHandler(siemSvc, opts))
 
-	mux.Handle("/metrics", tel.Metrics.Handler())
+	// Single /metrics exposition combining the platform and SIEM registries.
+	mux.Handle("/metrics", combinedMetrics(tel.Metrics.Handler(), siemMetrics.Handler()))
 	mux.Handle("/healthz", telemetry.HealthHandler())
 	mux.Handle("/readyz", telemetry.HealthHandler(
 		telemetry.Check{Name: "postgres", Func: database.Ping},
@@ -207,6 +228,67 @@ func (s webhookSink) Emit(e ingest.StoredEvent) {
 	})
 }
 
+// fanoutSink delivers each event to several sinks. It is synchronous but every
+// downstream sink is itself non-blocking (bounded queue + load-shed), so the
+// ingest write path is never stalled by a slow subscriber.
+type fanoutSink struct{ sinks []ingest.EventSink }
+
+func (f fanoutSink) Emit(e ingest.StoredEvent) {
+	for _, s := range f.sinks {
+		s.Emit(e)
+	}
+}
+
+// siemSink adapts the ingest write path to the SIEM exporter, projecting a
+// StoredEvent onto the minimized, non-PII Event the exporter understands.
+type siemSink struct{ ex *siem.Exporter }
+
+func (s siemSink) Emit(e ingest.StoredEvent) {
+	s.ex.Submit(siem.Event{
+		TenantID:         e.TenantID,
+		AppID:            e.AppID,
+		EventType:        e.EventType,
+		RiskLevel:        e.RiskLevel,
+		RiskBits:         e.RiskBits,
+		Confidence:       e.Confidence,
+		BuildHash:        e.BuildHash,
+		PolicyHash:       e.PolicyHash,
+		InstallKeyHash:   e.InstallKeyHash,
+		CoarseTimeBucket: e.TimeBucket,
+		Country:          e.Country,
+	})
+}
+
+// combinedMetrics serves several Prometheus handlers' output on one endpoint.
+// The platform and SIEM registries are disjoint (neither registers go/process
+// collectors), so concatenating their expositions yields a single valid scrape.
+func combinedMetrics(handlers ...http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		first := true
+		for _, h := range handlers {
+			rec := &bufferingResponseWriter{header: http.Header{}}
+			h.ServeHTTP(rec, r)
+			if first {
+				if ct := rec.header.Get("Content-Type"); ct != "" {
+					w.Header().Set("Content-Type", ct)
+				}
+				first = false
+			}
+			_, _ = w.Write(rec.buf.Bytes())
+		}
+	})
+}
+
+// bufferingResponseWriter captures a handler's body and headers in memory.
+type bufferingResponseWriter struct {
+	header http.Header
+	buf    bytes.Buffer
+}
+
+func (w *bufferingResponseWriter) Header() http.Header         { return w.header }
+func (w *bufferingResponseWriter) Write(b []byte) (int, error) { return w.buf.Write(b) }
+func (w *bufferingResponseWriter) WriteHeader(int)             {}
+
 // controlPlaneProcedures lists procedures that require a valid API key. Device
 // -plane procedures (trust, config, ingest) authenticate via request body and
 // signed proofs instead.
@@ -234,5 +316,8 @@ func controlPlaneProcedures() map[string]bool {
 		ksealv1connect.QueryServiceListEventsProcedure:                 true,
 		ksealv1connect.QueryServiceGetTenantOverviewProcedure:          true,
 		ksealv1connect.QueryServiceGetTrustSessionStatsProcedure:       true,
+		ksealv1connect.SiemServiceRegisterConnectorProcedure:           true,
+		ksealv1connect.SiemServiceListConnectorsProcedure:              true,
+		ksealv1connect.SiemServiceDeleteConnectorProcedure:             true,
 	}
 }

@@ -1,0 +1,86 @@
+syntax = "proto3";
+
+package kseal.v1;
+
+option go_package = "github.com/kennguy3n/kseal/server/gen/kseal/v1;ksealv1";
+
+// SiemKind identifies the external SIEM/observability sink a connector targets.
+enum SiemKind {
+  SIEM_KIND_UNSPECIFIED = 0;
+  // Splunk HTTP Event Collector (HEC).
+  SIEM_KIND_SPLUNK_HEC = 1;
+  // Microsoft Sentinel via the Log Analytics ingestion (Data Collection Rule).
+  SIEM_KIND_SENTINEL = 2;
+  // Elastic, formatted as Elastic Common Schema (ECS) documents.
+  SIEM_KIND_ELASTIC = 3;
+}
+
+// SiemPayloadFormat selects the on-the-wire document shape an exporter renders.
+// It is decoupled from SiemKind so a sink can, in principle, accept more than
+// one shape; the service validates that a format is compatible with the kind.
+enum SiemPayloadFormat {
+  SIEM_PAYLOAD_FORMAT_UNSPECIFIED = 0;
+  // Splunk HEC event envelope ({"event": {...}, "sourcetype": ...}).
+  SIEM_PAYLOAD_FORMAT_SPLUNK_HEC = 1;
+  // Sentinel Log Analytics ingestion rows (JSON array of flat objects).
+  SIEM_PAYLOAD_FORMAT_SENTINEL = 2;
+  // Elastic Common Schema (ECS) JSON document.
+  SIEM_PAYLOAD_FORMAT_ECS = 3;
+}
+
+// SiemConnector is a per-tenant export target. It NEVER carries the auth secret
+// value: only an opaque reference to the sealed secret held server-side. The
+// field allow-list bounds which minimized, non-PII telemetry fields may egress.
+message SiemConnector {
+  string id = 1;
+  string tenant_id = 2;
+  SiemKind kind = 3;
+  // Base ingestion endpoint URL of the sink (scheme + host [+ base path]).
+  string endpoint = 4;
+  // Opaque identifier of the sealed auth secret (e.g. "siem_sec_ab12cd"). The
+  // secret value itself is sealed with the AES-GCM-under-KEK envelope and is
+  // never returned by any RPC.
+  string auth_secret_ref = 5;
+  SiemPayloadFormat format = 6;
+  // Allow-list of canonical minimized telemetry field names permitted to
+  // egress through this connector (subset of the platform privacy contract).
+  // Empty means "the full minimized contract".
+  repeated string field_allow_list = 7;
+  bool is_active = 8;
+  int64 created_at = 9;
+  // Sentinel-only routing: the Data Collection Rule immutable id and the
+  // destination stream name (e.g. "Custom-KsealTrust_CL"). Empty otherwise.
+  string sentinel_dcr_immutable_id = 10;
+  string sentinel_stream_name = 11;
+  // Elastic-only routing: the destination index or data stream. Empty otherwise.
+  string elastic_index = 12;
+  // Splunk-only routing: target index and sourcetype. Empty otherwise.
+  string splunk_index = 13;
+  string splunk_sourcetype = 14;
+}
+
+message RegisterSiemConnectorRequest {
+  string tenant_id = 1;
+  SiemKind kind = 2;
+  string endpoint = 3;
+  // Plaintext auth secret (Splunk HEC token / Sentinel bearer token / Elastic
+  // API key). Sealed at rest immediately; never persisted or returned in clear.
+  string auth_secret = 4;
+  SiemPayloadFormat format = 5;
+  repeated string field_allow_list = 6;
+  string sentinel_dcr_immutable_id = 7;
+  string sentinel_stream_name = 8;
+  string elastic_index = 9;
+  string splunk_index = 10;
+  string splunk_sourcetype = 11;
+}
+message RegisterSiemConnectorResponse { SiemConnector connector = 1; }
+
+message ListSiemConnectorsRequest { string tenant_id = 1; }
+message ListSiemConnectorsResponse { repeated SiemConnector connectors = 1; }
+
+message DeleteSiemConnectorRequest {
+  string tenant_id = 1;
+  string id = 2;
+}
+message DeleteSiemConnectorResponse { bool deleted = 1; }

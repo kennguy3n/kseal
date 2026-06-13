@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package kseal.v1;
+
+import "kseal/v1/siem.proto";
+
+option go_package = "github.com/kennguy3n/kseal/server/gen/kseal/v1;ksealv1";
+
+// SiemService manages per-tenant SIEM export connectors (Splunk HEC, Microsoft
+// Sentinel, Elastic). It is a control-plane surface: register, list, and delete
+// connectors. Secret values are write-only; no RPC ever returns them.
+service SiemService {
+  rpc RegisterConnector(RegisterSiemConnectorRequest) returns (RegisterSiemConnectorResponse);
+  rpc ListConnectors(ListSiemConnectorsRequest) returns (ListSiemConnectorsResponse);
+  rpc DeleteConnector(DeleteSiemConnectorRequest) returns (DeleteSiemConnectorResponse);
+}
