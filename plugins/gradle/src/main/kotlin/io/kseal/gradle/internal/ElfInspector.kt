@@ -18,11 +18,19 @@ import java.nio.ByteOrder
  * a target (e.g. MTE on a 32-bit or x86 ABI) we report it as `unsupported`
  * rather than silently dropping it.
  *
- * Detection is purely structural (ELF section/symbol/note parsing) so it needs
- * no NDK on the build host and is fully deterministic and unit-testable. The
- * parser is defensive: any malformed/oversized field yields an `unknown`
- * architecture and `indeterminate` features rather than throwing, so a single
- * odd library never breaks a build.
+ * Beyond the memory-safety features the inspector also reports the classic
+ * exploit-mitigation posture every shipped ELF should carry — **RELRO**,
+ * **NX** (non-executable stack), **PIE**, **stack-canary** and **FORTIFY** —
+ * derived from the program headers, the dynamic section and the symbol tables.
+ * These are tracked as a separate posture group from the memory-safety findings
+ * so each can be evaluated and reported independently.
+ *
+ * Detection is purely structural (ELF header / program-header / section /
+ * symbol / note / dynamic parsing) so it needs no NDK on the build host and is
+ * fully deterministic and unit-testable. The parser is defensive: any
+ * malformed/oversized field yields an `unknown` architecture and
+ * `indeterminate` features rather than throwing, so a single odd library never
+ * breaks a build.
  */
 internal object ElfInspector {
 
@@ -65,25 +73,61 @@ internal object ElfInspector {
     data class Result(
         val arch: Arch,
         val sha256: String,
+        // Memory-safety features (toolchain-injected at compile/link time).
         val cfi: Status,
         val mte: Status,
         val bti: Status,
         val pac: Status,
         val mteMode: String?,
         val notes: List<String>,
+        // Classic exploit-mitigation posture (RELRO/NX/PIE/canary/FORTIFY).
+        val relro: Status = Status.INDETERMINATE,
+        val relroMode: String? = null,
+        val nx: Status = Status.INDETERMINATE,
+        val pie: Status = Status.INDETERMINATE,
+        val stackCanary: Status = Status.INDETERMINATE,
+        val fortify: Status = Status.INDETERMINATE,
+        val postureNotes: List<String> = emptyList(),
     ) {
-        /** True when every feature applicable to this target is enabled. */
+        /** True when every memory-safety feature applicable to this target is enabled. */
         val fullyHardened: Boolean
             get() = listOf(cfi, mte, bti, pac).none { it == Status.ABSENT || it == Status.INDETERMINATE }
+
+        /**
+         * True when every applicable exploit-mitigation feature is enabled.
+         * `UNSUPPORTED`/`INDETERMINATE` do not count against the posture (they
+         * are reported but cannot be asserted as findings).
+         */
+        val mitigationsComplete: Boolean
+            get() = listOf(relro, nx, pie, stackCanary, fortify).none { it == Status.ABSENT }
     }
 
     private const val EI_NIDENT = 16
     private val ELF_MAGIC = byteArrayOf(0x7f, 'E'.code.toByte(), 'L'.code.toByte(), 'F'.code.toByte())
 
+    // ELF file types.
+    private const val ET_EXEC = 2
+    private const val ET_DYN = 3
+
     // Section header types.
     private const val SHT_SYMTAB = 2
+    private const val SHT_DYNAMIC = 6
     private const val SHT_NOTE = 7
     private const val SHT_DYNSYM = 11
+
+    // Program header types.
+    private const val PT_GNU_STACK = 0x6474e551
+    private const val PT_GNU_RELRO = 0x6474e552
+    private const val PF_X = 1
+
+    // Dynamic-section tags / flags.
+    private const val DT_NULL = 0L
+    private const val DT_BIND_NOW = 24L
+    private const val DT_FLAGS = 30L
+    private const val DT_FLAGS_1 = 0x6ffffffbL
+    private const val DF_BIND_NOW = 0x8L
+    private const val DF_1_NOW = 0x1L
+    private const val DF_1_PIE = 0x08000000L
 
     // Note types.
     private const val NT_GNU_PROPERTY_TYPE_0 = 5
@@ -112,6 +156,12 @@ internal object ElfInspector {
                 pac = Status.INDETERMINATE,
                 mteMode = null,
                 notes = listOf("not a parseable ELF object"),
+                relro = Status.INDETERMINATE,
+                nx = Status.INDETERMINATE,
+                pie = Status.INDETERMINATE,
+                stackCanary = Status.INDETERMINATE,
+                fortify = Status.INDETERMINATE,
+                postureNotes = listOf("not a parseable ELF object"),
             )
 
         val notes = mutableListOf<String>()
@@ -131,6 +181,19 @@ internal object ElfInspector {
         val bti = aarch64Feature(arch, parsed.aarch64Features, GNU_PROPERTY_AARCH64_FEATURE_1_BTI, "BTI", "-mbranch-protection=bti", notes)
         val pac = aarch64Feature(arch, parsed.aarch64Features, GNU_PROPERTY_AARCH64_FEATURE_1_PAC, "PAC", "-mbranch-protection=pac-ret", notes)
 
+        val postureNotes = mutableListOf<String>()
+        val relro = relroStatus(parsed, postureNotes)
+        val nx = nxStatus(parsed, postureNotes)
+        val pie = pieStatus(parsed, postureNotes)
+        val stackCanary = when {
+            parsed.hasStackCanary -> Status.ENABLED
+            else -> Status.ABSENT.also { postureNotes += "no stack-canary symbol; build with -fstack-protector-strong" }
+        }
+        val fortify = when {
+            parsed.hasFortify -> Status.ENABLED
+            else -> Status.ABSENT.also { postureNotes += "no _chk fortified symbols; build with -D_FORTIFY_SOURCE=2" }
+        }
+
         return Result(
             arch = arch,
             sha256 = sha,
@@ -140,7 +203,34 @@ internal object ElfInspector {
             pac = pac,
             mteMode = parsed.memtag?.let { memtagMode(it) },
             notes = notes,
+            relro = relro,
+            relroMode = parsed.relroMode(),
+            nx = nx,
+            pie = pie,
+            stackCanary = stackCanary,
+            fortify = fortify,
+            postureNotes = postureNotes,
         )
+    }
+
+    private fun relroStatus(parsed: Parsed, notes: MutableList<String>): Status = when {
+        parsed.hasRelroSegment && parsed.bindNow -> Status.ENABLED
+        parsed.hasRelroSegment -> Status.ABSENT.also { notes += "partial RELRO only; link with -Wl,-z,relro,-z,now for full RELRO" }
+        else -> Status.ABSENT.also { notes += "no RELRO segment; link with -Wl,-z,relro,-z,now" }
+    }
+
+    private fun nxStatus(parsed: Parsed, notes: MutableList<String>): Status = when (parsed.gnuStackExecutable) {
+        false -> Status.ENABLED
+        true -> Status.ABSENT.also { notes += "executable stack (PT_GNU_STACK is RWX); link with -Wl,-z,noexecstack" }
+        // No PT_GNU_STACK: the loader's default differs by platform; we cannot assert.
+        null -> Status.INDETERMINATE
+    }
+
+    private fun pieStatus(parsed: Parsed, notes: MutableList<String>): Status = when {
+        parsed.isPie -> Status.ENABLED
+        parsed.eType == ET_EXEC -> Status.ABSENT.also { notes += "non-PIE executable; build with -fPIE -pie" }
+        // A shared object (ET_DYN without DF_1_PIE) is inherently position-independent.
+        else -> Status.UNSUPPORTED
     }
 
     private fun aarch64Feature(arch: Arch, features: Int?, bit: Int, name: String, flag: String, notes: MutableList<String>): Status =
@@ -165,10 +255,26 @@ internal object ElfInspector {
 
     private class Parsed(
         val arch: Arch,
+        val eType: Int,
         val hasCfiSymbol: Boolean,
         val memtag: Int?,
         val aarch64Features: Int?,
-    )
+        val hasRelroSegment: Boolean,
+        /** True when PT_GNU_STACK is present and executable; false when present and non-exec; null when absent. */
+        val gnuStackExecutable: Boolean?,
+        val bindNow: Boolean,
+        val dfFlags1: Long,
+        val hasStackCanary: Boolean,
+        val hasFortify: Boolean,
+    ) {
+        val isPie: Boolean get() = (dfFlags1 and DF_1_PIE) != 0L
+
+        fun relroMode(): String = when {
+            hasRelroSegment && bindNow -> "full"
+            hasRelroSegment -> "partial"
+            else -> "none"
+        }
+    }
 
     private fun parse(bytes: ByteArray): Parsed {
         require(bytes.size >= EI_NIDENT + 48) { "truncated ELF header" }
@@ -186,44 +292,72 @@ internal object ElfInspector {
         }
         val buf = ByteBuffer.wrap(bytes).order(order)
 
+        val eType = buf.getShort(16).toInt() and 0xffff
         val machine = buf.getShort(18).toInt() and 0xffff
         val arch = Arch.from(machine)
 
-        // Section header table location and dimensions differ by ELF class.
+        // Program header and section header table locations differ by ELF class.
+        val phoff: Long
+        val phentsize: Int
+        val phnum: Int
         val shoff: Long
         val shentsize: Int
         val shnum: Int
         val shstrndx: Int
         if (is64) {
+            phoff = buf.getLong(32)
             shoff = buf.getLong(40)
+            phentsize = buf.getShort(54).toInt() and 0xffff
+            phnum = buf.getShort(56).toInt() and 0xffff
             shentsize = buf.getShort(58).toInt() and 0xffff
             shnum = buf.getShort(60).toInt() and 0xffff
             shstrndx = buf.getShort(62).toInt() and 0xffff
         } else {
-            shoff = (buf.getInt(32).toLong() and 0xffffffffL)
+            phoff = buf.getInt(28).toLong() and 0xffffffffL
+            shoff = buf.getInt(32).toLong() and 0xffffffffL
+            phentsize = buf.getShort(42).toInt() and 0xffff
+            phnum = buf.getShort(44).toInt() and 0xffff
             shentsize = buf.getShort(46).toInt() and 0xffff
             shnum = buf.getShort(48).toInt() and 0xffff
             shstrndx = buf.getShort(50).toInt() and 0xffff
         }
+
+        val segments = readProgramHeaders(buf, bytes.size, phoff, phentsize, phnum, is64)
+        val hasRelroSegment = segments.any { it.type == PT_GNU_RELRO }
+        val gnuStackExecutable = segments.firstOrNull { it.type == PT_GNU_STACK }?.let { (it.flags and PF_X) != 0 }
+
         if (shoff == 0L || shnum == 0) {
-            return Parsed(arch, hasCfiSymbol = false, memtag = null, aarch64Features = null)
+            return Parsed(
+                arch = arch, eType = eType, hasCfiSymbol = false, memtag = null, aarch64Features = null,
+                hasRelroSegment = hasRelroSegment, gnuStackExecutable = gnuStackExecutable,
+                bindNow = false, dfFlags1 = 0L, hasStackCanary = false, hasFortify = false,
+            )
         }
 
         val sections = (0 until shnum).map { idx ->
             readSection(buf, bytes.size, shoff + idx.toLong() * shentsize, is64)
         }
         val shstr = sections.getOrNull(shstrndx)
-        fun nameOf(s: Section): String = shstr?.let { readCString(bytes, it.offset + s.nameOffset) } ?: ""
 
         var hasCfi = false
         var memtag: Int? = null
         var features: Int? = null
+        var hasCanary = false
+        var hasFortify = false
 
         for (s in sections) {
             when (s.type) {
                 SHT_DYNSYM, SHT_SYMTAB -> {
                     val strtab = sections.getOrNull(s.link)
-                    if (strtab != null && hasSymbol(bytes, buf, s, strtab, is64, "__cfi_check")) hasCfi = true
+                    if (strtab != null) {
+                        forEachSymbolName(bytes, buf, s, strtab, is64) { name ->
+                            when {
+                                name == "__cfi_check" -> hasCfi = true
+                                name == "__stack_chk_fail" || name == "__stack_chk_guard" -> hasCanary = true
+                                isFortifiedSymbol(name) -> hasFortify = true
+                            }
+                        }
+                    }
                 }
                 SHT_NOTE -> {
                     parseNotes(bytes, buf, s) { name, type, descOff, descSz ->
@@ -236,7 +370,79 @@ internal object ElfInspector {
                 }
             }
         }
-        return Parsed(arch, hasCfi, memtag, features)
+
+        // The dynamic flags (BIND_NOW / DF_1_*) live in the SHT_DYNAMIC section
+        // when present, else in the PT_DYNAMIC segment's file range.
+        val dynamicSection = sections.firstOrNull { it.type == SHT_DYNAMIC }
+        val (bindNow, dfFlags1) = parseDynamic(buf, bytes.size, dynamicSection, is64)
+
+        return Parsed(
+            arch = arch,
+            eType = eType,
+            hasCfiSymbol = hasCfi,
+            memtag = memtag,
+            aarch64Features = features,
+            hasRelroSegment = hasRelroSegment,
+            gnuStackExecutable = gnuStackExecutable,
+            bindNow = bindNow,
+            dfFlags1 = dfFlags1,
+            hasStackCanary = hasCanary,
+            hasFortify = hasFortify,
+        )
+    }
+
+    /** Symbols glibc/bionic export for fortified libc wrappers, e.g. `__memcpy_chk`. */
+    private fun isFortifiedSymbol(name: String): Boolean =
+        name.length > 5 && name.startsWith("__") && name.endsWith("_chk")
+
+    private class Segment(val type: Int, val flags: Int)
+
+    private fun readProgramHeaders(buf: ByteBuffer, fileSize: Int, phoff: Long, phentsize: Int, phnum: Int, is64: Boolean): List<Segment> {
+        if (phoff <= 0L || phnum <= 0) return emptyList()
+        val entSize = if (phentsize > 0) phentsize else if (is64) 56 else 32
+        val out = ArrayList<Segment>(phnum)
+        for (i in 0 until phnum) {
+            val base = (phoff + i.toLong() * entSize)
+            if (base < 0 || base + entSize > fileSize) break
+            val at = base.toInt()
+            // p_type is the first word in both classes; p_flags moves between them.
+            val type = buf.getInt(at)
+            val flags = if (is64) buf.getInt(at + 4) else buf.getInt(at + 24)
+            out += Segment(type, flags)
+        }
+        return out
+    }
+
+    /** Returns (bindNow, dfFlags1) read from the dynamic section, defaulting to (false, 0). */
+    private fun parseDynamic(buf: ByteBuffer, fileSize: Int, dynamic: Section?, is64: Boolean): Pair<Boolean, Long> {
+        if (dynamic == null || dynamic.size <= 0) return false to 0L
+        val entSize = if (is64) 16 else 8
+        val count = dynamic.size / entSize
+        var bindNow = false
+        var flags1 = 0L
+        for (i in 0 until count) {
+            val at = dynamic.offset + i * entSize
+            if (at < 0 || at + entSize > fileSize) break
+            val tag: Long
+            val value: Long
+            if (is64) {
+                tag = buf.getLong(at)
+                value = buf.getLong(at + 8)
+            } else {
+                tag = buf.getInt(at).toLong() and 0xffffffffL
+                value = buf.getInt(at + 4).toLong() and 0xffffffffL
+            }
+            when (tag) {
+                DT_NULL -> break
+                DT_BIND_NOW -> bindNow = true
+                DT_FLAGS -> if ((value and DF_BIND_NOW) != 0L) bindNow = true
+                DT_FLAGS_1 -> {
+                    flags1 = flags1 or value
+                    if ((value and DF_1_NOW) != 0L) bindNow = true
+                }
+            }
+        }
+        return bindNow to flags1
     }
 
     private class Section(
@@ -274,25 +480,25 @@ internal object ElfInspector {
     private fun clampOffset(value: Long, fileSize: Int): Int =
         if (value in 0..fileSize.toLong()) value.toInt() else fileSize
 
-    private fun hasSymbol(
+    /** Invokes [onName] for every named symbol in [sym]'s table. */
+    private inline fun forEachSymbolName(
         bytes: ByteArray,
         buf: ByteBuffer,
         sym: Section,
         strtab: Section,
         is64: Boolean,
-        wanted: String,
-    ): Boolean {
+        onName: (String) -> Unit,
+    ) {
         val entSize = if (sym.entSize > 0) sym.entSize else if (is64) 24 else 16
-        if (entSize <= 0) return false
+        if (entSize <= 0) return
         val count = sym.size / entSize
         for (i in 0 until count) {
             val entry = sym.offset + i * entSize
             if (entry + 4 > bytes.size) break
             val nameOff = buf.getInt(entry)
             if (nameOff == 0) continue
-            if (readCString(bytes, strtab.offset + nameOff) == wanted) return true
+            onName(readCString(bytes, strtab.offset + nameOff))
         }
-        return false
     }
 
     /** Iterates the note entries of a `SHT_NOTE` section. */

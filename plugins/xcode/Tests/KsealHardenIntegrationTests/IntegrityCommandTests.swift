@@ -69,11 +69,23 @@ final class IntegrityCommandTests: XCTestCase {
         XCTAssertEqual(baked.buildHash, manifest.buildHash)
         XCTAssertTrue(baked.modules.contains("string-hardening"))
 
-        // Re-running must be idempotent (no duplicate transform).
+        // The same post-link pass bakes the per-binary posture and a hash-coverage
+        // summary, and lifts the manifest to the current revision.
+        let posture = try XCTUnwrap(baked.posture, "manifest must carry posture")
+        XCTAssertFalse(posture.slices.isEmpty)
+        XCTAssertTrue(baked.modules.contains("macho-binary-posture"))
+        XCTAssertNotNil(baked.transforms.first { $0.kind == "macho-binary-posture" })
+        let coverage = try XCTUnwrap(baked.hashCoverage, "manifest must carry hash coverage")
+        XCTAssertEqual(coverage.sliceCount, integrity.slices.count)
+        XCTAssertEqual(coverage.artifactsRoot, BuildProofManifest.HashCoverage.from(integrity: integrity).artifactsRoot)
+        XCTAssertEqual(baked.manifestRevision, BuildProofManifest.currentManifestRevision)
+
+        // Re-running must be idempotent (no duplicate transforms).
         let second = try run(cli, ["integrity", "--binary", machO.path, "--manifest", outURL.path])
         XCTAssertEqual(second.exitCode, 0)
         let reBaked = try BuildProofManifest.decode(from: Data(contentsOf: outURL))
         XCTAssertEqual(reBaked.transforms.filter { $0.kind == "macho-section-integrity" }.count, 1)
+        XCTAssertEqual(reBaked.transforms.filter { $0.kind == "macho-binary-posture" }.count, 1)
     }
 
     // MARK: - helpers

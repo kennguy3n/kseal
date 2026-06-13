@@ -56,6 +56,10 @@ public struct HardenRequest {
     public var host: String
     /// Extra tool versions (e.g. swift, strip) to record in the manifest.
     public var extraToolVersions: [String: String]
+    /// How the per-build seed was obtained: "explicit", "env" or "random".
+    /// Drives the manifest's reproducibility posture. Defaults to "random",
+    /// which is the honest default on iOS (a fresh seed per build).
+    public var seedDerivation: String
 
     public init(
         targetName: String,
@@ -66,7 +70,8 @@ public struct HardenRequest {
         secureStrings: [String: String] = [:],
         platform: String = "ios",
         host: String = "swiftpm-build-plugin",
-        extraToolVersions: [String: String] = [:]
+        extraToolVersions: [String: String] = [:],
+        seedDerivation: String = "random"
     ) {
         self.targetName = targetName
         self.sdkVersion = sdkVersion
@@ -77,6 +82,7 @@ public struct HardenRequest {
         self.platform = platform
         self.host = host
         self.extraToolVersions = extraToolVersions
+        self.seedDerivation = seedDerivation
     }
 }
 
@@ -143,6 +149,10 @@ public struct HardenEngine {
                 generatedAt: Self.rfc3339(clock()),
                 generator: "kseal-harden/\(ksealHardenVersion)",
                 host: request.host
+            ),
+            reproducibility: .init(
+                reproducible: request.seedDerivation != "random",
+                seedDerivation: request.seedDerivation
             )
         )
 

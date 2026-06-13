@@ -5,6 +5,7 @@ import io.kseal.gradle.tasks.GenerateMasvsReportTask
 import io.kseal.gradle.tasks.GeneratePolymorphismSeedTask
 import io.kseal.gradle.tasks.HardenNativeLibrariesTask
 import io.kseal.gradle.tasks.HardenResourcesTask
+import io.kseal.gradle.tasks.ObfuscateBytecodeTask
 import io.kseal.gradle.tasks.RegisterBuildTask
 import io.kseal.gradle.tasks.StripDebugMetadataTask
 import org.gradle.api.Plugin
@@ -49,6 +50,9 @@ class KsealAndroidHardenPlugin : Plugin<Project> {
         ext.versionCode.convention(0L)
         ext.packageId.convention("")
 
+        ext.obfuscation.enabled.convention(false)
+        ext.obfuscation.strength.convention("low")
+
         ext.polymorphism.randomize.convention(false)
         ext.polymorphism.masterKeyProperty.convention("kseal.polySeedKey")
         ext.polymorphism.masterKeyEnv.convention("KSEAL_POLY_SEED_KEY")
@@ -91,6 +95,33 @@ class KsealAndroidHardenPlugin : Plugin<Project> {
             outputs.upToDateWhen { !randomizeProvider.getOrElse(false) }
         }
 
+        val classes = project.tasks.register<StripDebugMetadataTask>("ksealStripDebugMetadata") {
+            group = GROUP
+            description = "Strips debug metadata from compiled classes."
+            onlyIf { enabledProvider.getOrElse(true) }
+            classes.from(ext.classesDirs)
+            strippedClassesDir.set(ksealOut.map { it.dir("hardened/classes") })
+            reportFile.set(ksealOut.map { it.file("reports/classes.json") })
+        }
+
+        // Resolve the obfuscation strength to OFF whenever the pass is disabled,
+        // so the task always runs and emits a (possibly unchanged) classes dir
+        // the manifest can hash — keeping the default build byte-identical.
+        val obfuscationStrength = ext.obfuscation.enabled.flatMap { en ->
+            if (en) ext.obfuscation.strength.orElse("low") else providers.provider { "off" }
+        }
+        val obfuscate = project.tasks.register<ObfuscateBytecodeTask>("ksealObfuscateBytecode") {
+            group = GROUP
+            description = "R8/mapping-aware bytecode control-flow obfuscation (string encryption + opaque predicates)."
+            onlyIf { enabledProvider.getOrElse(true) }
+            classesDir.set(classes.flatMap { it.strippedClassesDir })
+            seedFile.set(seed.flatMap { it.seedFile })
+            strength.set(obfuscationStrength)
+            keepStrings.set(ext.obfuscation.keepStrings)
+            obfuscatedClassesDir.set(ksealOut.map { it.dir("hardened/obfuscated-classes") })
+            reportFile.set(ksealOut.map { it.file("reports/obfuscation.json") })
+        }
+
         val resources = project.tasks.register<HardenResourcesTask>("ksealHardenResources") {
             group = GROUP
             description = "R8-aware string/resource obfuscation."
@@ -100,19 +131,13 @@ class KsealAndroidHardenPlugin : Plugin<Project> {
             keepRuleFiles.from(ext.keepRuleFiles)
             keepStringKeys.set(ext.keepStringKeys)
             seedFile.set(seed.flatMap { it.seedFile })
+            // The obfuscation summary is recorded in the mapping addendum so the
+            // single addendum fully describes what kseal did to the build.
+            obfuscationReportFile.set(obfuscate.flatMap { it.reportFile })
             hardenedResourcesDir.set(ksealOut.map { it.dir("hardened/res") })
             sealedStringsFile.set(ksealOut.map { it.file("hardened/assets/kseal/strings.sealed") })
             mappingOutFile.set(ksealOut.map { it.file("hardened/mapping.txt") })
             reportFile.set(ksealOut.map { it.file("reports/resources.json") })
-        }
-
-        val classes = project.tasks.register<StripDebugMetadataTask>("ksealStripDebugMetadata") {
-            group = GROUP
-            description = "Strips debug metadata from compiled classes."
-            onlyIf { enabledProvider.getOrElse(true) }
-            classes.from(ext.classesDirs)
-            strippedClassesDir.set(ksealOut.map { it.dir("hardened/classes") })
-            reportFile.set(ksealOut.map { it.file("reports/classes.json") })
         }
 
         val native = project.tasks.register<HardenNativeLibrariesTask>("ksealHardenNativeLibraries") {
@@ -142,10 +167,11 @@ class KsealAndroidHardenPlugin : Plugin<Project> {
             seedMetaFile.set(seed.flatMap { it.seedMetaFile })
             transformReports.from(
                 classes.flatMap { it.reportFile },
+                obfuscate.flatMap { it.reportFile },
                 resources.flatMap { it.reportFile },
                 native.flatMap { it.reportFile },
             )
-            strippedClassesDir.set(classes.flatMap { it.strippedClassesDir })
+            strippedClassesDir.set(obfuscate.flatMap { it.obfuscatedClassesDir })
             hardenedResourcesDir.set(resources.flatMap { it.hardenedResourcesDir })
             hardenedNativeDir.set(native.flatMap { it.hardenedNativeDir })
             sealedStringsFile.set(resources.flatMap { it.sealedStringsFile })
@@ -192,7 +218,7 @@ class KsealAndroidHardenPlugin : Plugin<Project> {
             dependsOn(masvsReport)
         }
 
-        return KsealTasks(seed, resources, classes, native, manifest, register, harden)
+        return KsealTasks(seed, resources, classes, obfuscate, native, manifest, register, harden)
     }
 
     /** Resolves a secret from a Gradle property (by name) or, failing that, an env var. */
@@ -210,6 +236,7 @@ class KsealAndroidHardenPlugin : Plugin<Project> {
         val seed: org.gradle.api.tasks.TaskProvider<GeneratePolymorphismSeedTask>,
         val resources: org.gradle.api.tasks.TaskProvider<HardenResourcesTask>,
         val classes: org.gradle.api.tasks.TaskProvider<StripDebugMetadataTask>,
+        val obfuscate: org.gradle.api.tasks.TaskProvider<ObfuscateBytecodeTask>,
         val native: org.gradle.api.tasks.TaskProvider<HardenNativeLibrariesTask>,
         val manifest: org.gradle.api.tasks.TaskProvider<BuildProofManifestTask>,
         val register: org.gradle.api.tasks.TaskProvider<RegisterBuildTask>,

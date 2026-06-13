@@ -111,6 +111,17 @@ func runGenerate(_ opts: Args) {
         if parts.count == 2, !parts[0].isEmpty { toolVersions[String(parts[0])] = String(parts[1]) }
     }
 
+    // Determine how the seed will be sourced so the manifest's reproducibility
+    // posture is honest (mirrors PolymorphismSeed.resolve precedence).
+    let seedDerivation: String
+    if let h = opts.value("build-seed"), PolymorphismSeed(hex: h) != nil {
+        seedDerivation = "explicit"
+    } else if let h = ProcessInfo.processInfo.environment["KSEAL_BUILD_SEED"], PolymorphismSeed(hex: h) != nil {
+        seedDerivation = "env"
+    } else {
+        seedDerivation = "random"
+    }
+
     let request = HardenRequest(
         targetName: target,
         sdkVersion: opts.value("sdk-version") ?? ksealSDKVersion,
@@ -120,7 +131,8 @@ func runGenerate(_ opts: Args) {
         secureStrings: secureStrings,
         platform: opts.value("platform") ?? "ios",
         host: opts.value("host") ?? "swiftpm-build-plugin",
-        extraToolVersions: toolVersions
+        extraToolVersions: toolVersions,
+        seedDerivation: seedDerivation
     )
 
     let seed = PolymorphismSeed.resolve(explicitHex: opts.value("build-seed"))
@@ -183,16 +195,23 @@ func runIntegrity(_ opts: Args) {
     }
 
     let integrity: BuildProofManifest.Integrity
+    let posture: MachOInspector.Posture
     do {
-        integrity = try MachOInspector().inspect(binaryAt: binary)
+        let inspector = MachOInspector()
+        integrity = try inspector.inspect(binaryAt: binary)
+        posture = try inspector.posture(binaryAt: binary)
     } catch {
         fail("\(error)")
     }
 
     let sectionCount = integrity.slices.reduce(0) { $0 + $1.sections.count }
     manifest.integrity = integrity
-    // Record the transform idempotently so re-running doesn't duplicate it.
-    manifest.transforms.removeAll { $0.kind == "macho-section-integrity" }
+    manifest.posture = posture
+    manifest.hashCoverage = BuildProofManifest.HashCoverage.from(integrity: integrity)
+    // Enriching an existing manifest brings it up to the current revision.
+    manifest.manifestRevision = BuildProofManifest.currentManifestRevision
+    // Record the transforms idempotently so re-running doesn't duplicate them.
+    manifest.transforms.removeAll { $0.kind == "macho-section-integrity" || $0.kind == "macho-binary-posture" }
     manifest.transforms.append(
         BuildProofManifest.Transform(
             kind: "macho-section-integrity",
@@ -201,8 +220,17 @@ func runIntegrity(_ opts: Args) {
             detail: ["slices": String(integrity.slices.count), "format": integrity.format]
         )
     )
-    if !manifest.modules.contains("macho-section-integrity") {
-        manifest.modules = (manifest.modules + ["macho-section-integrity"]).sorted()
+    let findings = posture.slices.reduce(0) { acc, s in acc + (s.hardened ? 0 : 1) }
+    manifest.transforms.append(
+        BuildProofManifest.Transform(
+            kind: "macho-binary-posture",
+            algorithm: "macho-parse",
+            count: posture.slices.count,
+            detail: ["all_hardened": String(posture.allHardened), "slices_with_findings": String(findings)]
+        )
+    )
+    for module in ["macho-section-integrity", "macho-binary-posture"] where !manifest.modules.contains(module) {
+        manifest.modules = (manifest.modules + [module]).sorted()
     }
 
     do {
@@ -211,7 +239,8 @@ func runIntegrity(_ opts: Args) {
         fail("could not write manifest: \(error)")
     }
     let archs = integrity.slices.map { $0.arch }.joined(separator: ",")
-    print("baked Mach-O integrity for \(binary.lastPathComponent): \(integrity.slices.count) slice(s) [\(archs)], \(sectionCount) section hash(es)")
+    let postureSummary = posture.allHardened ? "all slices hardened" : "\(findings) slice(s) with findings"
+    print("baked Mach-O integrity for \(binary.lastPathComponent): \(integrity.slices.count) slice(s) [\(archs)], \(sectionCount) section hash(es); posture: \(postureSummary)")
 }
 
 func runHardenBinary(_ opts: Args) {

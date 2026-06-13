@@ -44,6 +44,16 @@ abstract class HardenResourcesTask : DefaultTask() {
     @get:PathSensitive(PathSensitivity.NONE)
     abstract val mappingFile: RegularFileProperty
 
+    /**
+     * Optional bytecode-obfuscation report (from `ksealObfuscateBytecode`). When
+     * the pass applied, its structural summary is recorded in the mapping
+     * addendum so the addendum fully describes what kseal did to the build.
+     */
+    @get:InputFile
+    @get:Optional
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val obfuscationReportFile: RegularFileProperty
+
     @get:InputFiles
     @get:PathSensitive(PathSensitivity.RELATIVE)
     abstract val keepRuleFiles: ConfigurableFileCollection
@@ -112,6 +122,7 @@ abstract class HardenResourcesTask : DefaultTask() {
                 r8Mapping = mappingFile.orNull?.asFile?.takeIf { it.isFile }?.readText(),
                 seedDigestHex = seedDigest,
                 resourceTokens = result.tokenToKey,
+                obfuscation = readObfuscationSummary(),
             ),
         )
 
@@ -126,5 +137,24 @@ abstract class HardenResourcesTask : DefaultTask() {
             ),
         )
         logger.lifecycle("kseal: sealed ${result.sealedCount} string(s), kept ${result.keptCount} in clear")
+    }
+
+    /**
+     * Parses the optional obfuscation report into a mapping-addendum summary.
+     * Returns null unless the pass actually applied, so the default (obfuscation
+     * disabled) build emits a byte-identical mapping.
+     */
+    private fun readObfuscationSummary(): MappingComposer.Obfuscation? {
+        val file = obfuscationReportFile.orNull?.asFile?.takeIf { it.isFile } ?: return null
+        val root = Json.parse(file.readText()) as? Map<*, *> ?: return null
+        if (root["status"] != "applied") return null
+        fun int(key: String): Int = (root[key] as? Number)?.toInt() ?: 0
+        return MappingComposer.Obfuscation(
+            strength = root["strength"]?.toString() ?: "low",
+            decoderClass = root["decoder_class"]?.toString(),
+            uniqueStringsEncrypted = int("unique_strings_encrypted"),
+            stringLoadsRewritten = int("string_loads_rewritten"),
+            opaquePredicatesInserted = int("opaque_predicates_inserted"),
+        )
     }
 }
