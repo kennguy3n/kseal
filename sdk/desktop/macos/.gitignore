@@ -1,0 +1,4 @@
+.build/
+.swiftpm/
+*.xcframework
+Sources/CKseal/include/kseal.h

@@ -1,0 +1,90 @@
+import Foundation
+
+/// Coarse confidence in a signal or decision. Mirrors `kseal.v1.Confidence`.
+public enum Confidence: Int32, Sendable {
+    case unspecified = 0
+    case low = 1
+    case medium = 2
+    case high = 3
+
+    init(code: Int32) {
+        self = Confidence(rawValue: code) ?? .unspecified
+    }
+}
+
+/// Fused trust classification for an app instance. Mirrors `kseal.v1.TrustLevel`.
+///
+/// `unspecified` is reported when no signed policy is loaded (thresholds are
+/// required to map a score to a level).
+public enum TrustLevel: Int32, Sendable {
+    case unspecified = 0
+    case trusted = 1
+    case lowRisk = 2
+    case mediumRisk = 3
+    case highRisk = 4
+    case critical = 5
+
+    init(code: Int32) {
+        self = TrustLevel(rawValue: code) ?? .unspecified
+    }
+}
+
+/// Telemetry event categories emitted by the SDK. Mirrors `kseal.v1.EventType`.
+public enum EventType: Int32, Sendable {
+    case unspecified = 0
+    case runtimeTamper = 1
+    case debugger = 2
+    case rootRisk = 3
+    case attestationFail = 4
+    case networkMitm = 5
+    case policyDecision = 6
+    case hookingDetected = 7
+    case appIntegrityFail = 8
+    case environmentRisk = 9
+}
+
+/// Reporting platform. Mirrors `kseal.v1.Platform`.
+///
+/// The wire enum (`proto/kseal/v1/common.proto`) currently defines only
+/// `UNSPECIFIED`, `ANDROID`, and `IOS`. Desktop builds report `.unspecified`
+/// until a desktop discriminant is added server-side (owned by the proto/server
+/// workstream). `.unspecified` is the safe, forward-compatible default: the core
+/// stamps it onto telemetry events without affecting risk scoring or proof
+/// generation, and an older server tolerates it. See `docs/desktop-sdk.md`.
+public enum Platform: Int32, Sendable {
+    case unspecified = 0
+    case android = 1
+    case ios = 2
+
+    /// Platform discriminant reported by the macOS desktop SDK.
+    public static let desktopMac: Platform = .unspecified
+}
+
+/// Result of an on-device risk evaluation.
+public struct RiskAssessment: Sendable {
+    /// Packed signal bitset (the only thing handed to the core / server).
+    public let riskBits: UInt64
+    /// Decoded set of detected signals (for local logging/UX; never exported raw).
+    public let signals: Set<RiskSignal>
+    /// Weighted risk score from the active policy (default weights when none loaded).
+    public let score: UInt32
+    /// Coarse confidence derived from the signal mix.
+    public let confidence: Confidence
+    /// Fused trust level under the active policy, or `.unspecified` when no policy is loaded.
+    public let trustLevel: TrustLevel
+
+    /// Whether no risk signals were observed.
+    public var isClean: Bool { riskBits == 0 }
+}
+
+/// Per-request proof binding a request to the current trust token.
+///
+/// `proofBytes` is the serialized `kseal.v1.RequestProof` the host attaches to
+/// the outbound request; the other fields are the inputs the SDK supplied.
+public struct RequestProof: Sendable {
+    public let tokenId: String
+    public let requestHash: Data
+    public let nonce: Data
+    public let sequence: Int64
+    public let proofBytes: Data
+}
