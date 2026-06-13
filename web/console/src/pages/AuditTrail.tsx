@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useAuditEvents } from "../hooks/compliance";
+import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import {
   Badge,
   Card,
@@ -32,18 +33,25 @@ export function AuditTrailPage() {
   const [startLocal, setStartLocal] = useState("");
   const [endLocal, setEndLocal] = useState("");
 
+  // Debounce the free-text filters so typing coalesces into a single query
+  // instead of firing a request per keystroke. Date pickers change discretely,
+  // so they drive the query directly.
+  const actorQuery = useDebouncedValue(actorInput);
+  const resourceQuery = useDebouncedValue(resourceType);
+  const actionsQuery = useDebouncedValue(actionsInput);
+
   const actions = useMemo(
     () =>
-      actionsInput
+      actionsQuery
         .split(",")
         .map((a) => a.trim())
         .filter((a) => a.length > 0),
-    [actionsInput],
+    [actionsQuery],
   );
 
   const audit = useAuditEvents({
-    actor: actorInput.trim() || undefined,
-    resourceType: resourceType.trim() || undefined,
+    actor: actorQuery.trim() || undefined,
+    resourceType: resourceQuery.trim() || undefined,
     actions: actions.length > 0 ? actions : undefined,
     startTime: toMillis(startLocal),
     endTime: toMillis(endLocal),

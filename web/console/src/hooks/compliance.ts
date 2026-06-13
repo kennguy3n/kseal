@@ -98,21 +98,29 @@ export function useKillSwitchState(appId: string) {
   });
 }
 
-export function useRequestKillSwitchChange(appId: string) {
+// appId travels with each mutation call (not captured by closure) so that if
+// the selected app changes while a signed change is in-flight, onSuccess still
+// invalidates the cache for the app the change was actually for. Mirrors
+// useActivatePolicy in hooks/queries.ts.
+export function useRequestKillSwitchChange() {
   const clients = useLocalClients();
   const { tenantId } = useSession();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: { desiredStatus: KillSwitchStatus; reason: string }) =>
+    mutationFn: (input: {
+      appId: string;
+      desiredStatus: KillSwitchStatus;
+      reason: string;
+    }) =>
       clients.killSwitch.requestKillSwitchChange({
         tenantId,
-        appId,
+        appId: input.appId,
         desiredStatus: input.desiredStatus,
         reason: input.reason,
       }),
-    onSuccess: () => {
+    onSuccess: (_res, input) => {
       void qc.invalidateQueries({
-        queryKey: complianceKeys.killSwitch(tenantId, appId),
+        queryKey: complianceKeys.killSwitch(tenantId, input.appId),
       });
       // A signed kill-switch change is itself an audited control-plane
       // mutation, so refresh the audit trail too.

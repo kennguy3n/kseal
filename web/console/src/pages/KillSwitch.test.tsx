@@ -17,7 +17,10 @@ import { renderWithProviders } from "../test/render";
 
 function withApps(router: ConnectRouter) {
   router.service(RegistryService, {
-    listApps: () => create(ListAppsResponseSchema, { apps: [] }),
+    listApps: () =>
+      create(ListAppsResponseSchema, {
+        apps: [{ id: "app-9", name: "App Nine" }],
+      }),
   });
 }
 
@@ -62,7 +65,8 @@ describe("KillSwitchPage", () => {
 
   it("requires a reason and requests a signed change", async () => {
     const user = userEvent.setup();
-    const requests: { status: KillSwitchStatus; reason: string }[] = [];
+    const requests: { appId: string; status: KillSwitchStatus; reason: string }[] =
+      [];
     let current = KillSwitchStatus.ARMED;
 
     const transport = createRouterTransport((router) => {
@@ -71,7 +75,11 @@ describe("KillSwitchPage", () => {
         getKillSwitchState: () =>
           create(GetKillSwitchStateResponseSchema, { state: state(current) }),
         requestKillSwitchChange(req) {
-          requests.push({ status: req.desiredStatus, reason: req.reason });
+          requests.push({
+            appId: req.appId,
+            status: req.desiredStatus,
+            reason: req.reason,
+          });
           current = req.desiredStatus;
           return create(RequestKillSwitchChangeResponseSchema, {
             state: state(current),
@@ -87,6 +95,10 @@ describe("KillSwitchPage", () => {
     });
 
     await waitFor(() => expect(screen.getByText("Armed")).toBeInTheDocument());
+
+    // Scope the change to a specific app so we can assert appId travels with
+    // the mutation (not captured from a stale closure).
+    await user.selectOptions(screen.getByLabelText("App"), "app-9");
 
     await user.click(
       screen.getByRole("button", { name: /disable enforcement…/i }),
@@ -105,6 +117,7 @@ describe("KillSwitchPage", () => {
 
     await waitFor(() => expect(requests).toHaveLength(1));
     expect(requests[0]).toEqual({
+      appId: "app-9",
       status: KillSwitchStatus.DISABLED,
       reason: "INC-1234 false positive",
     });

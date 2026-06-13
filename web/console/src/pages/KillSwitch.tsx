@@ -22,7 +22,7 @@ import { isUnavailableError } from "../lib/availability";
 export function KillSwitchPage() {
   const [appId, setAppId] = useState("");
   const state = useKillSwitchState(appId);
-  const requestChange = useRequestKillSwitchChange(appId);
+  const requestChange = useRequestKillSwitchChange();
 
   // Two-step confirm: the operator must enter a reason and explicitly confirm
   // before a signed change is requested (fail-safe against accidental trips).
@@ -44,6 +44,7 @@ export function KillSwitchPage() {
     if (pending === null || reason.trim().length === 0) return;
     try {
       await requestChange.mutateAsync({
+        appId,
         desiredStatus: pending,
         reason: reason.trim(),
       });
@@ -73,6 +74,7 @@ export function KillSwitchPage() {
             resetRequest();
           }}
           allLabel="Tenant-wide"
+          disabled={requestChange.isPending}
         />
       </Card>
 

@@ -9,12 +9,14 @@ export function AppSelect({
   onChange,
   allLabel = "All apps",
   label = "App",
+  disabled = false,
 }: {
   id: string;
   value: string;
   onChange: (appId: string) => void;
   allLabel?: string;
   label?: string;
+  disabled?: boolean;
 }) {
   const apps = useApps();
   return (
@@ -27,7 +29,7 @@ export function AppSelect({
         className="input"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        disabled={apps.isLoading}
+        disabled={disabled || apps.isLoading}
       >
         <option value="">{allLabel}</option>
         {apps.data?.map((a) => (
