@@ -215,8 +215,9 @@ func TestE2ETrustFlow(t *testing.T) {
 	})
 
 	t.Run("critical_risk_denies", func(t *testing.T) {
-		// Tampered app (BitAppTamper|BitAppUnrecognized=125) + no device integrity
-		// (BitDeviceIntegrity|BitRootJailbreak=85) = 210 -> CRITICAL -> DENY.
+		// UNRECOGNIZED_VERSION -> BitAppTamper(60)|BitAppUnrecognized(65)=125;
+		// empty device verdict -> BitDeviceIntegrity(45)|BitRootJailbreak(40)=85;
+		// UNLICENSED -> BitAccountRisk(20). Total 230 -> CRITICAL -> DENY.
 		resp := runFlow(t, "UNRECOGNIZED_VERSION", []string{}, "UNLICENSED")
 		if !resp.Accepted {
 			t.Fatalf("expected accepted (verdict parsed) but high risk, got %q", resp.RejectionReason)
