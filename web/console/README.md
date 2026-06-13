@@ -65,6 +65,20 @@ defined in the canonical `//proto/kseal/v1/query.proto` +
 keyset-paginated queries. The pages render real data; a thin `ErrorNotice`
 fallback covers transient RPC failures.
 
+### Compliance & ops surface — console-local RPCs
+
+The audit-trail, data-processing-registry, kill-switch and canary views read
+from RPCs being added to the canonical server by another component. Until they
+land, the console talks to them through a **console-local** proto module
+(`proto-local/kseal/consolelocal/v1/`, package `kseal.consolelocal.v1`)
+generated into `src/gen-local/` via `npm run proto:gen:local`, and **degrades
+gracefully** — rendering a "not available yet" state on
+`UNIMPLEMENTED`/`UNAVAILABLE` (`src/lib/availability.ts`). The MASVS-evidence
+view needs no new RPC: it is derived client-side from `RegistryService`
+build manifests (`src/lib/masvs.ts`). See
+[`docs/compliance-console.md`](../../docs/compliance-console.md) for the full
+design and the migration path to the canonical client.
+
 ### Pagination
 
 The Apps, App-detail builds, and Events lists are keyset-paginated. Each hook

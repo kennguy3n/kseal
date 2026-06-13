@@ -11,7 +11,8 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "proto:gen": "bash scripts/gen-proto.sh"
+    "proto:gen": "bash scripts/gen-proto.sh",
+    "proto:gen:local": "bash scripts/gen-proto-local.sh"
   },
   "dependencies": {
     "@bufbuild/protobuf": "^2.2.3",

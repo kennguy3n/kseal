@@ -1,0 +1,25 @@
+version: v2
+# Console-local protobuf module.
+#
+# These are the read/control RPCs the compliance & ops console needs that are
+# being added to the canonical `//proto/kseal/v1` module by another component
+# (WS-K): the hash-chained audit trail, the per-tenant data-processing
+# registry, kill-switch state + signed-change requests, and canary rollout
+# status. Until those land on the canonical module, the console talks to them
+# through a console-local client generated from this file and degrades
+# gracefully (renders an "unavailable" state) when the server returns
+# UNIMPLEMENTED.
+#
+# This module is intentionally separate from `//proto` (which the console must
+# not modify) and lives entirely under `web/console/`. The package name keeps
+# it clearly console-local so it never collides with canonical symbols. Once
+# WS-K's RPCs merge, the parent swaps the console onto the canonical client and
+# this module is deleted.
+modules:
+  - path: .
+lint:
+  use:
+    - STANDARD
+breaking:
+  use:
+    - FILE
