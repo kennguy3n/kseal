@@ -74,6 +74,57 @@ func TestJSONIsValidAndDeterministic(t *testing.T) {
 	}
 }
 
+// TestMergeSameAndroidTypeSemantics locks the per-type merge rules when several
+// contract items project onto the same Play (category, data_type), mirroring the
+// iOS generator: purposes union, optional demotes (AND — one mandatory item
+// makes the merged type mandatory), and source ids are unioned into one row.
+func TestMergeSameAndroidTypeSemantics(t *testing.T) {
+	const cat, typ = "Personal info", "User IDs"
+	mk := func(id string, optional bool, purpose string) contract.DataItem {
+		return contract.DataItem{
+			ID: id, Name: id, ProtoFields: []string{id}, PersonalData: true,
+			Optional: optional, DefaultCollected: true,
+			Description: "desc " + id,
+			Android:     &contract.PlayMapping{Category: cat, DataType: typ, Purposes: []string{purpose}},
+		}
+	}
+
+	t.Run("one mandatory item demotes the merged row to a single mandatory row", func(t *testing.T) {
+		c := &contract.Contract{Collected: []contract.DataItem{
+			mk("opt_item", true, "App functionality"),
+			mk("mandatory_item", false, "Analytics"),
+		}}
+		f := Generate(c, Options{IncludeOptional: true})
+		if len(f.DataTypes) != 1 {
+			t.Fatalf("expected items to merge into 1 row, got %d", len(f.DataTypes))
+		}
+		row := f.DataTypes[0]
+		if row.Optional {
+			t.Error("merged row must be mandatory when any contributing item is mandatory")
+		}
+		if len(row.Purposes) != 2 {
+			t.Errorf("merged row must union purposes, got %v", row.Purposes)
+		}
+		if row.SourceItem != "mandatory_item,opt_item" {
+			t.Errorf("merged row must union source ids (sorted), got %q", row.SourceItem)
+		}
+	})
+
+	t.Run("all-optional items keep the merged row optional", func(t *testing.T) {
+		c := &contract.Contract{Collected: []contract.DataItem{
+			mk("opt_a", true, "App functionality"),
+			mk("opt_b", true, "Analytics"),
+		}}
+		f := Generate(c, Options{IncludeOptional: true})
+		if len(f.DataTypes) != 1 {
+			t.Fatalf("expected items to merge into 1 row, got %d", len(f.DataTypes))
+		}
+		if !f.DataTypes[0].Optional {
+			t.Error("merged row must stay optional when every contributing item is optional")
+		}
+	})
+}
+
 func TestGolden(t *testing.T) {
 	cJSON, _ := Generate(canonical(t), Options{IncludeOptional: true}).JSON()
 	assertGolden(t, "datasafety.json", cJSON)

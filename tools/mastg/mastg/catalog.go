@@ -41,7 +41,10 @@ func ParseCatalog(markdown string) (*Catalog, error) {
 	sc := bufio.NewScanner(strings.NewReader(markdown))
 	sc.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
 
-	var cur *Category
+	// Track the open category by index rather than a *Category into the slice:
+	// appends to cat.Categories can reallocate the backing array, which would
+	// dangle a held pointer. -1 means "no open category".
+	curIdx := -1
 	expectObjective, inObjective := false, false
 
 	for sc.Scan() {
@@ -49,17 +52,18 @@ func ParseCatalog(markdown string) (*Catalog, error) {
 
 		if name, ok := categoryHeading(trimmed); ok {
 			cat.Categories = append(cat.Categories, Category{Name: name})
-			cur = &cat.Categories[len(cat.Categories)-1]
+			curIdx = len(cat.Categories) - 1
 			expectObjective, inObjective = true, false
 			continue
 		}
 		if strings.HasPrefix(trimmed, "## ") {
-			cur, expectObjective, inObjective = nil, false, false
+			curIdx, expectObjective, inObjective = -1, false, false
 			continue
 		}
-		if cur == nil {
+		if curIdx < 0 {
 			continue
 		}
+		cur := &cat.Categories[curIdx]
 		if expectObjective && strings.HasPrefix(trimmed, "Objective:") {
 			cur.Objective = strings.TrimSpace(strings.TrimPrefix(trimmed, "Objective:"))
 			expectObjective, inObjective = false, true

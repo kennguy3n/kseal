@@ -7,6 +7,7 @@ package datasafety
 
 import (
 	"sort"
+	"strings"
 
 	"github.com/kennguy3n/kseal/tools/privacy-manifest/contract"
 )
@@ -47,13 +48,25 @@ type Form struct {
 
 // Generate builds the Data-Safety form from the data contract.
 //
-// Each Android-mapped personal-data item becomes one form row. "Optional" maps
-// to the contract's Optional flag (the Play Console asks whether the user can
-// use the app without providing the data); "Shared" is the contract's
-// third-party-sharing posture (the same for every type). Rows are sorted by
-// (category, data_type) for deterministic output.
+// The Play Console lists each data type once, so contract items that project
+// onto the same Android (category, data_type) are merged — mirroring the iOS
+// generator: purposes union, "optional" demotes (the type is mandatory if any
+// contributing item is mandatory), "shared" promotes (shared if any item is
+// shared), and source ids/descriptions are unioned. "Optional" maps to the
+// contract's Optional flag (the Play Console asks whether the user can use the
+// app without providing the data). Rows are sorted by (category, data_type) for
+// deterministic output.
 func Generate(c *contract.Contract, opts Options) *Form {
-	rows := make([]DataTypeAnswer, 0, len(c.Collected))
+	type agg struct {
+		shared      bool
+		optional    bool
+		purposes    map[string]struct{}
+		source      []string
+		description map[string]struct{}
+	}
+	byType := map[string]*agg{}
+	order := []string{}
+
 	for _, it := range c.PersonalDataItems() {
 		if it.Android == nil {
 			continue
@@ -61,20 +74,43 @@ func Generate(c *contract.Contract, opts Options) *Form {
 		if it.Optional && !it.DefaultCollected && !opts.IncludeOptional {
 			continue
 		}
-		purposes := append([]string(nil), it.Android.Purposes...)
-		sort.Strings(purposes)
+		key := it.Android.Category + "\x00" + it.Android.DataType
+		a := byType[key]
+		if a == nil {
+			// optional starts true so the &&-merge leaves a type optional only
+			// when every contributing item is optional.
+			a = &agg{optional: true, purposes: map[string]struct{}{}, description: map[string]struct{}{}}
+			byType[key] = a
+			order = append(order, key)
+		}
+		a.shared = a.shared || c.DataSharing.SharedWithThirdParties
+		a.optional = a.optional && it.Optional
+		a.source = append(a.source, it.ID)
+		for _, p := range it.Android.Purposes {
+			a.purposes[p] = struct{}{}
+		}
+		if it.Description != "" {
+			a.description[it.Description] = struct{}{}
+		}
+	}
+
+	rows := make([]DataTypeAnswer, 0, len(order))
+	for _, key := range order {
+		a := byType[key]
+		cat, dataType, _ := strings.Cut(key, "\x00")
+		sort.Strings(a.source)
 		rows = append(rows, DataTypeAnswer{
-			Category:  it.Android.Category,
-			DataType:  it.Android.DataType,
+			Category:  cat,
+			DataType:  dataType,
 			Collected: true,
-			Shared:    c.DataSharing.SharedWithThirdParties,
+			Shared:    a.shared,
 			// kseal persists at least aggregates (raw is opt-in), so collected
 			// data is not processed only ephemerally.
 			ProcessedEphemerally: false,
-			Optional:             it.Optional,
-			Purposes:             purposes,
-			SourceItem:           it.ID,
-			Description:          it.Description,
+			Optional:             a.optional,
+			Purposes:             keysSorted(a.purposes),
+			SourceItem:           strings.Join(a.source, ","),
+			Description:          strings.Join(keysSorted(a.description), "; "),
 		})
 	}
 	sort.SliceStable(rows, func(i, j int) bool {
@@ -97,4 +133,13 @@ func Generate(c *contract.Contract, opts Options) *Form {
 		DataTypes:                    rows,
 		NotCollected:                 notCollected,
 	}
+}
+
+func keysSorted(m map[string]struct{}) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
