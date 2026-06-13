@@ -82,6 +82,11 @@ struct KsealTrustClient {
         return URL(string: "\(trimmed)/kseal.v1.\(method)")!
     }
 
+    /// Synchronous POST: a deliberate simplification so this CLI reads top-to-
+    /// bottom. `URLSession.shared` runs its completion on a background delegate
+    /// queue (not the main queue), so the wait doesn't deadlock here — but a real
+    /// app should NOT block the calling thread: use the async API instead, e.g.
+    /// `let (data, resp) = try await URLSession.shared.data(for: req)`.
     private func post(_ method: String, body: Data, contentType: String) throws -> Data {
         var req = URLRequest(url: rpcURL(method))
         req.httpMethod = "POST"

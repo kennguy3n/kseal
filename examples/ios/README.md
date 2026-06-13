@@ -16,7 +16,10 @@ It is packaged as a SwiftPM executable so it is reproducible from the command
 line on a macOS host (the iOS SDK package also supports macOS for host testing).
 **The exact same `KsealSDK` API is what you call from a real iOS app target** —
 drop the SDK package into your app, then reuse `KsealTrustClient` and the flow
-in `main.swift`.
+in `main.swift`. One adaptation when you do: `KsealTrustClient.post` is written
+synchronously (a `DispatchSemaphore` wait) so this CLI reads top-to-bottom; in a
+real app make the transport `async` and call `URLSession.shared.data(for:)`
+instead of blocking the calling thread.
 
 ## Prerequisites
 
