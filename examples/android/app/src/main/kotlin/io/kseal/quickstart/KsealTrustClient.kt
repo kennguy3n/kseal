@@ -136,6 +136,9 @@ class KsealTrustClient(
                         if (b and 0x80 == 0) break
                         shift += 7
                     }
+                    // Guard against a malformed length that overruns the buffer
+                    // (String(bytes, i, len) would otherwise throw); stop the scan.
+                    if (len < 0 || i + len > bytes.size) break
                     val s = String(bytes, i, len, Charsets.UTF_8); i += len
                     if (field == 2) reason = s
                 }

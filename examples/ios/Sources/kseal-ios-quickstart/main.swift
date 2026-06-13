@@ -160,7 +160,8 @@ struct KsealTrustClient {
             case 2:
                 var shift = 0, len = 0
                 while i < b.count { let x = Int(b[i]); i += 1; len |= (x & 0x7f) << shift; if x & 0x80 == 0 { break }; shift += 7 }
-                i += len
+                // Stop on a malformed length that overruns the buffer.
+                if len < 0 || i + len > b.count { i = b.count } else { i += len }
             case 1: i += 8   // fixed64 — skip so an added wide field can't stall the scan
             case 5: i += 4   // fixed32 — skip
             default: i = b.count  // group/unknown wire type — stop
