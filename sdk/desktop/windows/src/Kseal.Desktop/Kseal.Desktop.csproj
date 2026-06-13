@@ -20,4 +20,9 @@
     <InternalsVisibleTo Include="Kseal.Desktop.Tests" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Authenticode timestamp (countersignature) inspection via SignedCms. -->
+    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="8.0.1" />
+  </ItemGroup>
+
 </Project>

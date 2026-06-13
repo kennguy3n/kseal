@@ -16,6 +16,59 @@ public sealed class SystemClock : IClock
 }
 
 /// <summary>
+/// Derives a filesystem-safe, collision-resistant directory component that
+/// isolates one tenant+app's private storage (config, proof key, install id)
+/// from every other tenant/app sharing the same user account.
+/// </summary>
+internal static class StorageScope
+{
+    public static string Component(string tenantId, string appId)
+    {
+        byte[] digest = SHA256.HashData(Encoding.UTF8.GetBytes($"{tenantId}\0{appId}"));
+        return Convert.ToHexString(digest.AsSpan(0, 16)).ToLowerInvariant();
+    }
+}
+
+/// <summary>Atomic, race-tolerant file helpers for first-launch secrets/config.</summary>
+internal static class AtomicFile
+{
+    /// <summary>
+    /// Writes <paramref name="bytes"/> to a sibling temp file then atomically
+    /// renames it over <paramref name="path"/>, so a crash mid-write never leaves
+    /// a partially written target.
+    /// </summary>
+    public static void Write(string path, byte[] bytes)
+    {
+        string tmp = $"{path}.{Guid.NewGuid():N}.tmp";
+        File.WriteAllBytes(tmp, bytes);
+        File.Move(tmp, path, overwrite: true);
+    }
+
+    /// <summary>
+    /// Materializes a first-launch secret tolerating a concurrent creator: the
+    /// exclusive <see cref="FileMode.CreateNew"/> makes the create-vs-create race
+    /// a loser-reads situation, so every caller converges on a single value (no
+    /// last-writer-wins churn).
+    /// </summary>
+    public static byte[] CreateOrReadExisting(string path, byte[] candidate)
+    {
+        try
+        {
+            using var fs = new FileStream(
+                path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+            fs.Write(candidate, 0, candidate.Length);
+            return candidate;
+        }
+        catch (IOException)
+        {
+            // Lost the race (file already exists): adopt the winner's bytes.
+            byte[] existing = File.ReadAllBytes(path);
+            return existing.Length > 0 ? existing : candidate;
+        }
+    }
+}
+
+/// <summary>
 /// Source of the tenant's signed config bytes. <see cref="CachedConfig"/> is
 /// read at launch (no network); <see cref="FetchConfig"/> is invoked only on
 /// demand and is where the host wires the signed-config CDN. The default never
@@ -42,7 +95,7 @@ public sealed class FileConfigProvider : IConfigProvider
 
     public byte[]? CachedConfig() => File.Exists(_path) ? File.ReadAllBytes(_path) : null;
     public byte[]? FetchConfig() => null;
-    public void Persist(byte[] config) => File.WriteAllBytes(_path, config);
+    public void Persist(byte[] config) => AtomicFile.Write(_path, config);
 }
 
 /// <summary>
@@ -109,9 +162,7 @@ public sealed class DefaultProofKeyProvider : IProofKeyProvider
             byte[] existing = File.ReadAllBytes(_path);
             if (existing.Length > 0) return existing;
         }
-        byte[] key = RandomNumberGenerator.GetBytes(32);
-        File.WriteAllBytes(_path, key);
-        return key;
+        return AtomicFile.CreateOrReadExisting(_path, RandomNumberGenerator.GetBytes(32));
     }
 }
 
@@ -138,9 +189,7 @@ public sealed class InstallIdentity
             byte[] existing = File.ReadAllBytes(_path);
             if (existing.Length > 0) return existing;
         }
-        byte[] id = RandomNumberGenerator.GetBytes(16);
-        File.WriteAllBytes(_path, id);
-        return id;
+        return AtomicFile.CreateOrReadExisting(_path, RandomNumberGenerator.GetBytes(16));
     }
 
     /// <summary>

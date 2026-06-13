@@ -27,9 +27,6 @@ final class KsealDesktopFlowTests: XCTestCase {
             platform: .desktopMac
         )
         return KsealDesktop(
-            tenantId: "tenant-1",
-            appId: "com.example.app",
-            apiKey: "api-key",
             core: core,
             env: env,
             options: KsealDesktopOptions(integrityPolicy: policy, maxBatchEvents: maxBatchEvents),

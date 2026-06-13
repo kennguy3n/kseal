@@ -117,7 +117,6 @@ public sealed class WindowsEnvironment : IWindowsEnvironment
 
         string? publisher = null;
         string? thumbprint = null;
-        bool timestamped = false;
         try
         {
 #pragma warning disable SYSLIB0057 // CreateFromSignedFile remains the supported way to read the Authenticode signer.
@@ -125,17 +124,30 @@ public sealed class WindowsEnvironment : IWindowsEnvironment
 #pragma warning restore SYSLIB0057
             publisher = cert.Subject;
             thumbprint = cert.Thumbprint;
-            // A countersignature timestamp lets the signature outlive cert expiry;
-            // its presence is surfaced for policies that require it.
-            timestamped = cert.NotAfter > DateTime.UtcNow;
         }
         catch (CryptographicException)
         {
             // Unsigned or signature unreadable: no publisher to report.
         }
 
+        // A trusted countersignature timestamp (not the signing cert's own expiry
+        // window) is what lets the signature outlive its certificate; detect it by
+        // inspecting the embedded PKCS#7, surfaced for policies that require it.
+        bool timestamped = AuthenticodeTimestamp.HasTrustedTimestamp(EmbeddedPkcs7(path));
+
         bool signed = publisher is not null || trusted;
         return new AuthenticodeInfo(signed, trusted, publisher, thumbprint, timestamped);
+    }
+
+    /// <summary>Extracts the executable's embedded Authenticode PKCS#7, or null.</summary>
+    private static byte[]? EmbeddedPkcs7(string path)
+    {
+        try
+        {
+            return PeImage.Parse(File.ReadAllBytes(path)).EmbeddedPkcs7();
+        }
+        catch (IOException) { return null; }
+        catch (UnauthorizedAccessException) { return null; }
     }
 
     [DllImport("kernel32.dll")]

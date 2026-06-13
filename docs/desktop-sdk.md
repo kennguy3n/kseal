@@ -78,7 +78,7 @@ ecosystem.)
 |---|---|---|---|
 | Code signature present & valid | `SecCodeCopySelf` → `SecStaticCodeCheckValidity` | `WinVerifyTrust` (`WINTRUST_ACTION_GENERIC_VERIFY_V2`) | **Real** (production impl) |
 | Signing identity / team / publisher | `kSecCodeInfoTeamIdentifier`, `…Identifier` | `X509Certificate.CreateFromSignedFile` subject + thumbprint | **Real** |
-| Notarization / timestamp | `SecAssessmentTicketLookup` presence | countersignature timestamp validity | **Real** |
+| Notarization / timestamp | `SecAssessmentCreate` Gatekeeper execute assessment | Authenticode PKCS#7 countersignature (`SignedCms`) | **Real** |
 | Hardened runtime / image flags | `kSecCodeInfoFlags` runtime bit | — | **Real** (macOS) |
 | Binary structure integrity | code-signature validity (covers Mach-O) | `PeImage` PE header/section parser + section SHA-256 | **Real** |
 | Injection / hooking | `DYLD_INSERT_LIBRARIES` + foreign dylibs | foreign loaded modules (outside app/OS dirs) | **Real** |
@@ -99,7 +99,7 @@ Windows code-signing/SmartScreen, and survives OS updates:
 
 - **macOS** uses the public **Security framework**: `SecCodeCopySelf`,
   `SecCodeCopyStaticCode`, `SecStaticCodeCheckValidity`,
-  `SecCodeCopySigningInformation`, and `SecAssessmentTicketLookup`. No private
+  `SecCodeCopySigningInformation`, and `SecAssessmentCreate`. No private
   SPI, no `task_for_pid` against other processes, no kernel pokes, no
   `amfid`/`csops` spelunking. The SDK only inspects **its own** running code, so
   it needs no extra entitlements and is hardened-runtime/sandbox compatible.

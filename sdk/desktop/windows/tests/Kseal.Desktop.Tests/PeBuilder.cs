@@ -63,4 +63,41 @@ internal static class PeBuilder
 
     public static byte[] BuildText(byte[] textBytes, uint certTableSize = 0x200) =>
         Build([(".text", textBytes)], certTableSize);
+
+    /// <summary>
+    /// Builds a PE32+ image whose SECURITY directory points at a real
+    /// WIN_CERTIFICATE attribute-certificate table wrapping <paramref name="pkcs7"/>
+    /// (type WIN_CERT_TYPE_PKCS_SIGNED_DATA), appended after the sections — so
+    /// <see cref="PeImage.EmbeddedPkcs7"/> can extract the original blob.
+    /// </summary>
+    public static byte[] BuildWithCertificate(byte[] pkcs7, ushort certType = 0x0002)
+    {
+        byte[] text = [1, 2, 3, 4];
+        byte[] image = BuildText(text, certTableSize: 0); // no directory yet; patched below
+
+        int coff = PeOffset + 4;
+        int optionalHeader = coff + 20;
+        int dataDir = optionalHeader + 112;
+        int certEntry = dataDir + 4 * 8;
+
+        const int winCertHeader = 8; // dwLength + wRevision + wCertificateType
+        uint dwLength = (uint)(winCertHeader + pkcs7.Length);
+        int certOffset = image.Length;
+
+        var buf = new byte[certOffset + (int)dwLength];
+        Array.Copy(image, buf, image.Length);
+        var span = buf.AsSpan();
+
+        // Patch the SECURITY data directory: VirtualAddress is a raw file offset.
+        BinaryPrimitives.WriteUInt32LittleEndian(span.Slice(certEntry, 4), (uint)certOffset);
+        BinaryPrimitives.WriteUInt32LittleEndian(span.Slice(certEntry + 4, 4), dwLength);
+
+        // WIN_CERTIFICATE { DWORD dwLength; WORD wRevision; WORD wCertificateType; BYTE bCert[]; }
+        BinaryPrimitives.WriteUInt32LittleEndian(span.Slice(certOffset, 4), dwLength);
+        BinaryPrimitives.WriteUInt16LittleEndian(span.Slice(certOffset + 4, 2), 0x0200); // WIN_CERT_REVISION_2_0
+        BinaryPrimitives.WriteUInt16LittleEndian(span.Slice(certOffset + 6, 2), certType);
+        Array.Copy(pkcs7, 0, buf, certOffset + winCertHeader, pkcs7.Length);
+
+        return buf;
+    }
 }

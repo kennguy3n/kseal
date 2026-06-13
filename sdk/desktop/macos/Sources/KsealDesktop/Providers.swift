@@ -14,6 +14,30 @@ public struct SystemClock: Clock {
     public func nowMillis() -> Int64 { Int64(Date().timeIntervalSince1970 * 1000) }
 }
 
+/// Derives a filesystem-safe, collision-resistant directory component that
+/// isolates one tenant+app's private storage (config, proof key, install id)
+/// from every other tenant/app sharing the same user account.
+enum StorageScope {
+    static func component(tenantId: String, appId: String) -> String {
+        let message = Data("\(tenantId)\u{0}\(appId)".utf8)
+        #if canImport(CryptoKit)
+        return SHA256.hash(data: message).prefix(16).map { String(format: "%02x", $0) }.joined()
+        #else
+        func fnv(_ seed: UInt64, _ bytes: Data) -> UInt64 {
+            var hash = seed
+            for byte in bytes {
+                hash ^= UInt64(byte)
+                hash = hash &* 0x100000001b3
+            }
+            return hash
+        }
+        let a = fnv(0xcbf29ce484222325, message)
+        let b = fnv(a ^ 0x5c5c5c5c5c5c5c5c, message)
+        return String(format: "%016llx%016llx", a, b)
+        #endif
+    }
+}
+
 /// Source of the tenant's signed config bytes.
 ///
 /// `cachedConfig()` is read at launch (no network); `fetchConfig()` is invoked
@@ -96,8 +120,24 @@ struct DefaultProofKeyProvider: ProofKeyProvider {
         var bytes = [UInt8](repeating: 0, count: 32)
         SecureRandom.fill(&bytes)
         let key = Data(bytes)
-        try? key.write(to: fileURL, options: [.atomic])
-        return key
+        return Self.createOrReadExisting(at: fileURL, candidate: key)
+    }
+
+    /// Materializes a first-launch secret with an exclusive create, tolerating a
+    /// concurrent creator. `.withoutOverwriting` makes the create-vs-create race a
+    /// loser-reads situation: whoever wins keeps its bytes; everyone else re-reads
+    /// the winner's file, so all callers converge on one value (no last-writer-wins
+    /// churn).
+    static func createOrReadExisting(at url: URL, candidate: Data) -> Data {
+        do {
+            try candidate.write(to: url, options: [.withoutOverwriting])
+            return candidate
+        } catch {
+            if let existing = try? Data(contentsOf: url), !existing.isEmpty {
+                return existing
+            }
+            return candidate
+        }
     }
 }
 
@@ -120,8 +160,7 @@ struct InstallIdentity {
         var bytes = [UInt8](repeating: 0, count: 16)
         SecureRandom.fill(&bytes)
         let id = Data(bytes)
-        try? id.write(to: fileURL, options: [.atomic])
-        return id
+        return DefaultProofKeyProvider.createOrReadExisting(at: fileURL, candidate: id)
     }
 
     /// Lowercase-hex tenant-scoped HMAC of the install id (never the raw id).

@@ -42,9 +42,6 @@ public struct KsealDesktopOptions {
 /// calls `establishTrustSession`.
 public final class KsealDesktop {
 
-    private let tenantId: String
-    private let appId: String
-    private let apiKey: String
     private let core: TrustCore
     private let env: DesktopEnvironment
     private let options: KsealDesktopOptions
@@ -62,9 +59,6 @@ public final class KsealDesktop {
     private var policyHash: String = ""
 
     init(
-        tenantId: String,
-        appId: String,
-        apiKey: String,
         core: TrustCore,
         env: DesktopEnvironment,
         options: KsealDesktopOptions,
@@ -74,9 +68,6 @@ public final class KsealDesktop {
         installIdentityHash: String,
         clock: Clock
     ) {
-        self.tenantId = tenantId
-        self.appId = appId
-        self.apiKey = apiKey
         self.core = core
         self.env = env
         self.options = options
@@ -299,7 +290,6 @@ public final class KsealDesktop {
     public static func initialize(
         tenantId: String,
         appId: String,
-        apiKey: String,
         options: KsealDesktopOptions = KsealDesktopOptions(),
         attestor: CodeIntegrityAttestor = LocalCodeIntegrityAttestor()
     ) throws -> KsealDesktop {
@@ -319,9 +309,6 @@ public final class KsealDesktop {
         let installHash = InstallIdentity(directory: storageDir).tenantScopedHash(tenantId: tenantId, appId: appId)
 
         let sdk = KsealDesktop(
-            tenantId: tenantId,
-            appId: appId,
-            apiKey: apiKey,
             core: core,
             env: env,
             options: options,
@@ -342,13 +329,22 @@ public final class KsealDesktop {
         instance = nil
     }
 
+    /// Per-tenant/app private storage root. Scoping the directory by a
+    /// collision-resistant `tenant+app` component keeps each tenant/app's config,
+    /// proof key, and install id isolated when several share one user account.
     private static func storageDirectory(tenantId: String, appId: String) -> URL {
         let fm = FileManager.default
+        let base: URL
         if let support = try? fm.url(
             for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true
         ) {
-            return support
+            base = support
+        } else {
+            base = fm.temporaryDirectory
         }
-        return fm.temporaryDirectory
+        let scoped = base.appendingPathComponent(
+            StorageScope.component(tenantId: tenantId, appId: appId), isDirectory: true)
+        try? fm.createDirectory(at: scoped, withIntermediateDirectories: true)
+        return scoped
     }
 }

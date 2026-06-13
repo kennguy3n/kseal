@@ -115,4 +115,14 @@ public class TrustCoreTests
     {
         Assert.False(NativeTrustCore.VerifyConfigSignature(new byte[8], new byte[64], new byte[32]));
     }
+
+    [Fact]
+    public void DisposeIsIdempotent()
+    {
+        var core = NewCore();
+        core.Dispose();
+        // A second dispose must be a no-op, not throw on the freed lock.
+        var ex = Record.Exception(() => core.Dispose());
+        Assert.Null(ex);
+    }
 }

@@ -28,9 +28,13 @@ public sealed class PeImage
 
     private readonly byte[] _bytes;
 
+    private const ushort WinCertTypePkcsSignedData = 0x0002; // WIN_CERT_TYPE_PKCS_SIGNED_DATA
+    private const int WinCertificateHeaderSize = 8;          // dwLength + wRevision + wCertificateType
+
     public bool IsValid { get; private set; }
     public bool HasEmbeddedSignature { get; private set; }
     public uint CertificateTableSize { get; private set; }
+    private uint _certificateTableOffset;
     public IReadOnlyList<PeSection> Sections { get; private set; } = [];
 
     private PeImage(byte[] bytes) => _bytes = bytes;
@@ -88,6 +92,9 @@ public sealed class PeImage
         int certEntry = dataDirOffset + CertificateDirectoryIndex * 8;
         if (certEntry + 8 <= span.Length)
         {
+            // The SECURITY directory's "VirtualAddress" is a raw file offset (not
+            // an RVA) pointing at the WIN_CERTIFICATE attribute-certificate table.
+            _certificateTableOffset = BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(certEntry, 4));
             CertificateTableSize = BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(certEntry + 4, 4));
             HasEmbeddedSignature = CertificateTableSize > 0;
         }
@@ -124,6 +131,27 @@ public sealed class PeImage
         int length = raw.IndexOf((byte)0);
         if (length < 0) length = raw.Length;
         return System.Text.Encoding.ASCII.GetString(raw[..length]);
+    }
+
+    /// <summary>
+    /// Extracts the DER PKCS#7 <c>SignedData</c> blob from the first
+    /// WIN_CERTIFICATE entry of the attribute-certificate table, or null when the
+    /// image is unsigned, malformed, or the entry is not a PKCS#7 signature.
+    /// </summary>
+    public byte[]? EmbeddedPkcs7()
+    {
+        if (!IsValid || !HasEmbeddedSignature || _certificateTableOffset == 0) return null;
+        var span = _bytes.AsSpan();
+        long offset = _certificateTableOffset;
+        if (offset + WinCertificateHeaderSize > span.Length) return null;
+
+        uint dwLength = BinaryPrimitives.ReadUInt32LittleEndian(span.Slice((int)offset, 4));
+        ushort certType = BinaryPrimitives.ReadUInt16LittleEndian(span.Slice((int)offset + 6, 2));
+        if (certType != WinCertTypePkcsSignedData) return null;
+        if (dwLength <= WinCertificateHeaderSize || offset + dwLength > span.Length) return null;
+
+        int certLength = (int)dwLength - WinCertificateHeaderSize;
+        return span.Slice((int)offset + WinCertificateHeaderSize, certLength).ToArray();
     }
 
     /// <summary>

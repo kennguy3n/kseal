@@ -142,15 +142,20 @@ final class MacDesktopEnvironment: DesktopEnvironment {
     /// for an *execute* operation succeeds only when the binary is signed,
     /// notarized, and not revoked — exactly the provenance the probe needs.
     private static func isNotarized(_ url: URL) -> Bool {
+        // `SecAssessmentCreate(path, flags, context, errors)` — the operation
+        // type is supplied via the context dictionary, not a positional arg. The
+        // call is audited, so the return is a managed `SecAssessment?` (ARC frees
+        // it) while `errors` is an unmanaged out-param we must release ourselves.
+        let context: CFDictionary = [
+            kSecAssessmentContextKeyOperation as String: kSecAssessmentOperationTypeExecute
+        ] as CFDictionary
         var error: Unmanaged<CFError>?
         let assessment = SecAssessmentCreate(
             url as CFURL,
-            SecAssessmentOperationType(rawValue: kSecAssessmentOperationTypeExecute as CFString),
             SecAssessmentFlags(rawValue: 0),
-            nil,
+            context,
             &error
         )
-        if let assessment { assessment.release() }
         if let error { error.release(); return false }
         return assessment != nil
     }

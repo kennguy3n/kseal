@@ -40,6 +40,7 @@ public sealed unsafe class NativeTrustCore : ITrustCore
 {
     private readonly ReaderWriterLockSlim _lock = new(LockRecursionPolicy.NoRecursion);
     private IntPtr _handle;
+    private int _disposed;
 
     private NativeTrustCore(IntPtr handle) => _handle = handle;
 
@@ -255,6 +256,8 @@ public sealed unsafe class NativeTrustCore : ITrustCore
 
     public void Dispose()
     {
+        // Idempotent: a second Dispose must not touch the already-disposed lock.
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         _lock.EnterWriteLock();
         try
         {

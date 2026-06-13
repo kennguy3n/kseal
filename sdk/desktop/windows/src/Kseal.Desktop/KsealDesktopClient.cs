@@ -294,7 +294,7 @@ public sealed class KsealDesktopClient : IDisposable
             if (_instance is not null) return _instance;
 
             var opts = options ?? new KsealDesktopOptions();
-            string storageDir = StorageDirectory();
+            string storageDir = StorageDirectory(tenantId, appId);
             var env = DesktopEnvironmentFactory.Create();
             byte[] proofKey = new DefaultProofKeyProvider(storageDir).ProofKey();
             var core = NativeTrustCore.Create(
@@ -324,10 +324,15 @@ public sealed class KsealDesktopClient : IDisposable
         }
     }
 
-    private static string StorageDirectory()
+    // Per-tenant/app private storage root. Scoping the directory by a
+    // collision-resistant tenant+app component keeps each tenant/app's config,
+    // proof key, and install id isolated when several share one user account.
+    private static string StorageDirectory(string tenantId, string appId)
     {
         string baseDir = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         if (string.IsNullOrEmpty(baseDir)) baseDir = Path.GetTempPath();
-        return baseDir;
+        string scoped = Path.Combine(baseDir, StorageScope.Component(tenantId, appId));
+        Directory.CreateDirectory(scoped);
+        return scoped;
     }
 }
