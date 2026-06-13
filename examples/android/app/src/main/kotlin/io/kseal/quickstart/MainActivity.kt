@@ -22,11 +22,29 @@ class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private val io = Executors.newSingleThreadExecutor()
 
+    // Initialize the SDK exactly once (no network at launch). KsealSDK.initialize
+    // is itself idempotent, but a lazy singleton is the pattern integrators should
+    // copy — a real app would hold this in Application.onCreate() or a DI graph.
+    private val sdk: KsealSDK by lazy {
+        KsealSDK.initialize(
+            context = applicationContext,
+            tenantId = BuildConfig.KSEAL_TENANT,
+            appId = BuildConfig.KSEAL_APP,
+            apiKey = BuildConfig.KSEAL_API_KEY,
+            options = KsealOptions(buildHash = "sha256:dev-build"),
+        )
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         binding.runButton.setOnClickListener { binding.runButton.isEnabled = false; runFlow() }
+    }
+
+    override fun onDestroy() {
+        io.shutdown()
+        super.onDestroy()
     }
 
     private fun log(line: String) = runOnUiThread {
@@ -35,14 +53,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun runFlow() = io.execute() {
         try {
-            // 1. Initialize the SDK (no network at launch).
-            val sdk = KsealSDK.initialize(
-                context = applicationContext,
-                tenantId = BuildConfig.KSEAL_TENANT,
-                appId = BuildConfig.KSEAL_APP,
-                apiKey = BuildConfig.KSEAL_API_KEY,
-                options = KsealOptions(buildHash = "sha256:dev-build"),
-            )
+            // 1. Use the lazily-initialized SDK singleton (initialized once, off the
+            // main thread on first tap).
 
             // 2. Evaluate local integrity (offline, cheap).
             val risk = sdk.evaluateRisk()
