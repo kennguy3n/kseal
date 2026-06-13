@@ -316,6 +316,8 @@ Events are tiny, structured, and minimized:
 
 ## Server-Side Architecture for 100K Tenants
 
+> **Delivered state (current build).** The shipped server implements the full service surface below as Go [Connect](https://connectrpc.com/) services (`RegistryService`, `TrustService`, `ConfigService`, `IngestService`, `QueryService`, `WebhookService`) over HTTP/2. Event ingest currently uses an **in-process channel broker + batched async writer** into an **in-memory analytics store**, behind `Broker`/`AnalyticsStore`/`EventSink` interfaces designed so a Kafka/Redpanda broker and a ClickHouse store drop in without touching callers (see `server/data-plane/ingest/writer.go`). The transactional source of truth is **Postgres 16** (with row-level-security tenant isolation), and **Redis 7** backs trust-session lookups and rate limits. Signing keys are sealed with AES-256-GCM envelope encryption under a 32-byte KEK; an external KMS/HSM is the production source for that KEK (future work). Webhook fan-out is delivered with HMAC-SHA256 signing, retries, and per-endpoint circuit breaking; SIEM templates are not yet started.
+
 ### Data plane services
 
 | Service | Responsibility |
@@ -421,15 +423,17 @@ Start desktop with **API attestation, code integrity, secure update, tamper tele
 
 ### Server
 
-| Concern | Choice |
-|---|---|
-| Services | Go |
-| RPC | gRPC / Connect (HTTP/2) |
-| Streaming / ingest | Kafka / Redpanda |
-| Analytics store | ClickHouse |
-| Transactional store | Postgres / CockroachDB |
-| Cache / sessions | Redis / Dragonfly |
-| Object storage | S3-compatible |
-| Key material | KMS / HSM |
-| Observability | OpenTelemetry |
-| Edge | CDN with HTTP/3 termination, HTTP/2 origin |
+The **Choice** column is the scale-out target; **Delivered** is what the current build ships.
+
+| Concern | Choice (target) | Delivered (current build) |
+|---|---|---|
+| Services | Go | Go |
+| RPC | gRPC / Connect (HTTP/2) | Connect over HTTP/2 (h2c) |
+| Streaming / ingest | Kafka / Redpanda | In-process channel broker + batched async writer (interface-compatible) |
+| Analytics store | ClickHouse | In-memory analytics store (interface-compatible) |
+| Transactional store | Postgres / CockroachDB | Postgres 16 (row-level-security tenant isolation) |
+| Cache / sessions | Redis / Dragonfly | Redis 7 |
+| Object storage | S3-compatible | Not yet used |
+| Key material | KMS / HSM | AES-256-GCM envelope encryption under a 32-byte KEK (KMS/HSM-sourced in production) |
+| Observability | OpenTelemetry | Prometheus metrics at `/metrics`; `/healthz` + `/readyz` health checks |
+| Edge | CDN with HTTP/3 termination, HTTP/2 origin | Single Go origin over HTTP/2 |

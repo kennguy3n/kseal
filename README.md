@@ -8,6 +8,10 @@ kseal is a continuous app trust platform for mobile and desktop applications. It
 
 ## Table of Contents
 
+- [Quick Start](#quick-start)
+- [Running the Tests](#running-the-tests)
+- [API Examples](#api-examples)
+- [Documentation](#documentation)
 - [Problem Statement](#problem-statement)
 - [Key Differentiators](#key-differentiators)
 - [Architecture Overview](#architecture-overview)
@@ -20,6 +24,127 @@ kseal is a continuous app trust platform for mobile and desktop applications. It
 - [Standards Alignment](#standards-alignment)
 - [License](#license)
 - [Contributing](#contributing)
+
+---
+
+## Quick Start
+
+The full stack — Go server, Postgres 16, Redis 7, and the React console — runs from one command.
+
+```bash
+make docker-up          # builds + starts server, postgres, redis, console (detached)
+```
+
+Once up, the server listens on `:8080` and the console on `:5173`. Verify health:
+
+```bash
+curl -fsS localhost:8080/healthz        # 200 once the process is up
+curl -fsS localhost:8080/readyz         # 200 once Postgres + Redis are reachable
+curl -fsS localhost:8080/metrics | head # Prometheus metrics
+```
+
+Migrations are applied automatically by the server on startup.
+
+Stop the stack (the Postgres volume is preserved):
+
+```bash
+make docker-down        # use `make docker-clean` to also drop the volume
+```
+
+### Endpoints
+
+| Service | Plane | Auth | Notes |
+|---|---|---|---|
+| `RegistryService` | Control | **API key required** (`Authorization: Bearer ksk_…`) | Tenants, apps, builds, policies, webhooks |
+| `TrustService` | Device | Tenant from request body + signed proof | `GetNonce` → `VerifyAttestation` → `ValidateRequestProof` |
+| `ConfigService` | Device | Tenant from request body | Signed, cacheable policy config |
+| `IngestService` | Device | Tenant from request body | zstd-compressed telemetry batches |
+| `QueryService` | Control | API key required | Dashboard overview, event listing, trust stats |
+| `WebhookService` | Control | API key required | HMAC-signed event fan-out |
+
+> **Bootstrapping the first API key.** Control-plane procedures (`RegistryService`, `QueryService`, `WebhookService`) require a valid API key; an unauthenticated control-plane call returns `401 Unauthenticated`. The initial admin tenant + key are currently seeded out-of-band through the registry store (`registry.Store.CreateTenant` + `CreateAPIKey`), exactly as the integration harness does in [`tests/harness_test.go`](tests/harness_test.go). A self-service onboarding RPC is on the Phase 1+ roadmap. The device-plane flow (`TrustService`/`ConfigService`/`IngestService`) needs no API key — it is scoped by the `tenant_id` in the request body and gated by signed proofs.
+
+### Run the trust flow
+
+The device-plane trust flow is exercised end-to-end (challenge → platform attestation → trust token → signed request proof → ALLOW/STEP_UP/DENY) by [`tests/e2e_trust_flow_test.go`](tests/e2e_trust_flow_test.go), which builds the request proof with the same `RequestProofPreimage` + HMAC-SHA256 construction the Rust SDK uses. See [API Examples](#api-examples) for the first call.
+
+---
+
+## Running the Tests
+
+```bash
+make test               # Go server unit tests + Rust core tests
+make test-integration   # end-to-end suite under tests/ (cd tests && go test ./...)
+```
+
+The integration suite drives the **real** services (registry, trust, ingest, query, config, webhook) against a real Postgres 16 + Redis 7. It provisions them automatically via [testcontainers](https://golang.testcontainers.org/) when a container runtime is available, or uses explicit endpoints when set:
+
+```bash
+export KSEAL_TEST_POSTGRES_DSN="postgres://kseal:kseal@localhost:5432/kseal?sslmode=disable"
+export KSEAL_TEST_REDIS_ADDR="localhost:6379"
+cd tests && go test ./...
+```
+
+When neither a DSN nor a container runtime is available, the suite **skips cleanly** so `go test ./...` stays hermetic. The only mocked dependencies are the external attestation platforms (Google Play Integrity / Apple App Attest) — and only their trust-material source is swapped, so the real JWS parsing and verdict mapping still run. Coverage:
+
+| Test | What it proves |
+|---|---|
+| `e2e_trust_flow_test.go` | Full trust chain + anti-replay (replayed/decreasing sequence, wrong nonce/token/key all DENY) |
+| `e2e_telemetry_test.go` | zstd ingest → read back via `ListEvents` with filters + keyset pagination; quota enforcement |
+| `e2e_config_test.go` | Ed25519-signed config envelope, ETag/`If-None-Match` caching, TTL, version rotation |
+| `e2e_webhook_test.go` | HMAC-SHA256 signed delivery + retry/backoff on a failing endpoint |
+| `e2e_query_overview_test.go` | Per-tenant overview + trust-session stats; cross-tenant reads denied |
+| `privacy_contract_test.go` | Telemetry schema carries only minimized, non-PII fields |
+
+---
+
+## API Examples
+
+The server speaks [Connect](https://connectrpc.com/), so every RPC is reachable as a plain JSON `POST`. Below uses `curl`; `grpcurl`/`buf curl` work too.
+
+Create a tenant (control plane — needs an API key):
+
+```bash
+curl -fsS localhost:8080/kseal.v1.RegistryService/CreateTenant \
+  -H "Authorization: Bearer $KSEAL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Acme","slug":"acme","tier":"growth"}'
+```
+
+An unauthenticated control-plane call is rejected:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' \
+  localhost:8080/kseal.v1.RegistryService/ListTenants \
+  -H "Content-Type: application/json" -d '{}'      # => 401
+```
+
+Start the trust flow (device plane — no API key; scoped by `tenant_id`):
+
+```bash
+curl -fsS localhost:8080/kseal.v1.TrustService/GetNonce \
+  -H "Content-Type: application/json" \
+  -d '{"tenant_id":"<tenant-uuid>","app_id":"<app-uuid>"}'
+```
+
+The returned nonce is bound into a platform attestation token and submitted to `TrustService/VerifyAttestation`, which returns a short-lived trust token. A per-request proof is then validated by `TrustService/ValidateRequestProof`. The complete, runnable sequence (including proof construction) lives in [`tests/e2e_trust_flow_test.go`](tests/e2e_trust_flow_test.go).
+
+---
+
+## Documentation
+
+| Document | Contents |
+|---|---|
+| [PROPOSAL.md](PROPOSAL.md) | Business & product proposal, unit economics |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Technical architecture and design principles |
+| [PROGRESS.md](PROGRESS.md) | Phase-by-phase delivery status + change log |
+| [docs/threat-model.md](docs/threat-model.md) | STRIDE-style threat model per vertical |
+| [docs/masvs-mapping.md](docs/masvs-mapping.md) | OWASP MASVS control mapping |
+| [docs/ios-app-review.md](docs/ios-app-review.md) | iOS App Store safety review (public APIs only) |
+| [docs/android-policy-review.md](docs/android-policy-review.md) | Play policy + Play Integrity quota model |
+| [docs/feature-parity-matrix.md](docs/feature-parity-matrix.md) | Competitor feature parity matrix |
+| [docs/cost-model.md](docs/cost-model.md) | Cost model at 10M / 100M / 300M MAU |
+| [docs/README.md](docs/README.md) | Documentation index |
 
 ---
 
