@@ -16,6 +16,13 @@ RUN npm run build
 
 # Runtime stage: static files served by nginx.
 FROM nginx:1.27-alpine AS runtime
+
+# Patch OS packages to clear fixable CVEs that the base image ships with. The
+# release-gate Trivy scan fails on HIGH/CRITICAL with --ignore-unfixed, so every
+# flagged vulnerability has an apk fix available; `apk upgrade` pulls them
+# without pinning, so each rebuild stays current (NoOps) instead of drifting.
+RUN apk upgrade --no-cache
+
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY nginx-security-headers.conf /etc/nginx/snippets/kseal-security-headers.conf
 COPY --from=build /app/dist /usr/share/nginx/html

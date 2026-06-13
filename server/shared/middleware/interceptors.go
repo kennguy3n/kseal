@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -109,7 +110,12 @@ func (i *Interceptors) observability() connect.UnaryInterceptorFunc {
 				Str("code", code).
 				Dur("duration", elapsed).
 				Msg("rpc")
-			if resp != nil {
+			// On the error path connect boxes a typed-nil *Response into the
+			// non-nil AnyResponse interface, so a bare `resp != nil` check
+			// passes yet resp.Header() dereferences a nil pointer and panics
+			// (recovered as CodeInternal, masking the handler's real code, e.g.
+			// NotFound). Guard the underlying pointer before touching it.
+			if resp != nil && !reflect.ValueOf(resp).IsNil() {
 				resp.Header().Set("X-Request-Id", reqID)
 			}
 			return resp, err
