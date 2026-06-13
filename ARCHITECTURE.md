@@ -169,7 +169,7 @@ Nine modules make up the RASP layer. Each has a defined response model feeding t
 
 Build transforms run **locally in the tenant's CI** (no per-build cloud compute), driven by the Gradle/Xcode plugins.
 
-> **Delivered state (current build).** The Gradle (`plugins/gradle`) and Xcode (`plugins/xcode`) plugins ship with R8-aware string/resource sealing (AES-256-GCM), symbol/debug-metadata stripping, a per-build HKDF-SHA256 polymorphism seed, and a shared `kseal.build-proof/v1` manifest registered via `RegistryService.CreateBuild` (offline fallback supported). Native memory-safety hardening (CFI/MTE), Mach-O section-hash integrity, and the auto-generated MASVS evidence report described below are still target state.
+> **Delivered state (current build).** The Gradle (`plugins/gradle`) and Xcode (`plugins/xcode`) plugins ship with R8-aware string/resource sealing (AES-256-GCM), symbol/debug-metadata stripping, a per-build HKDF-SHA256 polymorphism seed, and a shared `kseal.build-proof/v1` manifest registered via `RegistryService.CreateBuild` (offline fallback supported). **Native hardening is now delivered**: Android `.so` CFI/MTE/BTI/PAC posture is verified per-arch by `ElfInspector` and recorded in the build proof (unsupported toolchains are reported, not silently skipped), and iOS Mach-O section-hash + load-command integrity is baked into the manifest via `kseal-harden integrity`. The **MASVS evidence report** is generated per release by `tools/masvs-report` (and `kseal build masvs`) from real build-proof data. **Phase 3 is complete.**
 
 ### Android
 
@@ -318,7 +318,7 @@ Events are tiny, structured, and minimized:
 
 ## Server-Side Architecture for 100K Tenants
 
-> **Delivered state (current build).** The shipped server implements the full service surface below as Go [Connect](https://connectrpc.com/) services (`RegistryService`, `TrustService`, `ConfigService`, `IngestService`, `QueryService`, `WebhookService`) over HTTP/2. Event ingest currently uses an **in-process channel broker + batched async writer** into an **in-memory analytics store**, behind `Broker`/`AnalyticsStore`/`EventSink` interfaces designed so a Kafka/Redpanda broker and a ClickHouse store drop in without touching callers (see `server/data-plane/ingest/writer.go`). The transactional source of truth is **Postgres 16** (with row-level-security tenant isolation), and **Redis 7** backs trust-session lookups and rate limits. Signing keys are sealed with AES-256-GCM envelope encryption under a 32-byte KEK; an external KMS/HSM is the production source for that KEK (future work). Webhook fan-out is delivered with HMAC-SHA256 signing, retries, and per-endpoint circuit breaking. SIEM export is delivered (`server/data-plane/siem`): per-tenant connectors for Splunk HEC, Microsoft Sentinel, and Elastic with a backpressured, batched, at-least-once exporter (per-tenant circuit breaker + privacy allow-list), plus connector templates.
+> **Delivered state (current build).** The shipped server implements the full service surface below as Go [Connect](https://connectrpc.com/) services (`RegistryService`, `TrustService`, `ConfigService`, `IngestService`, `QueryService`, `WebhookService`) over HTTP/2. Event ingest currently uses an **in-process channel broker + batched async writer** into an **in-memory analytics store**, behind `Broker`/`AnalyticsStore`/`EventSink` interfaces designed so a Kafka/Redpanda broker and a ClickHouse store drop in without touching callers (see `server/data-plane/ingest/writer.go`). The transactional source of truth is **Postgres 16** (with row-level-security tenant isolation), and **Redis 7** backs trust-session lookups and rate limits. Signing keys are sealed with AES-256-GCM envelope encryption under a 32-byte KEK via the `TenantSealer` seam: the platform KEK is the default, and **customer-managed keys (BYOK)** are delivered as a per-tenant KMS-wrapped DEK (`CMKKeyManager`, self-describing `KSC1` envelope), fail-closed on KMS error or disabled-CMK open, gated by `KSEAL_CMK_KMS_URI` (default off). Additional hardening ships behind default-off env vars: Redis TLS/AUTH (`KSEAL_REDIS_TLS`/`_PASSWORD`/`_CA_FILE`), an OTLP trace exporter (`KSEAL_OTLP_ENDPOINT`/`_SAMPLE_RATIO`), and per-tenant raw-event retention (`KSEAL_RAW_RETENTION_DAYS` + per-tenant `raw_retention_days`, with a tenant-isolated purge routine). Webhook fan-out is delivered with HMAC-SHA256 signing, retries, and per-endpoint circuit breaking. SIEM export is delivered (`server/data-plane/siem`): per-tenant connectors for Splunk HEC, Microsoft Sentinel, and Elastic with a backpressured, batched, at-least-once exporter (per-tenant circuit breaker + privacy allow-list), plus connector templates.
 
 ### Data plane services
 
@@ -341,7 +341,7 @@ Events are tiny, structured, and minimized:
 | **App registry** | Apps, platforms, bundle/package IDs |
 | **Protection profile** | Hardening/obfuscation profiles per app |
 | **Runtime policy** | Authoring + versioning of risk policies |
-| **Key management** | Per-tenant keys, signing keys, KMS/HSM, CMK |
+| **Key management** | Per-tenant keys, signing keys, KMS/HSM, CMK/BYOK (delivered) |
 | **Build proof** | Records build hashes/manifests; verifies build provenance |
 | **Compliance** | MASVS evidence, audit log, data-processing registry |
 | **Billing** | MAU/MAD/event/retention metering |
@@ -352,6 +352,8 @@ Events are tiny, structured, and minimized:
 ## Desktop Expansion
 
 Desktop (**Phase 5**) reuses the trust backbone and adds platform-specific integrity modules.
+
+> **Delivered state (current build).** Both desktop SDKs are delivered under `sdk/desktop`. **macOS** (`sdk/desktop/macos`, SwiftPM `KsealDesktop`) performs SecCode/SecStaticCode signature validity, team-id, notarization, hardened-runtime, and dylib-injection checks; **Windows** (`sdk/desktop/windows`, .NET 8 `Kseal.Desktop`) performs WinVerifyTrust Authenticode (incl. real PKCS#7 timestamp extraction), publisher/thumbprint, pure-managed PE header/section integrity, and DLL-injection checks. Both fuse local integrity signals through the Rust core via the C FFI and establish a desktop trust session over the existing `TrustService` RPCs. Secure-updater integration and enterprise compatibility controls remain target state.
 
 ### macOS modules
 
