@@ -85,7 +85,9 @@ export async function fetchTenantSnapshot(
   return snapshot;
 }
 
-const PLACEHOLDER_ERRORS: string[] = [];
+// Frozen so a stray push would throw in strict mode rather than silently
+// corrupting every placeholder snapshot that shares this sentinel.
+const PLACEHOLDER_ERRORS: readonly string[] = Object.freeze<string[]>([]);
 
 function placeholderSnapshot(tenantId: string): TenantSnapshot {
   // Pre-load placeholder. The UI gates the rollup on isLoading, so this never
