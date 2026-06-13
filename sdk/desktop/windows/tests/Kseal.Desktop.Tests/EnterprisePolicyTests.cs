@@ -77,6 +77,19 @@ public class EnterprisePolicyTests : IDisposable
     }
 
     [Fact]
+    public void AllowsModuleMatchesCasePerPlatform()
+    {
+        var p = new EnterprisePolicy
+        {
+            InjectionAllowlist = [@"C:\Program Files\Acme\plugin.dll", @"C:\agents\"],
+        };
+        // Windows module paths are case-insensitive; other hosts are case-sensitive.
+        bool expected = OperatingSystem.IsWindows();
+        Assert.Equal(expected, p.AllowsModule(@"c:\program files\acme\plugin.dll"));
+        Assert.Equal(expected, p.AllowsModule(@"C:\AGENTS\telemetry.dll"));
+    }
+
+    [Fact]
     public void FileProviderReadsPolicy()
     {
         string path = Path.Combine(_dir, "policy.json");

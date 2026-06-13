@@ -69,10 +69,16 @@ public sealed record EnterprisePolicy
         && TelemetryVerbosity == TelemetryVerbosity.Standard
         && !RequireHardwareBackedProofKey;
 
+    // Windows module paths are case-insensitive (NTFS/loader), so an MDM admin's
+    // allowlist must match regardless of casing. Off Windows (the JSON-file
+    // fallback path) filesystems are case-sensitive, so honor that.
+    private static readonly StringComparison PathComparison =
+        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+
     /// <summary>
     /// Whether a foreign module <paramref name="path"/> is allowlisted (exact
     /// match, or under an allowlist entry that names a directory prefix ending in
-    /// a path separator).
+    /// a path separator). Path matching is case-insensitive on Windows.
     /// </summary>
     public bool AllowsModule(string path)
     {
@@ -81,9 +87,9 @@ public sealed record EnterprisePolicy
             if (string.IsNullOrEmpty(entry)) continue;
             if (entry.EndsWith('/') || entry.EndsWith('\\'))
             {
-                if (path.StartsWith(entry, StringComparison.Ordinal)) return true;
+                if (path.StartsWith(entry, PathComparison)) return true;
             }
-            else if (string.Equals(path, entry, StringComparison.Ordinal))
+            else if (string.Equals(path, entry, PathComparison))
             {
                 return true;
             }
