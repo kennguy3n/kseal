@@ -147,7 +147,10 @@ struct KsealTrustClient {
         let b = [UInt8](bytes)
         var i = 0, decision = 0
         while i < b.count {
-            let tag = Int(b[i]); i += 1
+            // The tag is itself a varint; read it fully so field numbers >= 16
+            // (which encode as multi-byte tags) still parse if the proto grows.
+            var tag = 0, tShift = 0
+            while i < b.count { let x = Int(b[i]); i += 1; tag |= (x & 0x7f) << tShift; if x & 0x80 == 0 { break }; tShift += 7 }
             let field = tag >> 3
             switch tag & 0x7 {
             case 0:

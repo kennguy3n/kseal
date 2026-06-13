@@ -107,9 +107,17 @@ class KsealTrustClient(
         var decision = 0
         var reason = ""
         while (i < bytes.size) {
-            val tag = bytes[i].toInt() and 0xff; i++
-            val field = tag ushr 3
-            when (tag and 0x7) {
+            // The tag is itself a varint; read it fully so field numbers >= 16
+            // (which encode as multi-byte tags) still parse if the proto grows.
+            var tag = 0L; var tShift = 0
+            while (i < bytes.size) {
+                val b = bytes[i].toInt() and 0xff; i++
+                tag = tag or ((b.toLong() and 0x7f) shl tShift)
+                if (b and 0x80 == 0) break
+                tShift += 7
+            }
+            val field = (tag ushr 3).toInt()
+            when ((tag and 0x7).toInt()) {
                 0 -> { // varint
                     var shift = 0; var v = 0L
                     while (i < bytes.size) {
