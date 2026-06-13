@@ -169,6 +169,8 @@ Nine modules make up the RASP layer. Each has a defined response model feeding t
 
 Build transforms run **locally in the tenant's CI** (no per-build cloud compute), driven by the Gradle/Xcode plugins.
 
+> **Delivered state (current build).** The Gradle (`plugins/gradle`) and Xcode (`plugins/xcode`) plugins ship with R8-aware string/resource sealing (AES-256-GCM), symbol/debug-metadata stripping, a per-build HKDF-SHA256 polymorphism seed, and a shared `kseal.build-proof/v1` manifest registered via `RegistryService.CreateBuild` (offline fallback supported). Native memory-safety hardening (CFI/MTE), Mach-O section-hash integrity, and the auto-generated MASVS evidence report described below are still target state.
+
 ### Android
 
 - **Gradle plugin** integrates into the existing build, after compilation, before packaging.
@@ -316,7 +318,7 @@ Events are tiny, structured, and minimized:
 
 ## Server-Side Architecture for 100K Tenants
 
-> **Delivered state (current build).** The shipped server implements the full service surface below as Go [Connect](https://connectrpc.com/) services (`RegistryService`, `TrustService`, `ConfigService`, `IngestService`, `QueryService`, `WebhookService`) over HTTP/2. Event ingest currently uses an **in-process channel broker + batched async writer** into an **in-memory analytics store**, behind `Broker`/`AnalyticsStore`/`EventSink` interfaces designed so a Kafka/Redpanda broker and a ClickHouse store drop in without touching callers (see `server/data-plane/ingest/writer.go`). The transactional source of truth is **Postgres 16** (with row-level-security tenant isolation), and **Redis 7** backs trust-session lookups and rate limits. Signing keys are sealed with AES-256-GCM envelope encryption under a 32-byte KEK; an external KMS/HSM is the production source for that KEK (future work). Webhook fan-out is delivered with HMAC-SHA256 signing, retries, and per-endpoint circuit breaking; SIEM templates are not yet started.
+> **Delivered state (current build).** The shipped server implements the full service surface below as Go [Connect](https://connectrpc.com/) services (`RegistryService`, `TrustService`, `ConfigService`, `IngestService`, `QueryService`, `WebhookService`) over HTTP/2. Event ingest currently uses an **in-process channel broker + batched async writer** into an **in-memory analytics store**, behind `Broker`/`AnalyticsStore`/`EventSink` interfaces designed so a Kafka/Redpanda broker and a ClickHouse store drop in without touching callers (see `server/data-plane/ingest/writer.go`). The transactional source of truth is **Postgres 16** (with row-level-security tenant isolation), and **Redis 7** backs trust-session lookups and rate limits. Signing keys are sealed with AES-256-GCM envelope encryption under a 32-byte KEK; an external KMS/HSM is the production source for that KEK (future work). Webhook fan-out is delivered with HMAC-SHA256 signing, retries, and per-endpoint circuit breaking. SIEM export is delivered (`server/data-plane/siem`): per-tenant connectors for Splunk HEC, Microsoft Sentinel, and Elastic with a backpressured, batched, at-least-once exporter (per-tenant circuit breaker + privacy allow-list), plus connector templates.
 
 ### Data plane services
 
