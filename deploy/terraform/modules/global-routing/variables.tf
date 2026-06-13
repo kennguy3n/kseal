@@ -19,10 +19,9 @@ variable "domain_name" {
   description = "Apex domain for a zone to create when hosted_zone_id is empty (e.g. kseal.example.com)."
   type        = string
   default     = ""
-  validation {
-    condition     = var.hosted_zone_id != "" || var.domain_name != ""
-    error_message = "Set either hosted_zone_id (use an existing zone) or domain_name (create a new zone)."
-  }
+  # The hosted_zone_id XOR domain_name rule is cross-variable, so it is enforced
+  # by a precondition on terraform_data.routing_guard (see main.tf) rather than a
+  # validation block — keeping required_version at the repo-wide >= 1.6.0 floor.
 }
 
 variable "global_hostname" {

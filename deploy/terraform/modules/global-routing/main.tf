@@ -27,6 +27,10 @@ resource "aws_route53_zone" "this" {
 resource "terraform_data" "routing_guard" {
   lifecycle {
     precondition {
+      condition     = var.hosted_zone_id != "" || var.domain_name != ""
+      error_message = "Set either hosted_zone_id (use an existing zone) or domain_name (create a new zone)."
+    }
+    precondition {
       condition     = !local.use_geolocation || contains(keys(var.regional_endpoints), var.default_region)
       error_message = "default_region must be one of regional_endpoints when routing_policy = 'geolocation'."
     }

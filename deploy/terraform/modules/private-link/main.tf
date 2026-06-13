@@ -12,6 +12,17 @@ locals {
   use_tls = var.tls_certificate_arn != ""
 }
 
+# Cross-variable validation (can't live in a variable validation block on the
+# repo's >= 1.6.0 floor): private_dns_name is required when private DNS is on.
+resource "terraform_data" "guard" {
+  lifecycle {
+    precondition {
+      condition     = !var.enable_private_dns || var.private_dns_name != ""
+      error_message = "private_dns_name must be set when enable_private_dns = true."
+    }
+  }
+}
+
 resource "aws_lb" "this" {
   name                             = "${var.name}-pl"
   internal                         = true

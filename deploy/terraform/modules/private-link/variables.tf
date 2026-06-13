@@ -86,8 +86,7 @@ variable "private_dns_name" {
   description = "Private DNS name to advertise (e.g. private.kseal.example.com). Requires domain-ownership verification via the emitted TXT record; see outputs."
   type        = string
   default     = ""
-  validation {
-    condition     = !var.enable_private_dns || var.private_dns_name != ""
-    error_message = "private_dns_name must be set when enable_private_dns = true."
-  }
+  # The "required when enable_private_dns" rule is cross-variable, so it is
+  # enforced by a precondition on terraform_data.guard (see main.tf) rather than
+  # a validation block — keeping required_version at the repo-wide >= 1.6.0 floor.
 }
