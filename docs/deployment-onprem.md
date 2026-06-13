@@ -77,6 +77,14 @@ curl -fsS http://127.0.0.1:8080/readyz && echo
 The server applies its embedded SQL migrations on startup; no init scripts are
 needed. Postgres data persists in the `pgdata` volume (back it up — see DR).
 
+> **Required Postgres extensions:** the migrations run `CREATE EXTENSION IF NOT
+> EXISTS` for `pgcrypto` (UUIDs) and `pg_trgm` (app-search indexes). Both are
+> trusted, bundled extensions on stock PostgreSQL 16, RDS, and Cloud SQL, so the
+> migration role can create them without superuser. On a locked-down cluster
+> that restricts `CREATE EXTENSION`, pre-create them once as a superuser
+> (`CREATE EXTENSION pgcrypto; CREATE EXTENSION pg_trgm;` in the kseal database)
+> before first startup — the `IF NOT EXISTS` migrations then become no-ops.
+
 ## Install: Kubernetes
 
 ```bash
