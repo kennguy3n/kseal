@@ -57,6 +57,10 @@ public class SecureUpdateTests
         Assert.True(new UpdateVersion("2.0") == new UpdateVersion("2.0.0"));
         Assert.True(new UpdateVersion("3.0.1") > new UpdateVersion("3.0.0"));
         Assert.False(new UpdateVersion("1.0.0") > new UpdateVersion("1.0.0"));
+
+        // Equal versions must hash equally; default must be usable (no NPE).
+        Assert.Equal(new UpdateVersion("2.0").GetHashCode(), new UpdateVersion("2.0.0").GetHashCode());
+        Assert.Equal(0, default(UpdateVersion).CompareTo(new UpdateVersion("0.0")));
     }
 
     [Fact]

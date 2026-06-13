@@ -12,7 +12,10 @@ namespace Kseal.Desktop;
 public readonly struct UpdateVersion : IComparable<UpdateVersion>, IEquatable<UpdateVersion>
 {
     public string Raw { get; }
-    private readonly int[] _components;
+    private readonly int[]? _components;
+
+    // Never null even for default(UpdateVersion), which bypasses the constructor.
+    private int[] Components => _components ?? [];
 
     public UpdateVersion(string raw)
     {
@@ -24,11 +27,12 @@ public readonly struct UpdateVersion : IComparable<UpdateVersion>, IEquatable<Up
 
     public int CompareTo(UpdateVersion other)
     {
-        int count = Math.Max(_components.Length, other._components.Length);
+        int[] a = Components, b = other.Components;
+        int count = Math.Max(a.Length, b.Length);
         for (int i = 0; i < count; i++)
         {
-            int l = i < _components.Length ? _components[i] : 0;
-            int r = i < other._components.Length ? other._components[i] : 0;
+            int l = i < a.Length ? a[i] : 0;   // missing trailing component == 0
+            int r = i < b.Length ? b[i] : 0;
             if (l != r) return l.CompareTo(r);
         }
         return 0;
@@ -36,7 +40,18 @@ public readonly struct UpdateVersion : IComparable<UpdateVersion>, IEquatable<Up
 
     public bool Equals(UpdateVersion other) => CompareTo(other) == 0;
     public override bool Equals(object? obj) => obj is UpdateVersion v && Equals(v);
-    public override int GetHashCode() => CompareTo(default) == 0 ? 0 : Raw.GetHashCode(StringComparison.Ordinal);
+
+    // Consistent with Equals: ignore trailing-zero components so 2.0 and 2.0.0 hash equally.
+    public override int GetHashCode()
+    {
+        int[] c = Components;
+        int len = c.Length;
+        while (len > 0 && c[len - 1] == 0) len--;
+        var hash = new HashCode();
+        for (int i = 0; i < len; i++) hash.Add(c[i]);
+        return hash.ToHashCode();
+    }
+
     public override string ToString() => Raw;
 
     public static bool operator <(UpdateVersion a, UpdateVersion b) => a.CompareTo(b) < 0;
