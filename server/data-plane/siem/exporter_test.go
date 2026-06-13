@@ -2,6 +2,7 @@ package siem
 
 import (
 	"errors"
+	"sync"
 	"testing"
 	"time"
 )
@@ -135,6 +136,41 @@ func TestSubmitDropsWhenQueueFull(t *testing.T) {
 	}
 	// No assertion on exact drops (timing-dependent), just that Submit never
 	// blocks: reaching here without deadlock is the property under test.
+}
+
+func TestStopReturnsPromptlyUnderConcurrentSubmit(t *testing.T) {
+	// IdleTimeout is deliberately huge: if Stop ever fails to signal a pipe that
+	// Submit registers concurrently, Stop would block until this fires. The test
+	// asserts Stop returns quickly regardless, proving the shutdown handshake.
+	ex := NewExporter(
+		NewMemConnectorStore(testEncryptorNil{}),
+		ExporterConfig{QueueSize: 8, FlushInterval: time.Hour, IdleTimeout: time.Hour},
+		nil,
+	)
+
+	var wg sync.WaitGroup
+	for g := 0; g < 16; g++ {
+		wg.Add(1)
+		go func(g int) {
+			defer wg.Done()
+			for i := 0; i < 500; i++ {
+				ex.Submit(Event{TenantID: "tenant-" + string(rune('a'+g%8)), RiskBits: uint64(i)})
+			}
+		}(g)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		ex.Stop()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Stop did not return promptly under concurrent Submit (pipe leaked past shutdown)")
+	}
+	wg.Wait()
 }
 
 // testEncryptorNil is a passthrough sealer used where encryption is irrelevant.

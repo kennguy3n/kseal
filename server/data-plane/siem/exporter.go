@@ -130,6 +130,9 @@ func (ex *Exporter) Submit(ev Event) {
 	te := timedEvent{ev: ev, at: ex.now()}
 	for {
 		p := ex.getOrCreate(ev.TenantID)
+		if p == nil {
+			return // exporter stopped between the guard above and pipe creation
+		}
 		switch p.enqueue(te) {
 		case enqOK:
 			ex.metrics.addQueueDepth(1)
@@ -157,6 +160,14 @@ func (ex *Exporter) getOrCreate(tenant string) *tenantPipe {
 	if p := ex.pipes[tenant]; p != nil {
 		return p
 	}
+	// Re-check under the write lock that Stop holds while snapshotting pipes, so
+	// we never register (and wg.Add) a pipe that Stop won't signal — which would
+	// otherwise wedge Stop until the idle reaper fires.
+	select {
+	case <-ex.stopped:
+		return nil
+	default:
+	}
 	p = newTenantPipe(ex, tenant)
 	ex.pipes[tenant] = p
 	ex.wg.Add(1)
@@ -178,13 +189,15 @@ func (ex *Exporter) removePipe(tenant string, p *tenantPipe) {
 // dropped. Idempotent.
 func (ex *Exporter) Stop() {
 	ex.stop.Do(func() {
+		// Close the stop signal and snapshot pipes atomically under the same lock
+		// getOrCreate uses, so no pipe can be registered after this snapshot.
+		ex.mu.Lock()
 		close(ex.stopped)
-		ex.mu.RLock()
 		pipes := make([]*tenantPipe, 0, len(ex.pipes))
 		for _, p := range ex.pipes {
 			pipes = append(pipes, p)
 		}
-		ex.mu.RUnlock()
+		ex.mu.Unlock()
 		for _, p := range pipes {
 			p.signalStop()
 		}
@@ -406,7 +419,9 @@ func (p *tenantPipe) deliverToConnector(ctx context.Context, cws ConnectorWithSe
 			}
 			p.ex.metrics.recordOutcome(kind, outcomeRetry)
 			if !sleepCtx(ctx, p.quit, p.backoff(attempt)) {
-				// Shutting down: leave for at-least-once redelivery semantics.
+				// Interrupted by shutdown mid-backoff. With no durable queue we
+				// cannot redeliver, so this batch is dead-lettered (counted) rather
+				// than silently lost.
 				p.ex.metrics.recordDeadLetter(kind)
 				return
 			}
