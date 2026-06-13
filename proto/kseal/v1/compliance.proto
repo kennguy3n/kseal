@@ -1,0 +1,249 @@
+syntax = "proto3";
+
+package kseal.v1;
+
+option go_package = "github.com/kennguy3n/kseal/server/gen/kseal/v1;ksealv1";
+
+// compliance.proto carries the enterprise trust & compliance surface: a
+// tamper-evident audit trail, a machine-readable data-processing registry, a
+// signed remote kill switch, and canary rollout state. Every message is
+// tenant-scoped; none carries PII. All fields are additive to the v1 wire
+// contract.
+
+// ---- Audit trail ----
+
+// AuditEvent is one entry in a tenant's append-only, hash-chained audit log of
+// control-plane mutations. Each event commits to its predecessor via prev_hash,
+// so any insertion, reordering, or edit breaks the chain and is detectable by
+// VerifyAuditChain. Events carry only coarse, non-PII attributes.
+message AuditEvent {
+  string tenant_id = 1;
+  // Per-tenant monotonic sequence number, starting at 1.
+  int64 seq = 2;
+  // Dotted action verb, e.g. "policy.activate", "killswitch.issue".
+  string action = 3;
+  // Resource kind the action targeted, e.g. "policy", "kill_switch".
+  string resource_type = 4;
+  // Identifier of the affected resource (never PII).
+  string resource_id = 5;
+  // API-key id of the actor that performed the action (non-PII identifier).
+  string actor_key_id = 6;
+  // Coarse, non-PII key/value attributes describing the change.
+  map<string, string> metadata = 7;
+  // Hex SHA-256 of the previous event in this tenant's chain ("" for the first).
+  string prev_hash = 8;
+  // Hex SHA-256 of this event over its canonical preimage (chained on prev_hash).
+  string hash = 9;
+  // Event time in unix milliseconds.
+  int64 created_at = 10;
+}
+
+message ListAuditEventsRequest {
+  string tenant_id = 1;
+  // Optional exact-match filters; empty means no filter.
+  string action = 2;
+  string resource_type = 3;
+  // Inclusive time bounds in unix millis (0 means unbounded).
+  int64 start_time = 4;
+  int64 end_time = 5;
+  int32 page_size = 6;
+  string page_token = 7;
+}
+message ListAuditEventsResponse {
+  // Newest first.
+  repeated AuditEvent events = 1;
+  string next_page_token = 2;
+}
+
+message VerifyAuditChainRequest {
+  string tenant_id = 1;
+}
+message VerifyAuditChainResponse {
+  // True when every event's hash matches its recomputed value and links to its
+  // predecessor with no gaps.
+  bool intact = 1;
+  // Number of events checked.
+  int64 verified_count = 2;
+  // Sequence number of the first event that failed verification (0 if intact).
+  int64 broken_seq = 3;
+  // Hex SHA-256 of the chain head (latest event), "" when the log is empty.
+  string head_hash = 4;
+}
+
+// ---- Data-processing registry ----
+
+// DataProcessingRecord is a machine-readable disclosure of what data an app/SDK
+// processes: categories, purpose, retention, and legal basis. It backs the
+// compliance console and store-disclosure tooling.
+message DataProcessingRecord {
+  string tenant_id = 1;
+  // Empty app_id is a tenant-wide default record.
+  string app_id = 2;
+  // Data categories processed (e.g. "device_integrity_signal", "coarse_region").
+  repeated string data_categories = 3;
+  // Processing purpose (e.g. "app_abuse_prevention").
+  string purpose = 4;
+  // Retention window in days for the raw data (0 means aggregates only).
+  int32 retention_days = 5;
+  // Lawful basis (e.g. "legitimate_interest", "consent").
+  string legal_basis = 6;
+  // Whether any category is shared with a third party.
+  bool third_party_sharing = 7;
+  int64 updated_at = 8;
+}
+
+message PutDataProcessingRecordRequest {
+  string tenant_id = 1;
+  string app_id = 2;
+  repeated string data_categories = 3;
+  string purpose = 4;
+  int32 retention_days = 5;
+  string legal_basis = 6;
+  bool third_party_sharing = 7;
+}
+message PutDataProcessingRecordResponse {
+  DataProcessingRecord record = 1;
+}
+
+message GetDataProcessingRegistryRequest {
+  string tenant_id = 1;
+}
+message GetDataProcessingRegistryResponse {
+  repeated DataProcessingRecord records = 1;
+}
+
+// ---- Signed kill switch (remote disable) ----
+
+// KillSwitchCommand is the action a signed kill switch carries.
+enum KillSwitchCommand {
+  KILL_SWITCH_COMMAND_UNSPECIFIED = 0;
+  // Normal operation (clears a prior disable).
+  KILL_SWITCH_COMMAND_ENABLE = 1;
+  // Remote disable: the SDK fails safe into a degraded/blocked posture.
+  KILL_SWITCH_COMMAND_DISABLE = 2;
+}
+
+// SignedKillSwitch is an Ed25519-signed remote disable/enable command for a
+// scope (tenant, optional app, optional build). Only a signature that verifies
+// under the tenant's active signing key flips device state; a forged or altered
+// command is a no-op. Delivered through the signed-config channel.
+message SignedKillSwitch {
+  string tenant_id = 1;
+  // Empty app_id targets the whole tenant.
+  string app_id = 2;
+  // Empty build_hash targets all builds in scope.
+  string build_hash = 3;
+  KillSwitchCommand command = 4;
+  // Monotonically increasing version per scope (anti-rollback anchor).
+  int64 version = 5;
+  int64 issued_at = 6;
+  string reason = 7;
+  // Ed25519 signature over the canonical kill-switch preimage.
+  bytes signature = 8;
+  // Identifier of the signing key (for rotation).
+  string key_id = 9;
+}
+
+message IssueKillSwitchRequest {
+  string tenant_id = 1;
+  string app_id = 2;
+  string build_hash = 3;
+  KillSwitchCommand command = 4;
+  string reason = 5;
+}
+message IssueKillSwitchResponse {
+  SignedKillSwitch kill_switch = 1;
+}
+
+message GetKillSwitchStateRequest {
+  string tenant_id = 1;
+  string app_id = 2;
+  string build_hash = 3;
+}
+message GetKillSwitchStateResponse {
+  // The resolved effective command for the scope (most specific scope wins),
+  // defaulting to ENABLE when nothing is set.
+  KillSwitchCommand effective_command = 1;
+  // The signed command in effect for the resolved scope (absent when none).
+  SignedKillSwitch active = 2;
+}
+
+message ListKillSwitchesRequest {
+  string tenant_id = 1;
+}
+message ListKillSwitchesResponse {
+  repeated SignedKillSwitch kill_switches = 1;
+}
+
+// ---- Canary rollout + auto-rollback ----
+
+// CanaryState is the lifecycle of a staged config rollout.
+enum CanaryState {
+  CANARY_STATE_UNSPECIFIED = 0;
+  // Candidate is being served to a percentage of instances.
+  CANARY_STATE_ACTIVE = 1;
+  // Candidate fully promoted to stable.
+  CANARY_STATE_PROMOTED = 2;
+  // Candidate withdrawn; all instances back on last-known-good.
+  CANARY_STATE_ROLLED_BACK = 3;
+}
+
+// CanaryStatus reports a staged rollout for an (tenant, app): which candidate
+// policy is being trialled, at what percentage, the last-known-good to revert
+// to, and the observed guardrail health driving auto-rollback.
+message CanaryStatus {
+  string tenant_id = 1;
+  string app_id = 2;
+  string candidate_policy_id = 3;
+  // Last-known-good policy the rollout reverts to on rollback.
+  string stable_policy_id = 4;
+  // Percentage of instances served the candidate (0..100).
+  uint32 percent = 5;
+  CanaryState state = 6;
+  // Observed windowed block rate for the candidate cohort.
+  double block_rate = 7;
+  // Decisions observed in the current window.
+  int64 sample_count = 8;
+  // Block-rate threshold above which auto-rollback fires.
+  double rollback_threshold = 9;
+  // Human-readable description of the last state transition.
+  string last_event = 10;
+  int64 updated_at = 11;
+}
+
+message SetCanaryRolloutRequest {
+  string tenant_id = 1;
+  string app_id = 2;
+  string candidate_policy_id = 3;
+  uint32 percent = 4;
+  // 0 uses the platform default rollback threshold.
+  double rollback_threshold = 5;
+}
+message SetCanaryRolloutResponse {
+  CanaryStatus status = 1;
+}
+
+message GetCanaryStatusRequest {
+  string tenant_id = 1;
+  string app_id = 2;
+}
+message GetCanaryStatusResponse {
+  CanaryStatus status = 1;
+}
+
+message PromoteCanaryRequest {
+  string tenant_id = 1;
+  string app_id = 2;
+}
+message PromoteCanaryResponse {
+  CanaryStatus status = 1;
+}
+
+message RollbackCanaryRequest {
+  string tenant_id = 1;
+  string app_id = 2;
+  string reason = 3;
+}
+message RollbackCanaryResponse {
+  CanaryStatus status = 1;
+}

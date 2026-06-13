@@ -168,17 +168,25 @@ func (d *Detector) RecordModule(tenant, app, policy, module string, falsePositiv
 
 // BlockRate returns the windowed block rate for a scope (0 when no traffic).
 func (d *Detector) BlockRate(tenant, app, policy string) float64 {
+	rate, _ := d.Sample(tenant, app, policy)
+	return rate
+}
+
+// Sample returns the windowed block rate and the number of decisions observed
+// for a scope (0, 0 when no traffic). It is the health signal the canary
+// auto-rollback controller reads for the candidate cohort.
+func (d *Detector) Sample(tenant, app, policy string) (blockRate float64, total int) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	c, ok := d.scopes[scopeKey{tenant, app, policy}]
 	if !ok {
-		return 0
+		return 0, 0
 	}
 	total, blocked, _ := c.aggregate(d.epoch())
 	if total == 0 {
-		return 0
+		return 0, 0
 	}
-	return float64(blocked) / float64(total)
+	return float64(blocked) / float64(total), total
 }
 
 // ModuleFalsePositiveRate returns a module's windowed FP rate within a scope.

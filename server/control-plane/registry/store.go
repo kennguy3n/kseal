@@ -172,6 +172,7 @@ type Store interface {
 	// Policies.
 	CreatePolicy(ctx context.Context, in CreatePolicyInput) (*ksealv1.Policy, error)
 	GetActivePolicy(ctx context.Context, tenantID, appID string) (*ksealv1.Policy, error)
+	GetPolicy(ctx context.Context, tenantID, id string) (*ksealv1.Policy, error)
 	ListPolicies(ctx context.Context, tenantID, appID string) ([]*ksealv1.Policy, error)
 	ActivatePolicy(ctx context.Context, tenantID, id string) (*ksealv1.Policy, error)
 

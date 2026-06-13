@@ -26,11 +26,14 @@ import (
 	"github.com/kennguy3n/kseal/server/shared/middleware"
 	"github.com/kennguy3n/kseal/server/shared/telemetry"
 
+	"github.com/kennguy3n/kseal/server/control-plane/compliance"
 	"github.com/kennguy3n/kseal/server/control-plane/migrations"
 	"github.com/kennguy3n/kseal/server/control-plane/registry"
 
 	"github.com/kennguy3n/kseal/server/data-plane/attestation"
+	"github.com/kennguy3n/kseal/server/data-plane/canary"
 	cfgsvc "github.com/kennguy3n/kseal/server/data-plane/config"
+	"github.com/kennguy3n/kseal/server/data-plane/guardrails"
 	"github.com/kennguy3n/kseal/server/data-plane/ingest"
 	"github.com/kennguy3n/kseal/server/data-plane/query"
 	"github.com/kennguy3n/kseal/server/data-plane/siem"
@@ -116,6 +119,20 @@ func run() error {
 
 	configSvc := cfgsvc.NewService(store, cfgsvc.NewSigner(store), cfg.ConfigTTL)
 
+	// Enterprise trust & compliance: hash-chained audit trail + data-processing
+	// registry, signed kill switch, and canary rollout with auto-rollback. All
+	// flag-gated per tenant (default off); reads/writes are tenant-isolated.
+	complianceStore := compliance.NewPostgresStore(database, store)
+	complianceSvc := compliance.NewService(complianceStore, store)
+	canaryReg := canary.NewRegistry()
+	detector := guardrails.NewDetector(0)
+	canaryCtl := canary.NewController(complianceStore, canary.GuardrailHealth{Detector: detector}, canaryReg, canary.Config{})
+	// Wire optional, flag-gated compliance behavior into the hot paths: candidate
+	// selection + kill-switch delivery in config, and the canary health feed in
+	// trust. Disabled per tenant unless the matching feature flag is on.
+	configSvc.AttachCompliance(canaryReg, complianceStore, cfg.FeatureFlags)
+	trustSvc.AttachCanaryHealth(detector, canaryReg, cfg.FeatureFlags)
+
 	dispatcher := webhook.NewDispatcher(store, webhook.DispatcherConfig{}, tel.Metrics)
 	defer dispatcher.Stop()
 
@@ -164,6 +181,16 @@ func run() error {
 		})
 	}()
 
+	// Canary auto-rollback controller: refreshes the in-memory active-canary
+	// snapshot the config/trust hot paths read, and reverts any candidate cohort
+	// that breaches its guardrail block-rate threshold. Harmless with no active
+	// canaries; tracked in bg so it drains before the DB pool closes.
+	bg.Add(1)
+	go func() {
+		defer bg.Done()
+		canaryCtl.Run(rootCtx)
+	}()
+
 	// Interceptors.
 	limiter := middleware.NewRedisRateLimiter(rdb, cfg.RateLimitPerSecond, cfg.RateLimitBurst, "rl")
 	ic := &middleware.Interceptors{
@@ -184,6 +211,7 @@ func run() error {
 	mux.Handle(ksealv1connect.NewWebhookServiceHandler(webhookSvc, opts))
 	mux.Handle(ksealv1connect.NewQueryServiceHandler(querySvc, opts))
 	mux.Handle(ksealv1connect.NewSiemServiceHandler(siemSvc, opts))
+	mux.Handle(ksealv1connect.NewComplianceServiceHandler(complianceSvc, opts))
 
 	// Single /metrics exposition combining the platform and SIEM registries.
 	mux.Handle("/metrics", siem.CombinedMetricsHandler(tel.Metrics.Handler(), siemMetrics.Handler()))
@@ -234,19 +262,30 @@ func run() error {
 // tenants with a configured cmk_kms_uri get per-tenant DEKs wrapped by their own
 // KMS key, and the rest still fall back to the platform KEK.
 func buildTenantSealer(cfg *cfgpkg.Config, platform *crypto.Encryptor, database *db.DB) (crypto.TenantSealer, error) {
-	if cfg.CMKKMSURI == "" {
-		return platform, nil
+	var base crypto.TenantSealer = platform
+	if cfg.CMKKMSURI != "" {
+		var kmsOpts []crypto.HTTPKMSOption
+		if cfg.CMKKMSAuthToken != "" {
+			kmsOpts = append(kmsOpts, crypto.WithAuthToken(cfg.CMKKMSAuthToken))
+		}
+		kms, err := crypto.NewHTTPKMSClient(cfg.CMKKMSURI, kmsOpts...)
+		if err != nil {
+			return nil, err
+		}
+		resolver := registry.NewCMKResolver(database, registry.DefaultCMKCacheTTL)
+		base, err = crypto.NewCMKKeyManager(platform, kms, resolver)
+		if err != nil {
+			return nil, err
+		}
 	}
-	var kmsOpts []crypto.HTTPKMSOption
-	if cfg.CMKKMSAuthToken != "" {
-		kmsOpts = append(kmsOpts, crypto.WithAuthToken(cfg.CMKKMSAuthToken))
+	// Dedicated/regulated isolation tier wraps the base sealer: tenants flagged
+	// dedicated (and without a CMK key) get a per-tenant HKDF-derived key domain;
+	// all others delegate to base with unchanged behavior. Off by default.
+	if cfg.DedicatedIsolation {
+		isolation := registry.NewDedicatedResolver(database, registry.DefaultCMKCacheTTL)
+		return crypto.NewDedicatedKeyManager(base, cfg.KEK, isolation)
 	}
-	kms, err := crypto.NewHTTPKMSClient(cfg.CMKKMSURI, kmsOpts...)
-	if err != nil {
-		return nil, err
-	}
-	resolver := registry.NewCMKResolver(database, registry.DefaultCMKCacheTTL)
-	return crypto.NewCMKKeyManager(platform, kms, resolver)
+	return base, nil
 }
 
 // webhookSink adapts the ingest write path to the webhook dispatcher, fanning
@@ -322,30 +361,41 @@ func (s siemSink) Emit(e ingest.StoredEvent) {
 // signed proofs instead.
 func controlPlaneProcedures() map[string]bool {
 	return map[string]bool{
-		ksealv1connect.RegistryServiceCreateTenantProcedure:            true,
-		ksealv1connect.RegistryServiceGetTenantProcedure:               true,
-		ksealv1connect.RegistryServiceListTenantsProcedure:             true,
-		ksealv1connect.RegistryServiceUpdateTenantProcedure:            true,
-		ksealv1connect.RegistryServiceCreateAppProcedure:               true,
-		ksealv1connect.RegistryServiceGetAppProcedure:                  true,
-		ksealv1connect.RegistryServiceListAppsProcedure:                true,
-		ksealv1connect.RegistryServiceCreateBuildProcedure:             true,
-		ksealv1connect.RegistryServiceGetBuildProcedure:                true,
-		ksealv1connect.RegistryServiceListBuildsProcedure:              true,
-		ksealv1connect.RegistryServiceCreatePolicyProcedure:            true,
-		ksealv1connect.RegistryServiceGetActivePolicyProcedure:         true,
-		ksealv1connect.RegistryServiceListPoliciesProcedure:            true,
-		ksealv1connect.RegistryServiceActivatePolicyProcedure:          true,
-		ksealv1connect.RegistryServiceCreateProtectionProfileProcedure: true,
-		ksealv1connect.RegistryServiceListProtectionProfilesProcedure:  true,
-		ksealv1connect.WebhookServiceRegisterWebhookProcedure:          true,
-		ksealv1connect.WebhookServiceListWebhooksProcedure:             true,
-		ksealv1connect.WebhookServiceDeleteWebhookProcedure:            true,
-		ksealv1connect.QueryServiceListEventsProcedure:                 true,
-		ksealv1connect.QueryServiceGetTenantOverviewProcedure:          true,
-		ksealv1connect.QueryServiceGetTrustSessionStatsProcedure:       true,
-		ksealv1connect.SiemServiceRegisterConnectorProcedure:           true,
-		ksealv1connect.SiemServiceListConnectorsProcedure:              true,
-		ksealv1connect.SiemServiceDeleteConnectorProcedure:             true,
+		ksealv1connect.RegistryServiceCreateTenantProcedure:                true,
+		ksealv1connect.RegistryServiceGetTenantProcedure:                   true,
+		ksealv1connect.RegistryServiceListTenantsProcedure:                 true,
+		ksealv1connect.RegistryServiceUpdateTenantProcedure:                true,
+		ksealv1connect.RegistryServiceCreateAppProcedure:                   true,
+		ksealv1connect.RegistryServiceGetAppProcedure:                      true,
+		ksealv1connect.RegistryServiceListAppsProcedure:                    true,
+		ksealv1connect.RegistryServiceCreateBuildProcedure:                 true,
+		ksealv1connect.RegistryServiceGetBuildProcedure:                    true,
+		ksealv1connect.RegistryServiceListBuildsProcedure:                  true,
+		ksealv1connect.RegistryServiceCreatePolicyProcedure:                true,
+		ksealv1connect.RegistryServiceGetActivePolicyProcedure:             true,
+		ksealv1connect.RegistryServiceListPoliciesProcedure:                true,
+		ksealv1connect.RegistryServiceActivatePolicyProcedure:              true,
+		ksealv1connect.RegistryServiceCreateProtectionProfileProcedure:     true,
+		ksealv1connect.RegistryServiceListProtectionProfilesProcedure:      true,
+		ksealv1connect.WebhookServiceRegisterWebhookProcedure:              true,
+		ksealv1connect.WebhookServiceListWebhooksProcedure:                 true,
+		ksealv1connect.WebhookServiceDeleteWebhookProcedure:                true,
+		ksealv1connect.QueryServiceListEventsProcedure:                     true,
+		ksealv1connect.QueryServiceGetTenantOverviewProcedure:              true,
+		ksealv1connect.QueryServiceGetTrustSessionStatsProcedure:           true,
+		ksealv1connect.SiemServiceRegisterConnectorProcedure:               true,
+		ksealv1connect.SiemServiceListConnectorsProcedure:                  true,
+		ksealv1connect.SiemServiceDeleteConnectorProcedure:                 true,
+		ksealv1connect.ComplianceServiceListAuditEventsProcedure:           true,
+		ksealv1connect.ComplianceServiceVerifyAuditChainProcedure:          true,
+		ksealv1connect.ComplianceServiceGetDataProcessingRegistryProcedure: true,
+		ksealv1connect.ComplianceServicePutDataProcessingRecordProcedure:   true,
+		ksealv1connect.ComplianceServiceIssueKillSwitchProcedure:           true,
+		ksealv1connect.ComplianceServiceGetKillSwitchStateProcedure:        true,
+		ksealv1connect.ComplianceServiceListKillSwitchesProcedure:          true,
+		ksealv1connect.ComplianceServiceSetCanaryRolloutProcedure:          true,
+		ksealv1connect.ComplianceServiceGetCanaryStatusProcedure:           true,
+		ksealv1connect.ComplianceServicePromoteCanaryProcedure:             true,
+		ksealv1connect.ComplianceServiceRollbackCanaryProcedure:            true,
 	}
 }
