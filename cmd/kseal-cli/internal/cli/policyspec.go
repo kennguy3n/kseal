@@ -156,6 +156,27 @@ func (pf *PolicyFile) thresholdsString() string {
 	return string(pf.RiskThresholds)
 }
 
+// scoringTables parses the weights and thresholds used for risk scoring,
+// independent of enforcement mode. Both `spec` (authoring) and `specFromPolicy`
+// (stored) share this so the two paths can never diverge.
+func (pf *PolicyFile) scoringTables() (weights map[uint32]uint32, thresholds map[string]uint32, err error) {
+	doc, err := parsePolicyDoc(pf.Rules)
+	if err != nil {
+		return nil, nil, err
+	}
+	weights = map[uint32]uint32{}
+	for k, v := range doc.SignalWeights {
+		if idx, perr := strconv.ParseUint(k, 10, 32); perr == nil && idx <= 63 {
+			weights[uint32(idx)] = v
+		}
+	}
+	thresholds, err = pf.thresholds()
+	if err != nil {
+		return nil, nil, err
+	}
+	return weights, thresholds, nil
+}
+
 // spec builds the scoring spec (weights/thresholds/mode) for the simulator,
 // using the exact mapping the server's config service applies.
 func (pf *PolicyFile) spec() (PolicySpec, error) {
@@ -163,17 +184,7 @@ func (pf *PolicyFile) spec() (PolicySpec, error) {
 	if !ok {
 		return PolicySpec{}, fmt.Errorf("invalid enforcement_mode %q", pf.EnforcementMode)
 	}
-	doc, err := parsePolicyDoc(pf.Rules)
-	if err != nil {
-		return PolicySpec{}, err
-	}
-	weights := map[uint32]uint32{}
-	for k, v := range doc.SignalWeights {
-		if idx, perr := strconv.ParseUint(k, 10, 32); perr == nil && idx <= 63 {
-			weights[uint32(idx)] = v
-		}
-	}
-	th, err := pf.thresholds()
+	weights, th, err := pf.scoringTables()
 	if err != nil {
 		return PolicySpec{}, err
 	}
@@ -190,22 +201,23 @@ type PolicySpec struct {
 	Mode       ksealv1.EnforcementMode
 }
 
-// specFromPolicy builds a PolicySpec from a stored Policy (the active one).
+// specFromPolicy builds a PolicySpec from a stored Policy (the active one). It
+// takes the enforcement mode directly from the proto rather than re-parsing a
+// string, so a stored UNSPECIFIED mode is preserved (and scored exactly as the
+// server would) instead of being rejected.
 func specFromPolicy(p *ksealv1.Policy) (PolicySpec, error) {
 	if p == nil {
 		return PolicySpec{Thresholds: map[string]uint32{}, Weights: map[uint32]uint32{}}, nil
 	}
 	pf := &PolicyFile{
-		EnforcementMode: p.GetEnforcementMode().String(),
-		Rules:           json.RawMessage(p.GetRules()),
-		RiskThresholds:  json.RawMessage(p.GetRiskThresholds()),
+		Rules:          json.RawMessage(p.GetRules()),
+		RiskThresholds: json.RawMessage(p.GetRiskThresholds()),
 	}
-	spec, err := pf.spec()
+	weights, th, err := pf.scoringTables()
 	if err != nil {
 		return PolicySpec{}, err
 	}
-	spec.Mode = p.GetEnforcementMode()
-	return spec, nil
+	return PolicySpec{Thresholds: th, Weights: weights, Mode: p.GetEnforcementMode()}, nil
 }
 
 // decide reproduces the server decision pipeline for a packed risk bitset.
