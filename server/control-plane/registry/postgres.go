@@ -74,12 +74,14 @@ func clampPageSize(n int) int {
 	}
 }
 
-// escapeLike escapes the LIKE wildcards (`%`, `_`) and the escape character
-// (`\`) itself so a user-supplied search string is matched literally. Used with
-// `LIKE ... ESCAPE '\'`.
-func escapeLike(s string) string {
-	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(s)
-}
+// likeReplacer escapes the LIKE wildcards (`%`, `_`) and the escape character
+// (`\`) itself so a user-supplied search string is matched literally. A
+// strings.Replacer is safe for concurrent use, so it is built once rather than
+// per SearchApps call (which is on a hot UI-autocomplete path).
+var likeReplacer = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+
+// escapeLike prepares s for use inside a `LIKE ... ESCAPE '\'` pattern.
+func escapeLike(s string) string { return likeReplacer.Replace(s) }
 
 // ---- Tenants ----
 
@@ -267,6 +269,8 @@ func (s *PostgresStore) SearchApps(ctx context.Context, tenantID, query string, 
 			       EXTRACT(EPOCH FROM updated_at)::bigint
 			FROM apps
 			WHERE tenant_id = $1
+			  -- $2 is '%%' only when the query is empty (match-all); compare it as a
+			  -- plain string to skip the per-row LIKE that would match everything.
 			  AND ($2 = '%%' OR lower(name) LIKE $2 ESCAPE '\' OR lower(package_id) LIKE $2 ESCAPE '\')
 			ORDER BY name, id
 			LIMIT $3 OFFSET $4`, tenantID, pattern, size+1, offset)
