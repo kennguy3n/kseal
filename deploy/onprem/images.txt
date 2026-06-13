@@ -1,0 +1,15 @@
+# Container images required by the on-prem / air-gapped kseal verifier bundle.
+# One source reference per line; comments (#) and blank lines are ignored.
+#
+# mirror-images.sh consumes this file to pull, (optionally) save to a tarball,
+# and push the images into the customer's internal registry. Pin to immutable
+# digests before transferring into a regulated/air-gapped environment — replace
+# each :tag with @sha256:... once your release pipeline publishes them.
+#
+# kseal application images (build + publish from this repo's CI, then mirror):
+ghcr.io/kennguy3n/kseal-server:0.1.0
+ghcr.io/kennguy3n/kseal-console:0.1.0
+
+# Third-party dependencies (Docker Hub official images):
+docker.io/library/postgres:16-alpine
+docker.io/library/redis:7-alpine

@@ -35,6 +35,10 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 app.kubernetes.io/part-of: kseal
+{{- if .Values.region.name }}
+topology.kubernetes.io/region: {{ .Values.region.name | quote }}
+kseal.io/region-role: {{ .Values.region.role | quote }}
+{{- end }}
 {{- with .Values.commonLabels }}
 {{ toYaml . }}
 {{- end }}
@@ -143,4 +147,36 @@ Args: (dict "constraints" <list> "selector" <selectorLabels-yaml>).
 {{- $out = append $out $c -}}
 {{- end -}}
 {{- toYaml $out -}}
+{{- end -}}
+
+{{/*
+Region node affinity. Pins pods to nodes in .Values.region.name when
+region-scoping + nodeAffinity are enabled. Emits nothing otherwise, so it can be
+appended under an `affinity:` block alongside podAntiAffinity without breaking
+single-region releases. required=true → hard requiredDuringScheduling;
+required=false → strong preferredDuringScheduling (weight 100).
+*/}}
+{{- define "kseal.regionNodeAffinity" -}}
+{{- if and .Values.region.name .Values.region.nodeAffinity.enabled }}
+{{- if .Values.region.nodeAffinity.required }}
+nodeAffinity:
+  requiredDuringSchedulingIgnoredDuringExecution:
+    nodeSelectorTerms:
+      - matchExpressions:
+          - key: topology.kubernetes.io/region
+            operator: In
+            values:
+              - {{ .Values.region.name | quote }}
+{{- else }}
+nodeAffinity:
+  preferredDuringSchedulingIgnoredDuringExecution:
+    - weight: 100
+      preference:
+        matchExpressions:
+          - key: topology.kubernetes.io/region
+            operator: In
+            values:
+              - {{ .Values.region.name | quote }}
+{{- end }}
+{{- end -}}
 {{- end -}}

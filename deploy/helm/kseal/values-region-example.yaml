@@ -1,0 +1,65 @@
+# Example region overlay — layer ON TOP of a base env overlay to deploy one
+# regional stack of a multi-region kseal deployment. Apply both files:
+#
+#   helm upgrade --install kseal-eu deploy/helm/kseal -n kseal-eu \
+#     -f deploy/helm/kseal/values-prod.yaml \
+#     -f deploy/helm/kseal/values-region-example.yaml
+#
+# Each region is its own Helm release pointing at that region's regional
+# endpoints + secret prefix. The global hostname that fronts all regions and the
+# cross-region Postgres/analytics replication are provisioned by the Terraform
+# multi-region root (deploy/terraform/envs/multi-region).
+#
+# This example models the eu-west-1 read-replica region.
+
+region:
+  name: eu-west-1
+  # "replica" regions run read-mostly traffic against a cross-region Postgres
+  # read replica; "primary" owns the write path.
+  role: replica
+  nodeAffinity:
+    enabled: true
+    required: true
+
+server:
+  config:
+    corsOrigins:
+      - https://console.eu.kseal.example.com
+
+console:
+  apiBaseUrl: https://api.eu.kseal.example.com
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/backend-protocol: "GRPC"
+  # Regional hostnames sit behind the global hostname (Route53 latency routing).
+  apiHost: api.eu.kseal.example.com
+  consoleHost: console.eu.kseal.example.com
+  tls:
+    - hosts:
+        - api.eu.kseal.example.com
+        - console.eu.kseal.example.com
+      secretName: kseal-eu-tls
+
+# Per-region secret prefix so each regional release pulls its own DSN/Redis addr
+# (the regional read-replica endpoint) from the external store.
+externalSecrets:
+  enabled: true
+  remoteKeys:
+    kek: kseal/prod/kek
+    postgresDsn: kseal/prod-eu/postgres-dsn
+    redisAddr: kseal/prod-eu/redis-addr
+
+# Scope egress to the eu-west-1 data-plane CIDRs (example ranges).
+networkPolicy:
+  enabled: true
+  egress:
+    postgres:
+      cidr: 10.40.0.0/16
+      port: 5432
+    redis:
+      cidr: 10.41.0.0/16
+      port: 6379

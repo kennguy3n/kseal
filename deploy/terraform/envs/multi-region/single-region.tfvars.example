@@ -1,0 +1,26 @@
+# Single-region example (the default topology): one primary region, no replicas.
+# This is the multi-region root deliberately scaled down to one region, so a
+# customer can start single-region and add replicas later by setting
+# replica_*_region without changing modules. Copy to terraform.tfvars.
+#
+# Generate the KEK out-of-band; it is consumed by the per-region Helm releases,
+# not this Terraform root.
+
+name           = "kseal-prod"
+primary_region = "us-east-1"
+
+primary = {
+  vpc_id                     = "vpc-aaaaaaaa"
+  private_subnet_ids         = ["subnet-aaaa", "subnet-bbbb", "subnet-cccc"]
+  workload_security_group_id = "sg-aaaaaaaa"
+  kms_key_arn                = "arn:aws:kms:us-east-1:111122223333:key/aaaa-..."
+  analytics_bucket_name      = "kseal-prod-analytics-us-east-1-111122223333"
+  endpoint_hostname          = "api.us.kseal.example.com"
+}
+
+# No replicas in single-region mode.
+# replica_a_region / replica_b_region intentionally left at their "" defaults.
+
+hosted_zone_id  = "Z0123456789ABCDEFGHIJ"
+global_hostname = "api.kseal.example.com"
+routing_policy  = "latency"

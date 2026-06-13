@@ -20,6 +20,30 @@ env: prod
 # ownership, and per-tenant fleet queries).
 commonLabels: {}
 
+# -----------------------------------------------------------------------------
+# region: optional region-scoping for a multi-region deployment. Leaving
+# region.name empty (the default) keeps this a single-region release, unchanged.
+#
+# When set, the chart stamps `topology.kubernetes.io/region` onto every object
+# and (optionally) pins pods to nodes in that region. The regional endpoints
+# (ingress hosts, console apiBaseUrl) and per-region secret prefixes are set in
+# a region overlay (see values-region-example.yaml); the Terraform
+# multi-region root + global-routing module own the cross-region data
+# replication and the global hostname that fronts these regional stacks.
+# -----------------------------------------------------------------------------
+region:
+  # AWS/cloud region this release serves (e.g. eu-west-1). Empty = single-region.
+  name: ""
+  # Topology role of this regional stack: "primary" (read/write) or "replica"
+  # (read-mostly). Surfaced as the `kseal.io/region-role` label.
+  role: primary
+  # Pin pods to nodes labelled topology.kubernetes.io/region=<region.name>.
+  nodeAffinity:
+    enabled: false
+    # required: hard constraint (pods stay Pending if no in-region node exists);
+    # false uses a strong preference instead.
+    required: true
+
 # image settings shared by server and console. Pin by digest in prod for
 # immutable, reproducible rollouts.
 image:
@@ -107,6 +131,39 @@ server:
       - https://console.kseal.example.com
     # Per-tenant feature flags (KSEAL_FEATURE_FLAGS), e.g. "tenantX:rasp=true".
     featureFlags: ""
+
+    # --- WS-F env-var contract (fail-safe, default-off) -----------------------
+    # These map 1:1 to the server env vars documented in docs/byok.md. They are
+    # wired additively here with safe defaults; the server ignores empty/unset
+    # values, so single-region/dev releases are unaffected.
+
+    # Redis transit security. Off by default (in-VPC ElastiCache). Set true to
+    # dial Redis over TLS (KSEAL_REDIS_TLS).
+    redisTls: false
+    # Custom CA for Redis TLS (KSEAL_REDIS_CA_FILE). When redisCaSecret.name is
+    # set, the chart mounts that Secret read-only and points the server at it;
+    # leave name empty to use the system trust store / no custom CA.
+    redisCaSecret:
+      name: ""
+      key: ca.crt
+      mountPath: /etc/kseal/redis-tls
+    # Redis AUTH password (KSEAL_REDIS_PASSWORD) is a SECRET: never set it here.
+    # Provide it via externalSecrets.remoteKeys.redisPassword (or the existing
+    # Secret) so it is injected from the external store, not committed to git.
+
+    # OpenTelemetry trace export. Empty endpoint = tracing disabled (default).
+    otlpEndpoint: ""
+    # Head-sampling ratio (KSEAL_OTLP_SAMPLE_RATIO), 0.0–1.0. Ignored when no
+    # endpoint is set.
+    otlpSampleRatio: "0"
+
+    # Customer-managed key URI for BYOK envelope encryption (KSEAL_CMK_KMS_URI).
+    # Empty = platform-managed KEK (default).
+    cmkKmsUri: ""
+
+    # Raw-event retention window in days (KSEAL_RAW_RETENTION_DAYS). Aggregates
+    # are kept regardless; raw events are off/short by default.
+    rawRetentionDays: 30
 
   # Horizontal autoscaling. Scales on CPU and a custom requests-per-second
   # metric published by prometheus-adapter from kseal_rpc_requests_total.
@@ -345,6 +402,9 @@ externalSecrets:
     kek: kseal/prod/kek                 # base64, decodes to 32 bytes
     postgresDsn: kseal/prod/postgres-dsn
     redisAddr: kseal/prod/redis-addr
+    # Optional: Redis AUTH password (KSEAL_REDIS_PASSWORD). Empty = no AUTH
+    # (default). Set to the external-store key holding the password to enable it.
+    redisPassword: ""
   # When externalSecrets.enabled is false, the chart expects a pre-existing
   # Secret named like the release with these keys (used by dev/local only).
   existingSecret: ""

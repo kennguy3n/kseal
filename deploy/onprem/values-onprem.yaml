@@ -1,0 +1,81 @@
+# Helm values variant for an on-prem / air-gapped kseal verifier on Kubernetes.
+#
+# Self-contained: images come from the customer's internal registry, secrets
+# from a plain in-cluster Secret (no External Secrets Operator required), no
+# public ingress, and no egress to cloud telemetry/KMS. Layer it onto the base
+# chart:
+#
+#   helm upgrade --install kseal deploy/helm/kseal -n kseal \
+#     -f deploy/onprem/values-onprem.yaml
+#
+# Create the secret out-of-band (never commit it):
+#   kubectl -n kseal create secret generic kseal-onprem-secrets \
+#     --from-literal=KSEAL_KEK="$(head -c 32 /dev/urandom | base64)" \
+#     --from-literal=KSEAL_POSTGRES_DSN='postgres://kseal:...@postgres:5432/kseal?sslmode=disable' \
+#     --from-literal=KSEAL_REDIS_ADDR='redis:6379'
+
+env: prod
+
+image:
+  registry: registry.internal.example.com
+  repository: kseal
+  pullPolicy: IfNotPresent
+
+server:
+  image:
+    repository: registry.internal.example.com/kseal-server
+    tag: "0.1.0"
+  # Fixed capacity: most on-prem clusters have neither metrics-server nor
+  # prometheus-adapter, so HPA is off and replicas are pinned.
+  replicaCount: 2
+  autoscaling:
+    enabled: false
+  pdb:
+    enabled: true
+    minAvailable: 1
+  config:
+    logLevel: info
+    corsOrigins:
+      - https://kseal.internal.example.com
+    # Air-gapped: no cloud trace export, no cloud KMS. Platform KEK only.
+    otlpEndpoint: ""
+    cmkKmsUri: ""
+    rawRetentionDays: 30
+
+console:
+  image:
+    repository: registry.internal.example.com/kseal-console
+    tag: "0.1.0"
+  replicaCount: 2
+  autoscaling:
+    enabled: false
+  pdb:
+    enabled: true
+    minAvailable: 1
+  apiBaseUrl: https://kseal.internal.example.com
+
+# No public ingress: expose internally via the in-cluster Service + the
+# customer's own internal LB / reverse proxy.
+ingress:
+  enabled: false
+
+# Secrets come from a plain in-cluster Secret, not an external store.
+externalSecrets:
+  enabled: false
+  existingSecret: kseal-onprem-secrets
+
+# Default-deny stays on. Cloud telemetry + external webhook egress are disabled
+# for air-gap; set the Postgres/Redis egress CIDRs to your cluster's pod CIDR.
+networkPolicy:
+  enabled: true
+  egress:
+    otelCollector:
+      enabled: false
+    siemSinks: []
+
+# No Prometheus Operator assumed on-prem.
+metrics:
+  serviceMonitor:
+    enabled: false
+  prometheusRule:
+    enabled: false
