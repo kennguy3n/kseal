@@ -1,0 +1,2 @@
+# Packaged bundle output (produced by `make bundle-onprem`).
+dist/

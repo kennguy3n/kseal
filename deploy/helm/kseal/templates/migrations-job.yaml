@@ -89,8 +89,23 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            {{- if .Values.server.config.redisCaSecret.name }}
+            # Same CA the server pods mount; KSEAL_REDIS_CA_FILE (from the shared
+            # ConfigMap) points here, so the gate's Redis TLS connect succeeds.
+            - name: redis-ca
+              mountPath: {{ .Values.server.config.redisCaSecret.mountPath | quote }}
+              readOnly: true
+            {{- end }}
       volumes:
         - name: tmp
           emptyDir:
             sizeLimit: 64Mi
+        {{- if .Values.server.config.redisCaSecret.name }}
+        - name: redis-ca
+          secret:
+            secretName: {{ .Values.server.config.redisCaSecret.name | quote }}
+            items:
+              - key: {{ .Values.server.config.redisCaSecret.key | quote }}
+                path: {{ .Values.server.config.redisCaSecret.key | quote }}
+        {{- end }}
 {{- end }}

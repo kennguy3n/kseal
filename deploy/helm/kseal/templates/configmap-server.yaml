@@ -21,3 +21,13 @@ data:
   {{- if .Values.server.config.featureFlags }}
   KSEAL_FEATURE_FLAGS: {{ .Values.server.config.featureFlags | quote }}
   {{- end }}
+  # WS-F env-var contract (fail-safe, default-off). The Redis AUTH password is a
+  # secret and is delivered via the Secret/ExternalSecret, never this ConfigMap.
+  KSEAL_REDIS_TLS: {{ .Values.server.config.redisTls | quote }}
+  {{- if .Values.server.config.redisCaSecret.name }}
+  KSEAL_REDIS_CA_FILE: {{ printf "%s/%s" (trimSuffix "/" .Values.server.config.redisCaSecret.mountPath) .Values.server.config.redisCaSecret.key | quote }}
+  {{- end }}
+  KSEAL_OTLP_ENDPOINT: {{ .Values.server.config.otlpEndpoint | quote }}
+  KSEAL_OTLP_SAMPLE_RATIO: {{ .Values.server.config.otlpSampleRatio | quote }}
+  KSEAL_CMK_KMS_URI: {{ .Values.server.config.cmkKmsUri | quote }}
+  KSEAL_RAW_RETENTION_DAYS: {{ .Values.server.config.rawRetentionDays | quote }}

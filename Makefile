@@ -134,3 +134,31 @@ tf-validate: ## terraform fmt -check + validate every module and env (no apply).
 		terraform -chdir="$$dir" init -backend=false -input=false >/dev/null; \
 		terraform -chdir="$$dir" validate; \
 	done
+
+## ---- on-prem / air-gapped bundle ----
+
+ONPREM_VERSION ?= $(shell awk '/^appVersion:/{gsub(/"/,"",$$2); print $$2}' deploy/helm/kseal/Chart.yaml)
+ONPREM_DIST    := deploy/onprem/dist
+ONPREM_STAGE   := $(ONPREM_DIST)/kseal-onprem-$(ONPREM_VERSION)
+ONPREM_TARBALL := $(ONPREM_DIST)/kseal-onprem-$(ONPREM_VERSION).tgz
+
+.PHONY: bundle-onprem
+bundle-onprem: ## Package the air-gapped on-prem verifier bundle (Helm chart + compose + docs) into a tarball.
+	@command -v helm >/dev/null || { echo "helm is required"; exit 1; }
+	rm -rf "$(ONPREM_STAGE)"
+	mkdir -p "$(ONPREM_STAGE)/helm" "$(ONPREM_STAGE)/docs"
+	# Compose + Helm values variant, image list, mirror script, env template.
+	cp deploy/onprem/docker-compose.yml deploy/onprem/values-onprem.yaml \
+		deploy/onprem/images.txt deploy/onprem/mirror-images.sh \
+		deploy/onprem/.env.example deploy/onprem/README.md "$(ONPREM_STAGE)/"
+	# Versioned, self-contained Helm chart package.
+	helm package deploy/helm/kseal --destination "$(ONPREM_STAGE)/helm" >/dev/null
+	# Deployment + DR docs travel with the bundle.
+	cp docs/deployment-onprem.md docs/deployment-disaster-recovery.md "$(ONPREM_STAGE)/docs/"
+	# Reproducible tarball (sorted, fixed owner/mtime) + checksum.
+	tar --sort=name --owner=0 --group=0 --numeric-owner \
+		--mtime='@0' -czf "$(ONPREM_TARBALL)" \
+		-C "$(ONPREM_DIST)" "kseal-onprem-$(ONPREM_VERSION)"
+	cd "$(ONPREM_DIST)" && sha256sum "kseal-onprem-$(ONPREM_VERSION).tgz" > "kseal-onprem-$(ONPREM_VERSION).tgz.sha256"
+	@echo "bundle: $(ONPREM_TARBALL)"
+	@cat "$(ONPREM_TARBALL).sha256"

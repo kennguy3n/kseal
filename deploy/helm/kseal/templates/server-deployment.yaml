@@ -47,6 +47,7 @@ spec:
       affinity:
         {{- $sel := include "kseal.server.selectorLabels" . -}}
         {{- include "kseal.podAntiAffinity" (list .Values.server.podAntiAffinityPreset $sel) | nindent 8 }}
+        {{- include "kseal.regionNodeAffinity" . | nindent 8 }}
       {{- with .Values.server.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -102,8 +103,22 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            {{- if .Values.server.config.redisCaSecret.name }}
+            - name: redis-ca
+              mountPath: {{ .Values.server.config.redisCaSecret.mountPath | quote }}
+              readOnly: true
+            {{- end }}
       volumes:
         # readOnlyRootFilesystem is on; give the process a writable scratch dir.
         - name: tmp
           emptyDir:
             sizeLimit: 64Mi
+        {{- if .Values.server.config.redisCaSecret.name }}
+        # Custom CA bundle for Redis TLS (KSEAL_REDIS_CA_FILE points here).
+        - name: redis-ca
+          secret:
+            secretName: {{ .Values.server.config.redisCaSecret.name | quote }}
+            items:
+              - key: {{ .Values.server.config.redisCaSecret.key | quote }}
+                path: {{ .Values.server.config.redisCaSecret.key | quote }}
+        {{- end }}

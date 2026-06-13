@@ -1,34 +1,35 @@
-# kseal local stack: server + Postgres + Redis + dashboard.
+# kseal on-prem / air-gapped attestation verifier — self-contained stack.
 #
-# `make up` (or `docker compose up --build`) brings up a prod-mirroring system:
-# health-gated startup ordering, resource limits, restart policies, hardened
-# security options (no-new-privileges, dropped capabilities, read-only rootfs
-# for the app containers), and a private bridge network. The server runs its
-# embedded SQL migrations against Postgres on startup, so no init scripts are
-# needed.
+# A customer-hosted deployment of the kseal verifier (server + Postgres + Redis
+# + console) for the Regulated isolation tier. Designed to run with NO internet
+# egress: all images come from the customer's internal registry (mirror them
+# first with ./mirror-images.sh and the pinned refs in images.txt), and every
+# external third-party attestation provider (Play Integrity, App Attest, cloud
+# KMS, OTLP) is left unconfigured/off by default.
 #
-# Overridable via the environment (see .env): KSEAL_KEK, KSEAL_RATE_LIMIT_RPS,
-# KSEAL_INGEST_QUOTA_PER_MIN, image tags, etc.
+# Bring up:
+#   cp .env.example .env       # set a real KSEAL_KEK + Postgres password
+#   docker compose --env-file .env up -d --wait
+#
+# Override KSEAL_REGISTRY / KSEAL_VERSION to point at your mirrored images.
 
-name: kseal
+name: kseal-onprem
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: ${KSEAL_REGISTRY:-registry.internal.example.com}/postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: kseal
-      POSTGRES_PASSWORD: kseal
-      POSTGRES_DB: kseal
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: ${KSEAL_PG_USER:-kseal}
+      POSTGRES_PASSWORD: ${KSEAL_PG_PASSWORD:?set KSEAL_PG_PASSWORD in .env}
+      POSTGRES_DB: ${KSEAL_PG_DB:-kseal}
     volumes:
       - pgdata:/var/lib/postgresql/data
     networks: [kseal]
     security_opt:
       - no-new-privileges:true
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U kseal -d kseal"]
+      test: ["CMD-SHELL", "pg_isready -U ${KSEAL_PG_USER:-kseal} -d ${KSEAL_PG_DB:-kseal}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -44,9 +45,8 @@ services:
         max-file: "3"
 
   redis:
-    image: redis:7-alpine
+    image: ${KSEAL_REGISTRY:-registry.internal.example.com}/redis:7-alpine
     restart: unless-stopped
-    # Match prod eviction semantics: TTL'd nonces/rate-limit keys, no persistence.
     command:
       - redis-server
       - --save
@@ -57,8 +57,6 @@ services:
       - 256mb
       - --maxmemory-policy
       - volatile-lru
-    ports:
-      - "6379:6379"
     networks: [kseal]
     security_opt:
       - no-new-privileges:true
@@ -80,27 +78,24 @@ services:
         max-file: "3"
 
   kseal-server:
-    build:
-      context: .
-      dockerfile: server/Dockerfile
+    image: ${KSEAL_REGISTRY:-registry.internal.example.com}/kseal-server:${KSEAL_VERSION:-0.1.0}
     restart: unless-stopped
     environment:
       KSEAL_HTTP_ADDR: ":8080"
-      KSEAL_POSTGRES_DSN: "postgres://kseal:kseal@postgres:5432/kseal?sslmode=disable"
-      KSEAL_REDIS_ADDR: "redis:6379"
+      # prod mode makes the KEK mandatory (fail-closed) — see server/shared/config.
+      KSEAL_ENV: "prod"
       KSEAL_LOG_LEVEL: "${KSEAL_LOG_LEVEL:-info}"
-      KSEAL_ENV: "dev"
-      # Stable local KEK so envelope-encrypted rows survive restarts. This is a
-      # throwaway development key — NEVER use it outside local dev. Override with
-      # `export KSEAL_KEK=$(head -c 32 /dev/urandom | base64)`.
-      KSEAL_KEK: "${KSEAL_KEK:-ZGV2LW9ubHkta3NlYWwta2VrLTMyLWJ5dGVzLWFhYWE=}"
+      KSEAL_POSTGRES_DSN: "postgres://${KSEAL_PG_USER:-kseal}:${KSEAL_PG_PASSWORD:?set KSEAL_PG_PASSWORD in .env}@postgres:5432/${KSEAL_PG_DB:-kseal}?sslmode=disable"
+      KSEAL_REDIS_ADDR: "redis:6379"
+      # 32-byte base64 KEK. Generate offline: head -c 32 /dev/urandom | base64
+      KSEAL_KEK: "${KSEAL_KEK:?set KSEAL_KEK in .env}"
       KSEAL_CORS_ORIGINS: "${KSEAL_CORS_ORIGINS:-http://localhost:5173}"
       KSEAL_RATE_LIMIT_RPS: "${KSEAL_RATE_LIMIT_RPS:-200}"
       KSEAL_RATE_LIMIT_BURST: "${KSEAL_RATE_LIMIT_BURST:-400}"
       KSEAL_INGEST_QUOTA_PER_MIN: "${KSEAL_INGEST_QUOTA_PER_MIN:-6000}"
-      # WS-F env-var contract (fail-safe, default-off). The local Redis above is
-      # plaintext + no AUTH, so these stay disabled; override via .env to test
-      # TLS/AUTH/OTLP/BYOK/retention against external services.
+      # WS-F contract — all off in air-gapped mode (no Redis TLS in-host, no
+      # cloud KMS, no trace export). Raw retention defaults to 30 days on local
+      # disk. Override only if your on-prem environment provides these.
       KSEAL_REDIS_TLS: "${KSEAL_REDIS_TLS:-false}"
       KSEAL_REDIS_PASSWORD: "${KSEAL_REDIS_PASSWORD:-}"
       KSEAL_REDIS_CA_FILE: "${KSEAL_REDIS_CA_FILE:-}"
@@ -109,7 +104,7 @@ services:
       KSEAL_CMK_KMS_URI: "${KSEAL_CMK_KMS_URI:-}"
       KSEAL_RAW_RETENTION_DAYS: "${KSEAL_RAW_RETENTION_DAYS:-30}"
     ports:
-      - "8080:8080"
+      - "${KSEAL_BIND_ADDR:-127.0.0.1}:8080:8080"
     networks: [kseal]
     depends_on:
       postgres:
@@ -140,20 +135,12 @@ services:
         max-file: "3"
 
   kseal-console:
-    build:
-      context: ./web/console
-      dockerfile: Dockerfile
-      args:
-        # Vite inlines VITE_* vars at build time, so the API base URL is passed
-        # as a build arg. The console Dockerfile additionally renders /env.js at
-        # container start for deploy-time overrides.
-        VITE_KSEAL_API_BASE_URL: "http://localhost:8080"
+    image: ${KSEAL_REGISTRY:-registry.internal.example.com}/kseal-console:${KSEAL_VERSION:-0.1.0}
     restart: unless-stopped
     environment:
-      # Runtime config injection (docker-entrypoint.sh renders /env.js).
       KSEAL_API_BASE_URL: "${KSEAL_API_BASE_URL:-http://localhost:8080}"
     ports:
-      - "5173:80"
+      - "${KSEAL_BIND_ADDR:-127.0.0.1}:5173:80"
     networks: [kseal]
     depends_on:
       kseal-server:

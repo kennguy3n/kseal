@@ -1,0 +1,59 @@
+# Multi-region example: a primary (us-east-1) plus two replica regions
+# (eu-west-1, ap-southeast-1). Each replica gets a cross-region Postgres read
+# replica and an analytics bucket that receives replicated cold-tier objects;
+# the global hostname resolves to the nearest healthy region. Copy to
+# terraform.tfvars and fill in real VPC/subnet/SG/KMS IDs per region.
+
+name = "kseal-prod"
+
+# ---- regions ----
+primary_region   = "us-east-1"
+replica_a_region = "eu-west-1"
+replica_b_region = "ap-southeast-1"
+
+primary = {
+  vpc_id                     = "vpc-aaaaaaaa"
+  private_subnet_ids         = ["subnet-a1", "subnet-a2", "subnet-a3"]
+  workload_security_group_id = "sg-aaaaaaaa"
+  kms_key_arn                = "arn:aws:kms:us-east-1:111122223333:key/aaaa-..."
+  analytics_bucket_name      = "kseal-prod-analytics-us-east-1-111122223333"
+  endpoint_hostname          = "api.us.kseal.example.com"
+}
+
+replica_a = {
+  vpc_id                     = "vpc-bbbbbbbb"
+  private_subnet_ids         = ["subnet-b1", "subnet-b2", "subnet-b3"]
+  workload_security_group_id = "sg-bbbbbbbb"
+  kms_key_arn                = "arn:aws:kms:eu-west-1:111122223333:key/bbbb-..."
+  analytics_bucket_name      = "kseal-prod-analytics-eu-west-1-111122223333"
+  endpoint_hostname          = "api.eu.kseal.example.com"
+}
+
+replica_b = {
+  vpc_id                     = "vpc-cccccccc"
+  private_subnet_ids         = ["subnet-c1", "subnet-c2", "subnet-c3"]
+  workload_security_group_id = "sg-cccccccc"
+  kms_key_arn                = "arn:aws:kms:ap-southeast-1:111122223333:key/cccc-..."
+  analytics_bucket_name      = "kseal-prod-analytics-ap-southeast-1-111122223333"
+  endpoint_hostname          = "api.ap.kseal.example.com"
+}
+
+# ---- global routing ----
+hosted_zone_id  = "Z0123456789ABCDEFGHIJ"
+global_hostname = "api.kseal.example.com"
+
+# Latency routing is the default global edge. To enforce data residency instead,
+# set routing_policy = "geolocation" and steer continents to regions:
+# routing_policy = "geolocation"
+# geolocation_routes = [
+#   { continent = "EU", region = "eu-west-1" },
+#   { continent = "NA", region = "us-east-1" },
+#   { continent = "AS", region = "ap-southeast-1" },
+# ]
+
+# Enterprise/Regulated per-tenant region pinning (published to SSM for the
+# control-plane router). Keys are tenant IDs.
+tenant_region_pins = {
+  # "tenant_acme"    = "eu-west-1"
+  # "tenant_globex"  = "ap-southeast-1"
+}
