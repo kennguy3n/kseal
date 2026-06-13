@@ -38,6 +38,10 @@ public struct BuildProofManifest: Codable, Equatable {
     public var modules: [String]
     /// Build provenance.
     public var provenance: Provenance
+    /// Optional binary-integrity evidence (Mach-O section/load-command hashes)
+    /// the runtime uses to detect post-build tampering. Additive: absent in
+    /// builds produced before integrity baking (and on the Android plane).
+    public var integrity: Integrity?
 
     public struct Polymorphism: Codable, Equatable {
         /// SHA-256 of the per-build seed, hex encoded.
@@ -69,6 +73,80 @@ public struct BuildProofManifest: Codable, Equatable {
         }
     }
 
+    /// Mach-O binary-integrity evidence: per-architecture-slice section hashes
+    /// plus load-command validation data. Computed from the *linked* binary
+    /// (post-link) so the runtime can recompute and compare to detect tampering.
+    public struct Integrity: Codable, Equatable {
+        /// Binary format the evidence describes (currently always "macho").
+        public var format: String
+        /// One entry per architecture slice (>1 for a universal/fat binary).
+        public var slices: [Slice]
+
+        public init(format: String = "macho", slices: [Slice]) {
+            self.format = format
+            self.slices = slices
+        }
+
+        public struct Slice: Codable, Equatable {
+            /// Architecture name, e.g. "arm64", "x86_64".
+            public var arch: String
+            /// Mach-O file type, e.g. "execute", "dylib".
+            public var fileType: String
+            /// True when the slice is position-independent (MH_PIE).
+            public var pie: Bool
+            /// True when the slice carries Apple FairPlay encryption (cryptid != 0).
+            public var encrypted: Bool
+            /// LC_UUID value, hex (empty when the binary carries no UUID).
+            public var uuid: String
+            /// Number of load commands (ncmds).
+            public var loadCommandCount: Int
+            /// Total size of the load-command region (sizeofcmds).
+            public var loadCommandsSize: Int
+            /// SHA-256 over the entire load-command region, hex.
+            public var loadCommandsHash: String
+            /// Per-section content hashes, sorted by segment+section.
+            public var sections: [SectionHash]
+
+            public init(
+                arch: String,
+                fileType: String,
+                pie: Bool,
+                encrypted: Bool,
+                uuid: String,
+                loadCommandCount: Int,
+                loadCommandsSize: Int,
+                loadCommandsHash: String,
+                sections: [SectionHash]
+            ) {
+                self.arch = arch
+                self.fileType = fileType
+                self.pie = pie
+                self.encrypted = encrypted
+                self.uuid = uuid
+                self.loadCommandCount = loadCommandCount
+                self.loadCommandsSize = loadCommandsSize
+                self.loadCommandsHash = loadCommandsHash
+                self.sections = sections
+            }
+        }
+
+        public struct SectionHash: Codable, Equatable {
+            public var segment: String
+            public var section: String
+            public var size: Int
+            /// SHA-256 over the section's file bytes, hex. Empty for zero-fill
+            /// (`S_ZEROFILL`/`bss`) sections that occupy no file range.
+            public var hash: String
+
+            public init(segment: String, section: String, size: Int, hash: String) {
+                self.segment = segment
+                self.section = section
+                self.size = size
+                self.hash = hash
+            }
+        }
+    }
+
     public struct Provenance: Codable, Equatable {
         /// RFC 3339 UTC timestamp the manifest was generated.
         public var generatedAt: String
@@ -96,7 +174,8 @@ public struct BuildProofManifest: Codable, Equatable {
         toolVersions: [String: String],
         transforms: [Transform],
         modules: [String],
-        provenance: Provenance
+        provenance: Provenance,
+        integrity: Integrity? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.platform = platform
@@ -110,6 +189,7 @@ public struct BuildProofManifest: Codable, Equatable {
         self.transforms = transforms
         self.modules = modules
         self.provenance = provenance
+        self.integrity = integrity
     }
 
     /// Deterministic, stable JSON (sorted keys, no escaping of slashes) suitable

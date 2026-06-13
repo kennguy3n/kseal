@@ -10,6 +10,9 @@ import KsealHardenCore
 //                  with an offline artifact fallback. (Run by the command plugin
 //                  or CI; network-permitted.)
 //   harden-binary  Strip symbols/metadata from a linked binary (strip/nm/otool).
+//   integrity      Compute Mach-O section-hash integrity for a linked binary and
+//                  bake it into an emitted manifest. (Run post-link by a run-script
+//                  phase or CI; pure file parsing, no network.)
 //   version        Print the toolkit version.
 //
 // All output is line-oriented and never contains secrets (no seed, no API key).
@@ -59,7 +62,7 @@ struct Args {
 }
 
 guard let command = arguments.first else {
-    fail("usage: kseal-harden <generate|register|harden-binary|version> [options]")
+    fail("usage: kseal-harden <generate|register|harden-binary|integrity|version> [options]")
 }
 let opts = Args(Array(arguments.dropFirst()))
 
@@ -75,6 +78,9 @@ case "register":
 
 case "harden-binary":
     runHardenBinary(opts)
+
+case "integrity":
+    runIntegrity(opts)
 
 default:
     fail("unknown command \"\(command)\"")
@@ -162,6 +168,50 @@ func runRegister(_ opts: Args) {
     case .failure(let error):
         fail("registration failed and offline write failed: \(error)")
     }
+}
+
+func runIntegrity(_ opts: Args) {
+    let binary = URL(fileURLWithPath: opts.require("binary"))
+    let manifestURL = URL(fileURLWithPath: opts.require("manifest"))
+    let outURL = URL(fileURLWithPath: opts.value("out-manifest") ?? manifestURL.path)
+
+    var manifest: BuildProofManifest
+    do {
+        manifest = try BuildProofManifest.decode(from: Data(contentsOf: manifestURL))
+    } catch {
+        fail("could not read manifest: \(error)")
+    }
+
+    let integrity: BuildProofManifest.Integrity
+    do {
+        integrity = try MachOInspector().inspect(binaryAt: binary)
+    } catch {
+        fail("\(error)")
+    }
+
+    let sectionCount = integrity.slices.reduce(0) { $0 + $1.sections.count }
+    manifest.integrity = integrity
+    // Record the transform idempotently so re-running doesn't duplicate it.
+    manifest.transforms.removeAll { $0.kind == "macho-section-integrity" }
+    manifest.transforms.append(
+        BuildProofManifest.Transform(
+            kind: "macho-section-integrity",
+            algorithm: "sha256",
+            count: sectionCount,
+            detail: ["slices": String(integrity.slices.count), "format": integrity.format]
+        )
+    )
+    if !manifest.modules.contains("macho-section-integrity") {
+        manifest.modules = (manifest.modules + ["macho-section-integrity"]).sorted()
+    }
+
+    do {
+        try manifest.jsonData().write(to: outURL, options: .atomic)
+    } catch {
+        fail("could not write manifest: \(error)")
+    }
+    let archs = integrity.slices.map { $0.arch }.joined(separator: ",")
+    print("baked Mach-O integrity for \(binary.lastPathComponent): \(integrity.slices.count) slice(s) [\(archs)], \(sectionCount) section hash(es)")
 }
 
 func runHardenBinary(_ opts: Args) {

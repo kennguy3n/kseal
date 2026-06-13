@@ -1,7 +1,9 @@
 package io.kseal.gradle
 
 import io.kseal.gradle.tasks.BuildProofManifestTask
+import io.kseal.gradle.tasks.GenerateMasvsReportTask
 import io.kseal.gradle.tasks.GeneratePolymorphismSeedTask
+import io.kseal.gradle.tasks.HardenNativeLibrariesTask
 import io.kseal.gradle.tasks.HardenResourcesTask
 import io.kseal.gradle.tasks.RegisterBuildTask
 import io.kseal.gradle.tasks.StripDebugMetadataTask
@@ -55,6 +57,8 @@ class KsealAndroidHardenPlugin : Plugin<Project> {
         ext.registry.protectionProfileId.convention("")
         ext.registry.apiKeyProperty.convention("kseal.apiKey")
         ext.registry.apiKeyEnv.convention("KSEAL_API_KEY")
+
+        ext.masvsReport.enabled.convention(false)
     }
 
     private fun registerTasks(project: Project, ext: KsealHardenExtension): KsealTasks {
@@ -111,6 +115,15 @@ class KsealAndroidHardenPlugin : Plugin<Project> {
             reportFile.set(ksealOut.map { it.file("reports/classes.json") })
         }
 
+        val native = project.tasks.register<HardenNativeLibrariesTask>("ksealHardenNativeLibraries") {
+            group = GROUP
+            description = "Verifies CFI/MTE/BTI/PAC hardening of native libraries and records it in the build proof."
+            onlyIf { enabledProvider.getOrElse(true) }
+            nativeLibDirs.from(ext.nativeLibsDirs)
+            hardenedNativeDir.set(ksealOut.map { it.dir("hardened/native") })
+            reportFile.set(ksealOut.map { it.file("reports/native.json") })
+        }
+
         val manifest = project.tasks.register<BuildProofManifestTask>("ksealBuildProofManifest") {
             group = GROUP
             description = "Emits the build-proof manifest and computes the build hash."
@@ -127,9 +140,14 @@ class KsealAndroidHardenPlugin : Plugin<Project> {
             r8MappingPresent.set(ext.mappingFile.map { it.asFile.isFile }.orElse(false))
             seedDigestFile.set(seed.flatMap { it.seedDigestFile })
             seedMetaFile.set(seed.flatMap { it.seedMetaFile })
-            transformReports.from(classes.flatMap { it.reportFile }, resources.flatMap { it.reportFile })
+            transformReports.from(
+                classes.flatMap { it.reportFile },
+                resources.flatMap { it.reportFile },
+                native.flatMap { it.reportFile },
+            )
             strippedClassesDir.set(classes.flatMap { it.strippedClassesDir })
             hardenedResourcesDir.set(resources.flatMap { it.hardenedResourcesDir })
+            hardenedNativeDir.set(native.flatMap { it.hardenedNativeDir })
             sealedStringsFile.set(resources.flatMap { it.sealedStringsFile })
             mappingOutFile.set(resources.flatMap { it.mappingOutFile })
             manifestFile.set(ksealOut.map { it.file("build-proof/manifest.json") })
@@ -151,14 +169,30 @@ class KsealAndroidHardenPlugin : Plugin<Project> {
             uploadableManifestFile.set(ksealOut.map { it.file("build-proof/uploadable-manifest.json") })
         }
 
+        val masvsEnabled = ext.masvsReport.enabled
+        val masvsExecutable = ext.masvsReport.executable
+        val masvsReport = project.tasks.register<GenerateMasvsReportTask>("ksealMasvsReport") {
+            group = GROUP
+            description = "Generates the MASVS evidence report from the build proof (optional; requires masvsReport.executable)."
+            onlyIf { enabledProvider.getOrElse(true) && masvsEnabled.getOrElse(false) && masvsExecutable.isPresent }
+            executable.set(masvsExecutable)
+            manifestFile.set(manifest.flatMap { it.manifestFile })
+            catalogFile.set(ext.masvsReport.catalogFile)
+            extraArgs.set(emptyList())
+            reportMarkdownFile.set(ksealOut.map { it.file("reports/masvs-evidence.md") })
+            reportJsonFile.set(ksealOut.map { it.file("reports/masvs-evidence.json") })
+        }
+
         val harden = project.tasks.register("ksealHarden") {
             group = GROUP
             description = "Runs the full kseal hardening pipeline and registers the build proof."
             onlyIf { enabledProvider.getOrElse(true) }
             dependsOn(register)
+            // The report is produced when opted in; its onlyIf no-ops otherwise.
+            dependsOn(masvsReport)
         }
 
-        return KsealTasks(seed, resources, classes, manifest, register, harden)
+        return KsealTasks(seed, resources, classes, native, manifest, register, harden)
     }
 
     /** Resolves a secret from a Gradle property (by name) or, failing that, an env var. */
@@ -176,6 +210,7 @@ class KsealAndroidHardenPlugin : Plugin<Project> {
         val seed: org.gradle.api.tasks.TaskProvider<GeneratePolymorphismSeedTask>,
         val resources: org.gradle.api.tasks.TaskProvider<HardenResourcesTask>,
         val classes: org.gradle.api.tasks.TaskProvider<StripDebugMetadataTask>,
+        val native: org.gradle.api.tasks.TaskProvider<HardenNativeLibrariesTask>,
         val manifest: org.gradle.api.tasks.TaskProvider<BuildProofManifestTask>,
         val register: org.gradle.api.tasks.TaskProvider<RegisterBuildTask>,
         val harden: org.gradle.api.tasks.TaskProvider<org.gradle.api.Task>,
