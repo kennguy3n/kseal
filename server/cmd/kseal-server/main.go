@@ -368,6 +368,7 @@ func controlPlaneProcedures() map[string]bool {
 		ksealv1connect.RegistryServiceCreateAppProcedure:                   true,
 		ksealv1connect.RegistryServiceGetAppProcedure:                      true,
 		ksealv1connect.RegistryServiceListAppsProcedure:                    true,
+		ksealv1connect.RegistryServiceSearchAppsProcedure:                  true,
 		ksealv1connect.RegistryServiceCreateBuildProcedure:                 true,
 		ksealv1connect.RegistryServiceGetBuildProcedure:                    true,
 		ksealv1connect.RegistryServiceListBuildsProcedure:                  true,

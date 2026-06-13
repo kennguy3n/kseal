@@ -132,6 +132,20 @@ message ListAppsResponse {
   string next_page_token = 2;
 }
 
+// SearchAppsRequest filters a tenant's apps by a case-insensitive substring of
+// the app name or package id. An empty query matches all apps (so a UI can use
+// one endpoint for both the initial app dropdown and incremental search).
+message SearchAppsRequest {
+  string tenant_id = 1;
+  string query = 2;
+  int32 page_size = 3;
+  string page_token = 4;
+}
+message SearchAppsResponse {
+  repeated App apps = 1;
+  string next_page_token = 2;
+}
+
 // ---- Build CRUD ----
 
 message CreateBuildRequest {

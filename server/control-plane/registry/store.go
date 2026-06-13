@@ -163,6 +163,9 @@ type Store interface {
 	CreateApp(ctx context.Context, in CreateAppInput) (*ksealv1.App, error)
 	GetApp(ctx context.Context, tenantID, id string) (*ksealv1.App, error)
 	ListApps(ctx context.Context, tenantID string, page Page) ([]*ksealv1.App, string, error)
+	// SearchApps filters a tenant's apps by a case-insensitive substring of the
+	// name or package id; an empty query matches all apps.
+	SearchApps(ctx context.Context, tenantID, query string, page Page) ([]*ksealv1.App, string, error)
 
 	// Builds.
 	CreateBuild(ctx context.Context, in CreateBuildInput) (*ksealv1.Build, error)

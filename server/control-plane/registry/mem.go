@@ -188,6 +188,31 @@ func (m *MemStore) ListApps(_ context.Context, tenantID string, page Page) ([]*k
 	return pageSlice(all, page)
 }
 
+func (m *MemStore) SearchApps(_ context.Context, tenantID, query string, page Page) ([]*ksealv1.App, string, error) {
+	q := strings.ToLower(strings.TrimSpace(query))
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var all []*ksealv1.App
+	for _, a := range m.apps {
+		if a.TenantId != tenantID {
+			continue
+		}
+		if q != "" && !strings.Contains(strings.ToLower(a.Name), q) && !strings.Contains(strings.ToLower(a.PackageId), q) {
+			continue
+		}
+		all = append(all, cloneApp(a))
+	}
+	// Alphabetical by name (id tiebreak) so search results read naturally in a
+	// dropdown and paginate deterministically.
+	sort.Slice(all, func(i, j int) bool {
+		if all[i].Name != all[j].Name {
+			return all[i].Name < all[j].Name
+		}
+		return all[i].Id < all[j].Id
+	})
+	return pageSlice(all, page)
+}
+
 // ---- Builds ----
 
 func (m *MemStore) CreateBuild(_ context.Context, in CreateBuildInput) (*ksealv1.Build, error) {
