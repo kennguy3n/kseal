@@ -4,8 +4,8 @@ import com.google.android.play.core.integrity.IntegrityManagerFactory
 import com.google.android.play.core.integrity.IntegrityTokenRequest
 import com.google.android.play.core.integrity.IntegrityTokenResponse
 import android.content.Context
+import android.util.Base64
 import com.google.android.gms.tasks.Tasks
-import java.util.Base64
 
 /**
  * Produces the EXTERNAL platform attestation token submitted to VerifyAttestation.
@@ -29,7 +29,7 @@ class PlayIntegrityTokenProvider(
 
     override fun attestationToken(nonce: ByteArray): ByteArray {
         // Play Integrity expects a URL-safe, unpadded nonce string.
-        val nonceString = Base64.getUrlEncoder().withoutPadding().encodeToString(nonce)
+        val nonceString = Base64.encodeToString(nonce, Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
         val request = IntegrityTokenRequest.builder()
             .setNonce(nonceString)
             .setCloudProjectNumber(cloudProjectNumber)
@@ -49,5 +49,5 @@ class PlayIntegrityTokenProvider(
  */
 class DevAttestationTokenProvider : AttestationTokenProvider {
     override fun attestationToken(nonce: ByteArray): ByteArray =
-        ("dev-attestation:" + Base64.getEncoder().encodeToString(nonce)).toByteArray(Charsets.UTF_8)
+        ("dev-attestation:" + Base64.encodeToString(nonce, Base64.NO_WRAP)).toByteArray(Charsets.UTF_8)
 }

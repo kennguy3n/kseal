@@ -4,8 +4,8 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import android.util.Base64
 import org.json.JSONObject
-import java.util.Base64
 
 /** Minted trust session returned by VerifyAttestation. */
 data class TrustSession(val accepted: Boolean, val tokenId: String, val rejectionReason: String)
@@ -38,7 +38,7 @@ class KsealTrustClient(
             .toString()
         val resp = post("TrustService/GetNonce", body.toByteArray(), json, auth = false)
         val nonce = JSONObject(String(resp, Charsets.UTF_8)).getString("nonce")
-        return Base64.getDecoder().decode(nonce)
+        return Base64.decode(nonce, Base64.DEFAULT)
     }
 
     /** VerifyAttestation → minted trust session. */
@@ -94,7 +94,8 @@ class KsealTrustClient(
         }
     }
 
-    private fun b64(b: ByteArray): String = Base64.getEncoder().encodeToString(b)
+    // NO_WRAP: standard alphabet, no line breaks (android.util.Base64 wraps by default).
+    private fun b64(b: ByteArray): String = Base64.encodeToString(b, Base64.NO_WRAP)
 
     /**
      * Reads the `decision` (field 1, enum varint) and `reason` (field 2, string)
