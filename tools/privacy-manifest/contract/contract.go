@@ -172,6 +172,10 @@ func (c *Contract) validate() []string {
 		}
 		// Items that are personal data and surfaced to a store must carry the
 		// store projection so the generators do not silently drop a disclosure.
+		// At least one of ios/android is required; a single mapping is valid by
+		// design for genuinely platform-specific data (e.g. an iOS-only required-
+		// reason API), in which case the item intentionally appears only in that
+		// platform's disclosure.
 		if it.PersonalData {
 			if it.IOS == nil && it.Android == nil {
 				problems = append(problems, fmt.Sprintf("personal-data item %q has no ios/android store mapping", it.ID))
