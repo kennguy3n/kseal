@@ -10,8 +10,8 @@ This document tracks delivery against the six-phase roadmap. Status values: **NO
 | [Phase 1](#phase-1-api-trust-product-3-4-months) | API Trust Product | 3–4 months | **DONE \| 100%** |
 | [Phase 2](#phase-2-runtime-protection-4-6-months) | Runtime Protection | 4–6 months | **DONE \| 100%** |
 | [Phase 3](#phase-3-build-time-hardening-6-9-months) | Build-Time Hardening | 6–9 months | **DONE \| 100%** |
-| [Phase 4](#phase-4-enterprise-scale-9-12-months) | Enterprise Scale | 9–12 months | **IN PROGRESS \| ~78%** |
-| [Phase 5](#phase-5-desktop-6-months-after-mobile-maturity) | Desktop | 6+ months post-mobile | **IN PROGRESS \| ~67%** |
+| [Phase 4](#phase-4-enterprise-scale-9-12-months) | Enterprise Scale | 9–12 months | **IN PROGRESS \| ~95%** |
+| [Phase 5](#phase-5-desktop-6-months-after-mobile-maturity) | Desktop | 6+ months post-mobile | **DONE \| 100%** |
 
 ---
 
@@ -112,27 +112,31 @@ Validate the threat model, standards mapping, platform constraints, and cost mod
 
 ## Phase 4: Enterprise Scale (9-12 months)
 
-**Status: IN PROGRESS | ~78%**
+**Status: IN PROGRESS | ~95%**
 
 ### Modules
 
 | Module | Status | Assignee | Notes |
 |---|---|---|---|
 | Multi-region data plane | DONE | | Terraform `multi-region` (regional Postgres primary + cross-region replica + analytics object store), `analytics-replication` (CRR fan-out), `global-routing` (latency/geo routing + health checks + per-tenant region-pin), `envs/multi-region` root (1→N regions from one config); region-scoped Helm values; `docs/multi-region.md`. All modules `terraform validate`-clean |
-| Dedicated tenant tiers | NOT STARTED | | Enterprise/Regulated isolation |
+| Dedicated tenant tiers | DONE | | Enterprise/Regulated isolation via HKDF per-tenant key domain in the compliance backend (dedicated sealer/registry path), gated default-off; `docs/dedicated-tiers.md` |
+| Audit trail + data-processing registry | DONE | | `ComplianceService` (`proto/kseal/v1/compliance_service.proto`, `server/control-plane/compliance`) — hash-chained, tamper-evident, tenant-scoped append-only audit log with `VerifyAuditChain`, plus a machine-readable data-processing registry; all RPCs require an API key and filter on the caller's tenant; `docs/audit-trail.md` |
+| Signed kill switch | DONE | | Ed25519-signed remote disable/enable with monotonic anti-rollback version (serialized per scope via `pg_advisory_xact_lock`), delivered over the signed-config channel; forged/stale commands are no-ops; `docs/kill-switch.md` |
+| Canary rollout + auto-rollback | DONE | | Deterministic tenant/app/instance bucketing with guardrail-driven auto-rollback to last-known-good; lock-free hot path; `docs/canary-rollout.md` |
+| Compliance NoOps tooling | DONE | | iOS privacy-manifest generator (`tools/privacy-manifest`), Google Data-Safety helper (`tools/datasafety`), MASTG procedure runner (`tools/mastg`), and `kseal` CLI compliance commands — driven by the SDK data contract, golden-file tested; `docs/privacy-manifest.md`, `docs/data-safety.md`, `docs/mastg-procedures.md` |
 | Customer-managed keys (CMK) | DONE | | `server/shared/crypto` `TenantSealer` seam: platform-KEK default + per-tenant KMS-wrapped DEK (`CMKKeyManager`), self-describing `KSC1` envelope, fail-closed on KMS error and disabled-CMK open (`ErrCMKDisabled`); gated by `KSEAL_CMK_KMS_URI` (default off); `docs/byok.md` |
 | Private link | DONE | | `deploy/terraform/modules/private-link` — private connectivity / private endpoints for regulated tenants, no public ingress; example tfvars; `docs/deployment-private-link.md` |
 | On-prem verifier | DONE | | `deploy/onprem` — self-contained Helm values + `docker-compose.yml` + air-gap image mirror (`mirror-images.sh`, `images.txt`) for a customer-hosted attestation verifier; `docs/deployment-onprem.md` |
 | Raw event retention controls | DONE | | Per-tenant `raw_retention_days` + platform default `KSEAL_RAW_RETENTION_DAYS`; interface-driven purge routine (fake-clock testable) deletes raw events past the window, retains aggregates, tenant-isolated; also purges orphaned deleted-tenant raw events |
 | Policy packs | DONE | | `kseal policy pack {list,show,diff,apply,bulk-apply}` over 4 embedded vertical packs (fintech/gaming/health/media), idempotent + fault-isolated bulk-apply with `--dry-run`, composed over existing policy RPCs (no server change); `docs/policy-packs.md` |
-| Compliance dashboards | NOT STARTED | | MASVS + audit + data-processing registry (MASVS evidence available via `tools/masvs-report` + `kseal build masvs`) |
+| Compliance dashboards | IN PROGRESS | | `web/console` ships five tenant-scoped views (audit trail, data-processing registry, MASVS evidence, kill-switch control, canary monitor) + UX polish; the `ComplianceService` backend is live on `main`. The console/CLI currently read these surfaces through a stream-local proto with graceful degradation; **remaining: re-point them at the canonical `kseal.v1.ComplianceService` client** (tracked follow-up — the local and canonical message shapes need reconciliation). MASVS evidence also available via `tools/masvs-report` + `kseal build masvs`; `docs/compliance-console.md` |
 | Partner / MSSP console | DONE | | `web/partner-console` — read-only React/Vite MSSP app, client-side fleet rollups over per-tenant `QueryService` reads (worst-first tenant health), reuses console request-proof/auth; `docs/mssp-console.md` |
 
 ---
 
 ## Phase 5: Desktop (6+ months after mobile maturity)
 
-**Status: IN PROGRESS | ~67%**
+**Status: DONE | 100%**
 
 ### Modules
 
@@ -142,8 +146,9 @@ Validate the threat model, standards mapping, platform constraints, and cost mod
 | Windows SDK | DONE | | `sdk/desktop/windows` — .NET 8 `Kseal.Desktop`: WinVerifyTrust Authenticode (incl. real PKCS#7 timestamp extraction), publisher/thumbprint, pure-managed PE header/section integrity, DLL-injection probes; binds the same C ABI via P/Invoke |
 | Desktop API attestation | DONE | | Both desktop SDKs establish a trust session over the existing `TrustService` RPCs, fusing local integrity signals through the Rust core (same path as mobile) |
 | Code integrity | DONE | | macOS bundle signature/notarization + Windows Authenticode/PE section integrity verification (see macOS/Windows SDK rows) |
-| Secure updater integration | NOT STARTED | | Signed update channel |
-| Enterprise compatibility controls | NOT STARTED | | Policy controls; defer aggressive anti-debug |
+| Secure updater integration | DONE | | `sdk/desktop` secure updater: Ed25519 verify-before-apply over a signed update channel (macOS + Windows), fail-closed on signature/rollback failure; `docs/desktop-secure-update.md` |
+| Enterprise compatibility controls | DONE | | MDM-friendly `EnterprisePolicy` providers (macOS + Windows) that fail-closed to strict policy on read errors and reject allowlist prefix-escape; defers aggressive anti-debug per the desktop caution; `docs/desktop-sdk.md` |
+| Hardware-bound proofs | DONE | | TPM (Windows) / Keychain (macOS) hardware-bound attestation keys backing desktop request proofs |
 
 ---
 
@@ -155,3 +160,4 @@ Validate the threat model, standards mapping, platform constraints, and cost mod
 | 2026-06-13 | Full platform delivery merged to `main` and verified end-to-end. **Phase 0 → DONE** (threat model, MASVS mapping, iOS/Android policy reviews, parity matrix, cost model, Rust startup benches, attestation prototype). **Phase 1 → DONE** (all 11 server + SDK modules: registry, trust sessions, Play Integrity + App Attest verifiers, signed request proof, signed config, ingest, query, webhooks, Android/iOS SDKs, Rust trust core, React console). **Phase 2 → IN PROGRESS ~88%** (7 runtime-protection modules done across the Rust core + mobile probes + policy simulator + false-positive guardrails; SIEM integration not started). Added the real end-to-end integration suite under `tests/` (trust flow + anti-replay, telemetry ingest/query with quota, signed config, webhook delivery + retry, query overview + cross-tenant isolation, privacy contract) running against Postgres 16 + Redis 7 via testcontainers. |
 | 2026-06-13 | Second delivery wave (5 parallel workstreams) merged to `main`. **Phase 2 → DONE** — SIEM integration (`server/data-plane/siem`): per-tenant export to Splunk HEC / Microsoft Sentinel / Elastic, backpressured + batched + at-least-once with per-tenant circuit breaker, privacy allow-list (no PII), connector templates. **Phase 3 → IN PROGRESS ~78%** — Gradle (`plugins/gradle`) + Xcode (`plugins/xcode`) build-time hardening plugins (R8-aware obfuscation, AES-GCM string/resource sealing, symbol/metadata stripping, per-build HKDF polymorphism seed), shared `kseal.build-proof/v1` manifest registered via `RegistryService.CreateBuild`, and the CI release gate (`.github/workflows/release-gate.yml`); native CFI/MTE hardening + MASVS evidence report still pending. Added the **`cmd/kseal-cli`** operator CLI (tenant/app/build/policy/simulate/webhook/events) and the **`deploy/`** foundation (Helm chart with HPA/PDB/NetworkPolicy, Terraform modules, Prometheus/Grafana observability) as enabling infrastructure. Fixed a server bug surfaced by the CLI: the observability interceptor dereferenced a typed-nil `*connect.Response` on the error path, masking every errored RPC as `Internal`. |
 | 2026-06-13 | Third delivery wave (5 disjoint workstreams) merged to `main`. **Phase 3 → DONE** (native `.so` CFI/MTE/BTI/PAC posture + Mach-O section-hash integrity; `tools/masvs-report` per-release MASVS evidence generator). **Phase 4 → IN PROGRESS ~78%** (CMK/BYOK with per-tenant KMS-wrapped DEK + fail-closed; multi-region Terraform + global routing; private-link; on-prem/air-gapped verifier bundle + DR runbooks; per-tenant raw-event retention; vertical policy packs; read-only partner/MSSP console). **Phase 5 → IN PROGRESS ~67%** (macOS + Windows desktop SDKs with code-signature/notarization/Authenticode/PE integrity, desktop trust-session attestation over the existing RPCs). Server hardening also added behind default-off env vars: Redis TLS/AUTH, OTLP trace exporter; wired additively into Helm/compose by the deploy stream. Remaining: dedicated tenant tiers, compliance dashboards, secure-updater integration, enterprise compatibility controls. |
+| 2026-06-13 | Fourth delivery wave (6 disjoint workstreams) merged to `main`, explicitly graded against the competitor parity matrix. **Phase 5 → DONE (100%)** — desktop secure-updater (Ed25519 verify-before-apply, fail-closed), MDM enterprise compatibility controls, and TPM/Keychain hardware-bound proofs complete the desktop SDKs. **Phase 4 → IN PROGRESS ~95%** — new `ComplianceService` backend (hash-chained tamper-evident audit trail + data-processing registry with `VerifyAuditChain`, Ed25519 anti-rollback signed kill switch, deterministic canary rollout + guardrail-driven auto-rollback, HKDF per-tenant dedicated/regulated tier; additive proto, flag-gated/fail-safe, all RPCs API-key-authed + tenant-scoped); compliance NoOps tooling (iOS privacy-manifest, Google Data-Safety, MASTG runner + CLI); five compliance/ops console views + UX polish; build-hardening depth (per-build bytecode obfuscation, broader native posture verification, build-proof v2); and product polish (runnable sample apps, docs site, refreshed parity matrix). Remaining for Phase 4: re-point the console/CLI compliance surfaces from their stream-local proto onto the canonical `kseal.v1.ComplianceService` client. |
