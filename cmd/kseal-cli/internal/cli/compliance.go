@@ -363,8 +363,13 @@ func (c *CLI) handleCapability(err error, rpc string) (error, bool) {
 		return err, false
 	}
 	_, _ = fmt.Fprintf(c.errOut, "server capability unavailable: %s (the server has not deployed this RPC yet)\n", rpc)
+	// Always emit a machine-parseable result on stdout so scripts get consistent
+	// output across formats (JSON object in --output json, a one-row table
+	// otherwise) instead of an empty stdout with a clean exit.
 	if c.output == outputJSON {
 		_ = renderJSON(c.out, capabilityUnavailable{Available: false, RPC: rpc})
+	} else {
+		_ = table{Headers: []string{"RPC", "AVAILABLE"}, Rows: [][]string{{rpc, "false"}}}.render(c.out)
 	}
 	return nil, true
 }

@@ -122,6 +122,11 @@ func TestComplianceServerCapabilityUnavailable(t *testing.T) {
 		if !strings.Contains(errOut, "server capability unavailable") {
 			t.Errorf("%s missing unavailable notice, stderr=%s out=%s", sub, errOut, out)
 		}
+		// Table mode still emits a machine-parseable one-liner on stdout so
+		// scripts get consistent output across formats.
+		if !strings.Contains(out, "AVAILABLE") || !strings.Contains(out, "false") {
+			t.Errorf("%s table mode should emit an availability row, out=%q", sub, out)
+		}
 	}
 
 	// JSON mode reports available:false so scripts can detect it.
