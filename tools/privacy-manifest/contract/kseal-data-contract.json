@@ -1,0 +1,152 @@
+{
+  "schema": "kseal.data-contract/v1",
+  "sdk": "kseal",
+  "sdk_display_name": "kseal app-trust SDK",
+  "description": "Machine-readable declaration of exactly what the kseal SDK collects and transmits. It is the canonical source of truth for the store-disclosure generators (iOS privacy manifest, Google Data Safety). Every collected item names the kseal.v1.TelemetryEvent proto field(s) it derives from, so the contract cannot silently drift from the wire schema (enforced by a test that diffs this file against proto/kseal/v1/telemetry.proto).",
+  "source_of_truth": {
+    "wire_schema": "proto/kseal/v1/telemetry.proto",
+    "enums": "proto/kseal/v1/common.proto",
+    "privacy_architecture": "ARCHITECTURE.md#privacy-architecture"
+  },
+  "transport": {
+    "encrypted_in_transit": true,
+    "protocol": "TLS 1.2+ (HTTP/2 to origin, HTTP/3 terminated at edge)",
+    "payload": "protobuf + zstd batches"
+  },
+  "data_sharing": {
+    "shared_with_third_parties": false,
+    "sold": false,
+    "used_for_tracking": false,
+    "note": "Telemetry is processed only by the tenant's own kseal control/data plane. kseal never brokers data between tenants and never shares with advertising or data brokers."
+  },
+  "store_disclosure": {
+    "data_deletion_request_supported": true,
+    "data_deletion_note": "Tenant data is namespaced by tenant_id under per-tenant keys; an integrator/tenant can request deletion and offboarding drops those keys (cryptographic erasure). Install identifiers are tenant-scoped salted hashes that rotate, so there is no durable per-user identity to retain.",
+    "account_creation_required": false
+  },
+  "retention": {
+    "raw_events": "Off by default. Raw events are retained only when a tenant opts in (paid), bounded by a per-region/per-tenant retention window (KSEAL_RAW_RETENTION_DAYS / raw_retention_days).",
+    "aggregates": "Aggregates are the default storage form; dashboards and rules run on aggregates, not raw events.",
+    "deletion": "Tenant data is namespaced by tenant_id and keyed under per-tenant keys; tenant offboarding drops those keys (cryptographic erasure). Install identifiers are tenant-scoped salted hashes that rotate, so there is no durable cross-tenant identity to erase."
+  },
+  "collected": [
+    {
+      "id": "security_risk_signals",
+      "name": "Security & fraud risk signals",
+      "proto_fields": ["event_type", "risk_bits", "confidence"],
+      "description": "Canonical event category (small enum), packed boolean risk bits, and a coarse confidence level (low/medium/high). No raw measurements or free-form payloads.",
+      "personal_data": true,
+      "linked_to_identity": false,
+      "used_for_tracking": false,
+      "optional": false,
+      "default_collected": true,
+      "purposes": ["security", "fraud_prevention", "app_functionality"],
+      "ios": {
+        "collected_data_type": "NSPrivacyCollectedDataTypeOtherDiagnosticData",
+        "purposes": ["NSPrivacyCollectedDataTypePurposeAppFunctionality"]
+      },
+      "android": {
+        "category": "App info and performance",
+        "data_type": "Other app performance data",
+        "purposes": ["Fraud prevention, security, and compliance", "App functionality"]
+      }
+    },
+    {
+      "id": "device_install_identifier",
+      "name": "Tenant-scoped install identifier",
+      "proto_fields": ["tenant_scoped_install_key_hash"],
+      "description": "An HMAC of a per-install key, scoped to the tenant. Lets the server correlate an app instance without ever seeing a raw install id. It is not stable across tenants (no cross-tenant fingerprint) and rotates, so it cannot be used to track a person across apps or sites.",
+      "personal_data": true,
+      "linked_to_identity": false,
+      "used_for_tracking": false,
+      "optional": false,
+      "default_collected": true,
+      "purposes": ["security", "fraud_prevention", "app_functionality"],
+      "ios": {
+        "collected_data_type": "NSPrivacyCollectedDataTypeDeviceID",
+        "purposes": ["NSPrivacyCollectedDataTypePurposeAppFunctionality"]
+      },
+      "android": {
+        "category": "Device or other IDs",
+        "data_type": "Device or other IDs",
+        "purposes": ["Fraud prevention, security, and compliance", "App functionality"]
+      }
+    },
+    {
+      "id": "coarse_region",
+      "name": "Coarse country or region",
+      "proto_fields": ["country_or_region"],
+      "description": "Optional coarse geography (country/region only, never precise location). Omitted entirely unless the tenant's privacy policy enables it; off by default.",
+      "personal_data": true,
+      "linked_to_identity": false,
+      "used_for_tracking": false,
+      "optional": true,
+      "default_collected": false,
+      "purposes": ["security", "fraud_prevention", "app_functionality"],
+      "ios": {
+        "collected_data_type": "NSPrivacyCollectedDataTypeCoarseLocation",
+        "purposes": ["NSPrivacyCollectedDataTypePurposeAppFunctionality"]
+      },
+      "android": {
+        "category": "Location",
+        "data_type": "Approximate location",
+        "purposes": ["Fraud prevention, security, and compliance", "App functionality"]
+      }
+    },
+    {
+      "id": "app_build_identity",
+      "name": "App build & policy identity",
+      "proto_fields": ["app_build_hash", "policy_hash"],
+      "description": "Content hashes of the protected build and the active signed policy. These identify the app artifact and configuration, not the user or device, so they are not user/personal data and are not declared on store disclosures.",
+      "personal_data": false,
+      "linked_to_identity": false,
+      "used_for_tracking": false,
+      "optional": false,
+      "default_collected": true,
+      "purposes": ["security", "app_functionality"]
+    },
+    {
+      "id": "coarse_event_time",
+      "name": "Coarse event time bucket",
+      "proto_fields": ["coarse_time_bucket"],
+      "description": "Event time truncated to a coarse bucket (e.g. the hour) for k-anonymity. Part of the event envelope; not user-identifying on its own and not declared as a store data type.",
+      "personal_data": false,
+      "linked_to_identity": false,
+      "used_for_tracking": false,
+      "optional": false,
+      "default_collected": true,
+      "purposes": ["security", "app_functionality"]
+    }
+  ],
+  "not_collected": [
+    "Precise / GPS location",
+    "Contacts",
+    "Advertising identifier (IDFA / GAID)",
+    "Installed-app inventory",
+    "Cross-tenant device fingerprint",
+    "Persisted raw IP address (used transiently for edge decisions, never stored raw)",
+    "Keystrokes",
+    "Screen contents / screenshots",
+    "Clipboard contents",
+    "Behavioral profiling",
+    "Health or fitness data",
+    "Financial account or payment data",
+    "Photos, videos, or audio",
+    "Message or email contents",
+    "Browsing or search history"
+  ],
+  "ios_required_reason_apis": [
+    {
+      "api_category": "NSPrivacyAccessedAPICategoryFileTimestamp",
+      "reasons": ["3B52.1"],
+      "sdk_source": "sdk/ios/Sources/KsealSDK/Probes/AppleDeviceEnvironment.swift",
+      "justification": "Integrity / jailbreak probes read file metadata of indicator paths via FileManager.attributesOfItem. The metadata stays on the device; only a derived boolean risk bit is transmitted."
+    },
+    {
+      "api_category": "NSPrivacyAccessedAPICategorySystemBootTime",
+      "reasons": ["35F9.1"],
+      "sdk_source": "sdk/ios/Sources/KsealSDK/Probes/AppleDeviceEnvironment.swift",
+      "justification": "Anti-debug probe reads process info via sysctl(KERN_PROC) to detect tracing and to measure elapsed time between in-app events. Used on-device for the risk decision only."
+    }
+  ]
+}

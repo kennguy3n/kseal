@@ -1,0 +1,69 @@
+{
+  "sdk": "kseal",
+  "collects_data": true,
+  "shares_data": false,
+  "encrypted_in_transit": true,
+  "data_deletion_request_supported": true,
+  "data_deletion_note": "Tenant data is namespaced by tenant_id under per-tenant keys; an integrator/tenant can request deletion and offboarding drops those keys (cryptographic erasure). Install identifiers are tenant-scoped salted hashes that rotate, so there is no durable per-user identity to retain.",
+  "data_types": [
+    {
+      "category": "App info and performance",
+      "data_type": "Other app performance data",
+      "collected": true,
+      "shared": false,
+      "processed_ephemerally": false,
+      "optional": false,
+      "purposes": [
+        "App functionality",
+        "Fraud prevention, security, and compliance"
+      ],
+      "source_item": "security_risk_signals",
+      "description": "Canonical event category (small enum), packed boolean risk bits, and a coarse confidence level (low/medium/high). No raw measurements or free-form payloads."
+    },
+    {
+      "category": "Device or other IDs",
+      "data_type": "Device or other IDs",
+      "collected": true,
+      "shared": false,
+      "processed_ephemerally": false,
+      "optional": false,
+      "purposes": [
+        "App functionality",
+        "Fraud prevention, security, and compliance"
+      ],
+      "source_item": "device_install_identifier",
+      "description": "An HMAC of a per-install key, scoped to the tenant. Lets the server correlate an app instance without ever seeing a raw install id. It is not stable across tenants (no cross-tenant fingerprint) and rotates, so it cannot be used to track a person across apps or sites."
+    },
+    {
+      "category": "Location",
+      "data_type": "Approximate location",
+      "collected": true,
+      "shared": false,
+      "processed_ephemerally": false,
+      "optional": true,
+      "purposes": [
+        "App functionality",
+        "Fraud prevention, security, and compliance"
+      ],
+      "source_item": "coarse_region",
+      "description": "Optional coarse geography (country/region only, never precise location). Omitted entirely unless the tenant's privacy policy enables it; off by default."
+    }
+  ],
+  "not_collected": [
+    "Advertising identifier (IDFA / GAID)",
+    "Behavioral profiling",
+    "Browsing or search history",
+    "Clipboard contents",
+    "Contacts",
+    "Cross-tenant device fingerprint",
+    "Financial account or payment data",
+    "Health or fitness data",
+    "Installed-app inventory",
+    "Keystrokes",
+    "Message or email contents",
+    "Persisted raw IP address (used transiently for edge decisions, never stored raw)",
+    "Photos, videos, or audio",
+    "Precise / GPS location",
+    "Screen contents / screenshots"
+  ]
+}

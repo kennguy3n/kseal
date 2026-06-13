@@ -17,6 +17,7 @@ const (
 	ExitNotFound     = 4 // requested resource does not exist
 	ExitUnavailable  = 5 // server unreachable / transient
 	ExitInvalidInput = 6 // server rejected the request as invalid
+	ExitBlocked      = 7 // a gating check failed (e.g. MASTG release blocked)
 )
 
 // usageError marks an error as caused by bad invocation (maps to ExitUsage).
@@ -42,6 +43,18 @@ func newAuthError(format string, args ...any) error {
 	return authError{err: fmt.Errorf(format, args...)}
 }
 
+// blockedError marks a gating failure (maps to ExitBlocked): the command ran
+// correctly but a policy/verification gate failed, so CI should stop the
+// release without treating it as a generic error.
+type blockedError struct{ err error }
+
+func (e blockedError) Error() string { return e.err.Error() }
+func (e blockedError) Unwrap() error { return e.err }
+
+func newBlockedError(format string, args ...any) error {
+	return blockedError{err: fmt.Errorf(format, args...)}
+}
+
 // ExitCode maps an error to a process exit code, translating Connect RPC codes
 // into the CLI's stable exit-code contract.
 func ExitCode(err error) int {
@@ -55,6 +68,10 @@ func ExitCode(err error) int {
 	var ae authError
 	if errors.As(err, &ae) {
 		return ExitAuth
+	}
+	var be blockedError
+	if errors.As(err, &be) {
+		return ExitBlocked
 	}
 	switch connect.CodeOf(err) {
 	case connect.CodeUnauthenticated, connect.CodePermissionDenied:
