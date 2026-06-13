@@ -1,0 +1,27 @@
+{
+  "id": "gaming",
+  "vertical": "gaming",
+  "name": "Gaming anti-cheat",
+  "description": "Anti-cheat and anti-tamper posture for mobile games. Steps up rather than hard-blocks to limit false positives on legitimate players, while weighting emulator, hooking, and repack/tamper signals heavily.",
+  "enforcement_mode": "step_up",
+  "modules_enabled": [
+    "integrity",
+    "rasp",
+    "anti-hooking",
+    "environment",
+    "obfuscation"
+  ],
+  "risk_thresholds": {
+    "LOW_RISK": 20,
+    "MEDIUM_RISK": 50,
+    "HIGH_RISK": 85,
+    "CRITICAL": 125
+  },
+  "signal_weights": {
+    "0": 55,
+    "2": 45,
+    "3": 60,
+    "4": 70,
+    "9": 60
+  }
+}

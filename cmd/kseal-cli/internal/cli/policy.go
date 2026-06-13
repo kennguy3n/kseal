@@ -24,6 +24,7 @@ func newPolicyCmd(c *CLI) *cobra.Command {
 		newPolicySimulateCmd(c),
 		newPolicyListCmd(c),
 		newPolicyGetActiveCmd(c),
+		newPolicyPackCmd(c),
 	)
 	return cmd
 }

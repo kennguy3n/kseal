@@ -1,0 +1,31 @@
+{
+  "id": "fintech",
+  "vertical": "fintech",
+  "name": "Fintech baseline",
+  "description": "Strict, fail-closed posture for banking, payments, and wallet apps. Blocks on critical risk and weights API-attestation, network MITM, and account-takeover signals heavily.",
+  "enforcement_mode": "block",
+  "modules_enabled": [
+    "integrity",
+    "rasp",
+    "attestation",
+    "network",
+    "anti-hooking",
+    "environment"
+  ],
+  "risk_thresholds": {
+    "LOW_RISK": 15,
+    "MEDIUM_RISK": 40,
+    "HIGH_RISK": 70,
+    "CRITICAL": 110
+  },
+  "signal_weights": {
+    "0": 50,
+    "3": 45,
+    "4": 65,
+    "5": 80,
+    "6": 60,
+    "7": 55,
+    "8": 50,
+    "9": 70
+  }
+}

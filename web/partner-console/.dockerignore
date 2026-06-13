@@ -1,0 +1,9 @@
+node_modules
+dist
+coverage
+.vite
+.proto-vendor
+.git
+.env
+.env.*
+*.log
