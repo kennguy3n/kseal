@@ -31,3 +31,13 @@ func TestComplianceServiceRequiresAuth(t *testing.T) {
 		}
 	}
 }
+
+// TestRegistrySearchAppsRequiresAuth ensures the app-search read RPC is treated
+// as a control-plane operation requiring an API key, like the rest of
+// RegistryService, rather than falling through to the device-plane auth path.
+func TestRegistrySearchAppsRequiresAuth(t *testing.T) {
+	auth := controlPlaneProcedures()
+	if !auth[ksealv1connect.RegistryServiceSearchAppsProcedure] {
+		t.Errorf("RegistryService.SearchApps must require auth (missing from controlPlaneProcedures)")
+	}
+}

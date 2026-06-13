@@ -53,6 +53,9 @@ const (
 	// RegistryServiceListAppsProcedure is the fully-qualified name of the RegistryService's ListApps
 	// RPC.
 	RegistryServiceListAppsProcedure = "/kseal.v1.RegistryService/ListApps"
+	// RegistryServiceSearchAppsProcedure is the fully-qualified name of the RegistryService's
+	// SearchApps RPC.
+	RegistryServiceSearchAppsProcedure = "/kseal.v1.RegistryService/SearchApps"
 	// RegistryServiceCreateBuildProcedure is the fully-qualified name of the RegistryService's
 	// CreateBuild RPC.
 	RegistryServiceCreateBuildProcedure = "/kseal.v1.RegistryService/CreateBuild"
@@ -92,6 +95,7 @@ var (
 	registryServiceCreateAppMethodDescriptor               = registryServiceServiceDescriptor.Methods().ByName("CreateApp")
 	registryServiceGetAppMethodDescriptor                  = registryServiceServiceDescriptor.Methods().ByName("GetApp")
 	registryServiceListAppsMethodDescriptor                = registryServiceServiceDescriptor.Methods().ByName("ListApps")
+	registryServiceSearchAppsMethodDescriptor              = registryServiceServiceDescriptor.Methods().ByName("SearchApps")
 	registryServiceCreateBuildMethodDescriptor             = registryServiceServiceDescriptor.Methods().ByName("CreateBuild")
 	registryServiceGetBuildMethodDescriptor                = registryServiceServiceDescriptor.Methods().ByName("GetBuild")
 	registryServiceListBuildsMethodDescriptor              = registryServiceServiceDescriptor.Methods().ByName("ListBuilds")
@@ -112,6 +116,7 @@ type RegistryServiceClient interface {
 	CreateApp(context.Context, *connect.Request[v1.CreateAppRequest]) (*connect.Response[v1.CreateAppResponse], error)
 	GetApp(context.Context, *connect.Request[v1.GetAppRequest]) (*connect.Response[v1.GetAppResponse], error)
 	ListApps(context.Context, *connect.Request[v1.ListAppsRequest]) (*connect.Response[v1.ListAppsResponse], error)
+	SearchApps(context.Context, *connect.Request[v1.SearchAppsRequest]) (*connect.Response[v1.SearchAppsResponse], error)
 	CreateBuild(context.Context, *connect.Request[v1.CreateBuildRequest]) (*connect.Response[v1.CreateBuildResponse], error)
 	GetBuild(context.Context, *connect.Request[v1.GetBuildRequest]) (*connect.Response[v1.GetBuildResponse], error)
 	ListBuilds(context.Context, *connect.Request[v1.ListBuildsRequest]) (*connect.Response[v1.ListBuildsResponse], error)
@@ -173,6 +178,12 @@ func NewRegistryServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			httpClient,
 			baseURL+RegistryServiceListAppsProcedure,
 			connect.WithSchema(registryServiceListAppsMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		searchApps: connect.NewClient[v1.SearchAppsRequest, v1.SearchAppsResponse](
+			httpClient,
+			baseURL+RegistryServiceSearchAppsProcedure,
+			connect.WithSchema(registryServiceSearchAppsMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 		createBuild: connect.NewClient[v1.CreateBuildRequest, v1.CreateBuildResponse](
@@ -241,6 +252,7 @@ type registryServiceClient struct {
 	createApp               *connect.Client[v1.CreateAppRequest, v1.CreateAppResponse]
 	getApp                  *connect.Client[v1.GetAppRequest, v1.GetAppResponse]
 	listApps                *connect.Client[v1.ListAppsRequest, v1.ListAppsResponse]
+	searchApps              *connect.Client[v1.SearchAppsRequest, v1.SearchAppsResponse]
 	createBuild             *connect.Client[v1.CreateBuildRequest, v1.CreateBuildResponse]
 	getBuild                *connect.Client[v1.GetBuildRequest, v1.GetBuildResponse]
 	listBuilds              *connect.Client[v1.ListBuildsRequest, v1.ListBuildsResponse]
@@ -285,6 +297,11 @@ func (c *registryServiceClient) GetApp(ctx context.Context, req *connect.Request
 // ListApps calls kseal.v1.RegistryService.ListApps.
 func (c *registryServiceClient) ListApps(ctx context.Context, req *connect.Request[v1.ListAppsRequest]) (*connect.Response[v1.ListAppsResponse], error) {
 	return c.listApps.CallUnary(ctx, req)
+}
+
+// SearchApps calls kseal.v1.RegistryService.SearchApps.
+func (c *registryServiceClient) SearchApps(ctx context.Context, req *connect.Request[v1.SearchAppsRequest]) (*connect.Response[v1.SearchAppsResponse], error) {
+	return c.searchApps.CallUnary(ctx, req)
 }
 
 // CreateBuild calls kseal.v1.RegistryService.CreateBuild.
@@ -341,6 +358,7 @@ type RegistryServiceHandler interface {
 	CreateApp(context.Context, *connect.Request[v1.CreateAppRequest]) (*connect.Response[v1.CreateAppResponse], error)
 	GetApp(context.Context, *connect.Request[v1.GetAppRequest]) (*connect.Response[v1.GetAppResponse], error)
 	ListApps(context.Context, *connect.Request[v1.ListAppsRequest]) (*connect.Response[v1.ListAppsResponse], error)
+	SearchApps(context.Context, *connect.Request[v1.SearchAppsRequest]) (*connect.Response[v1.SearchAppsResponse], error)
 	CreateBuild(context.Context, *connect.Request[v1.CreateBuildRequest]) (*connect.Response[v1.CreateBuildResponse], error)
 	GetBuild(context.Context, *connect.Request[v1.GetBuildRequest]) (*connect.Response[v1.GetBuildResponse], error)
 	ListBuilds(context.Context, *connect.Request[v1.ListBuildsRequest]) (*connect.Response[v1.ListBuildsResponse], error)
@@ -398,6 +416,12 @@ func NewRegistryServiceHandler(svc RegistryServiceHandler, opts ...connect.Handl
 		RegistryServiceListAppsProcedure,
 		svc.ListApps,
 		connect.WithSchema(registryServiceListAppsMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	registryServiceSearchAppsHandler := connect.NewUnaryHandler(
+		RegistryServiceSearchAppsProcedure,
+		svc.SearchApps,
+		connect.WithSchema(registryServiceSearchAppsMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	registryServiceCreateBuildHandler := connect.NewUnaryHandler(
@@ -470,6 +494,8 @@ func NewRegistryServiceHandler(svc RegistryServiceHandler, opts ...connect.Handl
 			registryServiceGetAppHandler.ServeHTTP(w, r)
 		case RegistryServiceListAppsProcedure:
 			registryServiceListAppsHandler.ServeHTTP(w, r)
+		case RegistryServiceSearchAppsProcedure:
+			registryServiceSearchAppsHandler.ServeHTTP(w, r)
 		case RegistryServiceCreateBuildProcedure:
 			registryServiceCreateBuildHandler.ServeHTTP(w, r)
 		case RegistryServiceGetBuildProcedure:
@@ -523,6 +549,10 @@ func (UnimplementedRegistryServiceHandler) GetApp(context.Context, *connect.Requ
 
 func (UnimplementedRegistryServiceHandler) ListApps(context.Context, *connect.Request[v1.ListAppsRequest]) (*connect.Response[v1.ListAppsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("kseal.v1.RegistryService.ListApps is not implemented"))
+}
+
+func (UnimplementedRegistryServiceHandler) SearchApps(context.Context, *connect.Request[v1.SearchAppsRequest]) (*connect.Response[v1.SearchAppsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("kseal.v1.RegistryService.SearchApps is not implemented"))
 }
 
 func (UnimplementedRegistryServiceHandler) CreateBuild(context.Context, *connect.Request[v1.CreateBuildRequest]) (*connect.Response[v1.CreateBuildResponse], error) {

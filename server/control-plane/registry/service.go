@@ -131,6 +131,17 @@ func (s *Service) ListApps(ctx context.Context, req *connect.Request[ksealv1.Lis
 	return connect.NewResponse(&ksealv1.ListAppsResponse{Apps: apps, NextPageToken: next}), nil
 }
 
+func (s *Service) SearchApps(ctx context.Context, req *connect.Request[ksealv1.SearchAppsRequest]) (*connect.Response[ksealv1.SearchAppsResponse], error) {
+	if err := requireTenant(ctx, req.Msg.TenantId); err != nil {
+		return nil, err
+	}
+	apps, next, err := s.store.SearchApps(ctx, req.Msg.TenantId, req.Msg.Query, Page{Size: int(req.Msg.PageSize), Token: req.Msg.PageToken})
+	if err != nil {
+		return nil, toConnectErr(err)
+	}
+	return connect.NewResponse(&ksealv1.SearchAppsResponse{Apps: apps, NextPageToken: next}), nil
+}
+
 // ---- Builds ----
 
 func (s *Service) CreateBuild(ctx context.Context, req *connect.Request[ksealv1.CreateBuildRequest]) (*connect.Response[ksealv1.CreateBuildResponse], error) {

@@ -74,6 +74,13 @@ func clampPageSize(n int) int {
 	}
 }
 
+// escapeLike escapes the LIKE wildcards (`%`, `_`) and the escape character
+// (`\`) itself so a user-supplied search string is matched literally. Used with
+// `LIKE ... ESCAPE '\'`.
+func escapeLike(s string) string {
+	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(s)
+}
+
 // ---- Tenants ----
 
 func (s *PostgresStore) CreateTenant(ctx context.Context, in CreateTenantInput) (*ksealv1.Tenant, error) {
@@ -224,6 +231,45 @@ func (s *PostgresStore) ListApps(ctx context.Context, tenantID string, page Page
 			FROM apps WHERE tenant_id = $1
 			ORDER BY created_at, id
 			LIMIT $2 OFFSET $3`, tenantID, size+1, offset)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var a ksealv1.App
+			if err := scanApp(rows, &a); err != nil {
+				return err
+			}
+			out = append(out, &a)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, "", wrapPgErr(err)
+	}
+	return paginate(out, size, offset)
+}
+
+func (s *PostgresStore) SearchApps(ctx context.Context, tenantID, query string, page Page) ([]*ksealv1.App, string, error) {
+	size := clampPageSize(page.Size)
+	offset, err := decodeOffset(page.Token)
+	if err != nil {
+		return nil, "", err
+	}
+	// Build a contains-pattern with LIKE metacharacters escaped so a user query
+	// of e.g. "100%" matches literally rather than as a wildcard.
+	pattern := "%" + escapeLike(strings.ToLower(strings.TrimSpace(query))) + "%"
+	var out []*ksealv1.App
+	err = s.db.WithTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `
+			SELECT id, tenant_id, name, platform, package_id, signing_identities, status,
+			       EXTRACT(EPOCH FROM created_at)::bigint,
+			       EXTRACT(EPOCH FROM updated_at)::bigint
+			FROM apps
+			WHERE tenant_id = $1
+			  AND ($2 = '%%' OR lower(name) LIKE $2 ESCAPE '\' OR lower(package_id) LIKE $2 ESCAPE '\')
+			ORDER BY name, id
+			LIMIT $3 OFFSET $4`, tenantID, pattern, size+1, offset)
 		if err != nil {
 			return err
 		}

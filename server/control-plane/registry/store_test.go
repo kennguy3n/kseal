@@ -3,6 +3,7 @@ package registry
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 
@@ -67,6 +68,100 @@ func runStoreSuite(t *testing.T, store Store) {
 		}
 		if _, err := store.CreateApp(ctx, in); !errors.Is(err, ErrConflict) {
 			t.Fatalf("expected conflict, got %v", err)
+		}
+	})
+
+	t.Run("app search", func(t *testing.T) {
+		a := mustTenant(t, store)
+		b := mustTenant(t, store)
+		mk := func(name, pkg string) {
+			if _, err := store.CreateApp(ctx, CreateAppInput{TenantID: a.Id, Name: name, PackageID: pkg, Platform: ksealv1.Platform_PLATFORM_ANDROID}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		mk("Orders Mobile", "com.acme.orders")
+		mk("Payments", "com.acme.pay")
+		mk("Inventory", "com.acme.inv")
+		// A matching name under another tenant must never surface.
+		if _, err := store.CreateApp(ctx, CreateAppInput{TenantID: b.Id, Name: "Orders Secret", PackageID: "com.other.orders", Platform: ksealv1.Platform_PLATFORM_IOS}); err != nil {
+			t.Fatal(err)
+		}
+		names := func(apps []*ksealv1.App) string {
+			out := make([]string, len(apps))
+			for i, ap := range apps {
+				out[i] = ap.Name
+			}
+			return strings.Join(out, ",")
+		}
+
+		// Case-insensitive substring of the name.
+		got, _, err := store.SearchApps(ctx, a.Id, "ORDER", Page{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if names(got) != "Orders Mobile" {
+			t.Fatalf("name search: %q", names(got))
+		}
+
+		// Substring of the package id.
+		got, _, err = store.SearchApps(ctx, a.Id, "acme.pay", Page{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if names(got) != "Payments" {
+			t.Fatalf("package search: %q", names(got))
+		}
+
+		// Empty query returns all of tenant a's apps, alphabetically by name.
+		got, _, err = store.SearchApps(ctx, a.Id, "  ", Page{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if names(got) != "Inventory,Orders Mobile,Payments" {
+			t.Fatalf("empty query: %q", names(got))
+		}
+
+		// Isolation: tenant b sees only its own matching app.
+		got, _, err = store.SearchApps(ctx, b.Id, "orders", Page{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if names(got) != "Orders Secret" {
+			t.Fatalf("isolation: %q", names(got))
+		}
+
+		// Pagination over the 3 apps: a full first page yields a token, the
+		// remainder closes it out.
+		page1, tok, err := store.SearchApps(ctx, a.Id, "", Page{Size: 2})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(page1) != 2 || tok == "" {
+			t.Fatalf("page1: %d items tok=%q", len(page1), tok)
+		}
+		page2, tok2, err := store.SearchApps(ctx, a.Id, "", Page{Size: 2, Token: tok})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(page2) != 1 || tok2 != "" {
+			t.Fatalf("page2: %d items tok=%q", len(page2), tok2)
+		}
+
+		// LIKE wildcards in the query are matched literally, not as wildcards.
+		mk("Reports 100%", "com.acme.rep")
+		got, _, err = store.SearchApps(ctx, a.Id, "100%", Page{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if names(got) != "Reports 100%" {
+			t.Fatalf("literal percent search: %q", names(got))
+		}
+		got, _, err = store.SearchApps(ctx, a.Id, "%", Page{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if names(got) != "Reports 100%" {
+			t.Fatalf("escaped percent should match only the literal: %q", names(got))
 		}
 	})
 
