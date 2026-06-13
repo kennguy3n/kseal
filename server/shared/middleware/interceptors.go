@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -109,11 +110,33 @@ func (i *Interceptors) observability() connect.UnaryInterceptorFunc {
 				Str("code", code).
 				Dur("duration", elapsed).
 				Msg("rpc")
-			if resp != nil {
+			// On the error path connect boxes a typed-nil *Response into the
+			// non-nil AnyResponse interface, so a bare `resp != nil` check
+			// passes yet resp.Header() dereferences a nil pointer and panics
+			// (recovered as CodeInternal, masking the handler's real code, e.g.
+			// NotFound). Guard the underlying value before touching it.
+			if !isNilResponse(resp) {
 				resp.Header().Set("X-Request-Id", reqID)
 			}
 			return resp, err
 		}
+	}
+}
+
+// isNilResponse reports whether an AnyResponse is unusable (nil interface or a
+// boxed typed-nil pointer), which is what connect returns on the error path.
+// reflect.Value.IsNil panics on non-nilable kinds, so the Kind is checked
+// first; any other concrete kind is treated as a usable response.
+func isNilResponse(resp connect.AnyResponse) bool {
+	if resp == nil {
+		return true
+	}
+	v := reflect.ValueOf(resp)
+	switch v.Kind() {
+	case reflect.Ptr, reflect.Interface, reflect.Map, reflect.Slice, reflect.Chan, reflect.Func:
+		return v.IsNil()
+	default:
+		return false
 	}
 }
 

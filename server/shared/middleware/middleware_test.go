@@ -2,12 +2,18 @@ package middleware
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"connectrpc.com/connect"
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
+	"github.com/rs/zerolog"
+	"google.golang.org/protobuf/types/known/emptypb"
+
+	"github.com/kennguy3n/kseal/server/shared/telemetry"
 )
 
 func newRedis(t *testing.T) *redis.Client {
@@ -52,6 +58,36 @@ func TestCORSPreflight(t *testing.T) {
 	h.ServeHTTP(rr, req)
 	if rr.Header().Get("Access-Control-Allow-Origin") != "https://app.example.com" {
 		t.Fatalf("missing CORS origin header: %v", rr.Header())
+	}
+}
+
+// TestObservabilityErrorPathNoPanic pins the regression where a handler that
+// returns (nil, err) made the observability interceptor panic. On the error
+// path connect boxes a typed-nil *Response into the non-nil AnyResponse
+// interface, so the old `if resp != nil { resp.Header()... }` dereferenced a
+// nil pointer; the recovery interceptor then masked the handler's real code
+// (e.g. NotFound) as Internal. The interceptor must instead pass the original
+// error through untouched and not panic.
+func TestObservabilityErrorPathNoPanic(t *testing.T) {
+	tel, err := telemetry.Setup("test", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ic := &Interceptors{Logger: zerolog.Nop(), Tracer: *tel}
+
+	// next mimics connect's unary handler on the error path: a typed-nil
+	// *Response boxed into AnyResponse, alongside a NotFound error.
+	var typedNil *connect.Response[emptypb.Empty]
+	next := func(ctx context.Context, _ connect.AnyRequest) (connect.AnyResponse, error) {
+		return typedNil, connect.NewError(connect.CodeNotFound, errors.New("registry: not found"))
+	}
+	wrapped := ic.observability()(next)
+
+	// Before the fix this panicked (failing the test); after it returns the
+	// original NotFound code.
+	_, gotErr := wrapped(context.Background(), connect.NewRequest(&emptypb.Empty{}))
+	if connect.CodeOf(gotErr) != connect.CodeNotFound {
+		t.Fatalf("expected NotFound to pass through, got %v (%v)", connect.CodeOf(gotErr), gotErr)
 	}
 }
 
