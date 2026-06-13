@@ -38,8 +38,9 @@ const BuildHash = "sha256:000000000000000000000000000000000000000000000000000000
 
 // devKEK is a fixed 32-byte key-encryption key for the local example database.
 // It only protects signing-key material inside a throwaway dev database, so a
-// constant is fine here (and never appears in production paths).
-var devKEK = []byte("kseal-backend-quickstart-dev-kek")
+// constant is fine here (and never appears in production paths). Declared as a
+// string const so it is truly immutable; converted to bytes at the use site.
+const devKEK = "kseal-backend-quickstart-dev-kek"
 
 // playKeyID is the fake Google JWKS key id our mock key source answers to.
 const playKeyID = "kseal-quickstart-google-kid"
@@ -75,7 +76,7 @@ func Connect(ctx context.Context, dsn, redisAddr string) (*Env, error) {
 		return nil, fmt.Errorf("connect redis (%s): %w", redisAddr, err)
 	}
 
-	enc, err := kcrypto.NewEncryptor(devKEK)
+	enc, err := kcrypto.NewEncryptor([]byte(devKEK))
 	if err != nil {
 		_ = rdb.Close()
 		database.Close()

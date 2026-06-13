@@ -61,9 +61,11 @@ func run(seedOnly bool) error {
 			return err
 		}
 		// Emit shell exports so `eval "$(go run . -seed)"` wires curl-quickstart.sh.
-		fmt.Printf("export KSEAL_API_KEY=%s\n", seed.APIKey)
-		fmt.Printf("export KSEAL_TENANT=%s\n", seed.TenantID)
-		fmt.Printf("export KSEAL_APP=%s\n", seed.AppID)
+		// Single-quote the values so any shell metacharacter is treated literally
+		// (these ids never contain a single quote, so no escaping is needed).
+		fmt.Printf("export KSEAL_API_KEY='%s'\n", seed.APIKey)
+		fmt.Printf("export KSEAL_TENANT='%s'\n", seed.TenantID)
+		fmt.Printf("export KSEAL_APP='%s'\n", seed.AppID)
 		return nil
 	}
 

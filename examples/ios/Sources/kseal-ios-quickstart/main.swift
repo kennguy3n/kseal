@@ -35,6 +35,28 @@ struct DevAttestationTokenProvider: AttestationTokenProvider {
     }
 }
 
+// MARK: - Stable install identity
+
+/// Returns a stable, non-PII install id persisted across runs, mirroring the
+/// Android sample's SharedPreferences-backed id. The production SDK derives a
+/// tenant-scoped install identity internally; here the host owns the id since it
+/// drives the transport directly, so persist it rather than minting a new one
+/// each run (which would create a fresh trust session identity every time).
+func stableInstanceId() -> String {
+    let fm = FileManager.default
+    let base = (try? fm.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true))
+        ?? URL(fileURLWithPath: NSTemporaryDirectory())
+    let dir = base.appendingPathComponent("kseal-quickstart", isDirectory: true)
+    try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+    let file = dir.appendingPathComponent("instance-id")
+    if let id = try? String(contentsOf: file, encoding: .utf8), !id.isEmpty {
+        return id
+    }
+    let id = UUID().uuidString
+    try? id.write(to: file, atomically: true, encoding: .utf8)
+    return id
+}
+
 // MARK: - Host-owned transport over the TrustService RPCs
 
 enum TrustError: Error, CustomStringConvertible {
@@ -157,7 +179,7 @@ do {
     let nonce = try client.getNonce()
     print("[nonce] \(nonce.count) bytes")
     let token = try provider.attestationToken(nonce: nonce)
-    let instanceId = UUID().uuidString
+    let instanceId = stableInstanceId()
     let session = try client.verifyAttestation(nonce: nonce, buildHash: "sha256:dev-build", instanceId: instanceId, token: token)
     if session.accepted {
         print("[trust] accepted token=\(session.tokenId.prefix(8))…")
