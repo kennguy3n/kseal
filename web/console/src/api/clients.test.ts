@@ -53,6 +53,7 @@ describe("createClients wiring + auth header injection", () => {
     const transport = createRouterTransport(() => {});
     const clients = createClients(transport);
     expect(Object.keys(clients).sort()).toEqual([
+      "compliance",
       "config",
       "ingest",
       "query",

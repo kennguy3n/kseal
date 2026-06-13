@@ -1,8 +1,5 @@
 import { useState } from "react";
-import {
-  useKillSwitchState,
-  useRequestKillSwitchChange,
-} from "../hooks/compliance";
+import { useIssueKillSwitch, useKillSwitchState } from "../hooks/compliance";
 import {
   Badge,
   Card,
@@ -11,46 +8,49 @@ import {
   UnavailableNotice,
 } from "../components/ui";
 import { AppSelect } from "../components/AppSelect";
-import { KillSwitchStatus } from "../gen-local/kseal/consolelocal/v1/compliance_pb";
+import { KillSwitchCommand } from "../gen/kseal/v1/compliance_pb";
 import {
   formatTimestamp,
-  killSwitchStatusLabels,
-  killSwitchStatusTone,
+  killSwitchCommandLabels,
+  killSwitchCommandTone,
 } from "../lib/format";
 import { isUnavailableError } from "../lib/availability";
 
 export function KillSwitchPage() {
   const [appId, setAppId] = useState("");
   const state = useKillSwitchState(appId);
-  const requestChange = useRequestKillSwitchChange();
+  const issue = useIssueKillSwitch();
 
   // Two-step confirm: the operator must enter a reason and explicitly confirm
-  // before a signed change is requested (fail-safe against accidental trips).
+  // before a signed command is issued (fail-safe against accidental trips).
   const [reason, setReason] = useState("");
-  const [pending, setPending] = useState<KillSwitchStatus | null>(null);
+  const [pending, setPending] = useState<KillSwitchCommand | null>(null);
 
-  const current = state.data ?? null;
-  const isArmed = current?.status === KillSwitchStatus.ARMED;
-  // Default the proposed change to the opposite of the current state.
-  const target = isArmed ? KillSwitchStatus.DISABLED : KillSwitchStatus.ARMED;
+  // The effective command defaults to ENABLE (armed) when nothing is set, so
+  // the response is always present unless the RPC itself is unavailable.
+  const effective = state.data?.effectiveCommand ?? KillSwitchCommand.UNSPECIFIED;
+  const active = state.data?.active ?? null;
+  const isArmed = effective !== KillSwitchCommand.DISABLE;
+  // Default the proposed command to the opposite of the current state.
+  const target = isArmed ? KillSwitchCommand.DISABLE : KillSwitchCommand.ENABLE;
 
   function resetRequest() {
     setPending(null);
     setReason("");
-    requestChange.reset();
+    issue.reset();
   }
 
   async function onConfirm() {
     if (pending === null || reason.trim().length === 0) return;
     try {
-      await requestChange.mutateAsync({
+      await issue.mutateAsync({
         appId,
-        desiredStatus: pending,
+        command: pending,
         reason: reason.trim(),
       });
       resetRequest();
     } catch {
-      // surfaced via requestChange.isError below
+      // surfaced via issue.isError below
     }
   }
 
@@ -59,7 +59,7 @@ export function KillSwitchPage() {
       <header>
         <h1 className="text-xl font-semibold text-slate-50">Kill switch</h1>
         <p className="text-sm text-slate-400">
-          View and request signed enable/disable of protection enforcement.
+          View and issue a signed enable/disable of protection enforcement.
           Signing and authority are server-side; the console only requests the
           change.
         </p>
@@ -74,7 +74,7 @@ export function KillSwitchPage() {
             resetRequest();
           }}
           allLabel="Tenant-wide"
-          disabled={requestChange.isPending}
+          disabled={issue.isPending}
         />
       </Card>
 
@@ -85,15 +85,11 @@ export function KillSwitchPage() {
           <UnavailableNotice feature="The kill switch" />
         ) : state.isError ? (
           <ErrorNotice error={state.error} />
-        ) : !current ? (
-          <p className="text-sm text-slate-400">
-            No kill-switch state reported for this scope.
-          </p>
         ) : (
           <div className="space-y-4">
             <div className="flex items-center gap-3">
-              <Badge tone={killSwitchStatusTone(current.status)}>
-                {killSwitchStatusLabels[current.status]}
+              <Badge tone={killSwitchCommandTone(effective)}>
+                {killSwitchCommandLabels[effective]}
               </Badge>
               <span className="text-sm text-slate-400">
                 {isArmed
@@ -101,64 +97,70 @@ export function KillSwitchPage() {
                   : "Protection enforcement is disabled (observe-only)."}
               </span>
             </div>
-            <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
-              <div>
-                <dt className="label">Last changed by</dt>
-                <dd className="text-slate-300">
-                  {current.lastChangedBy || "—"}
-                </dd>
-              </div>
-              <div>
-                <dt className="label">Last changed</dt>
-                <dd className="font-mono text-xs text-slate-400">
-                  {formatTimestamp(current.lastChangedAt)}
-                </dd>
-              </div>
-              <div>
-                <dt className="label">Signing key</dt>
-                <dd className="font-mono text-xs text-slate-400">
-                  {current.signingKeyId || "—"}
-                </dd>
-              </div>
-              <div>
-                <dt className="label">Reason</dt>
-                <dd className="text-slate-300">{current.reason || "—"}</dd>
-              </div>
-            </dl>
+            {active ? (
+              <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+                <div>
+                  <dt className="label">Issued</dt>
+                  <dd className="font-mono text-xs text-slate-400">
+                    {formatTimestamp(active.issuedAt)}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="label">Version</dt>
+                  <dd className="font-mono text-xs text-slate-400">
+                    {active.version.toString()}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="label">Signing key</dt>
+                  <dd className="font-mono text-xs text-slate-400">
+                    {active.keyId || "—"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="label">Reason</dt>
+                  <dd className="text-slate-300">{active.reason || "—"}</dd>
+                </div>
+              </dl>
+            ) : (
+              <p className="text-sm text-slate-400">
+                No signed command in effect for this scope (armed by default).
+              </p>
+            )}
           </div>
         )}
       </Card>
 
-      {current && (
+      {!state.isError && (
         <Card
           title={
-            target === KillSwitchStatus.DISABLED
+            target === KillSwitchCommand.DISABLE
               ? "Disable protection"
               : "Re-arm protection"
           }
         >
-          {requestChange.isError && (
+          {issue.isError && (
             <div className="mb-3">
-              <ErrorNotice error={requestChange.error} />
+              <ErrorNotice error={issue.error} />
             </div>
           )}
           {pending === null ? (
             <div className="space-y-3">
               <p className="text-sm text-slate-400">
-                {target === KillSwitchStatus.DISABLED
-                  ? "Requests a signed kill switch that disables enforcement for this scope. Use only for incident response."
-                  : "Requests a signed change that re-arms enforcement for this scope."}
+                {target === KillSwitchCommand.DISABLE
+                  ? "Issues a signed kill switch that disables enforcement for this scope. Use only for incident response."
+                  : "Issues a signed command that re-arms enforcement for this scope."}
               </p>
               <button
                 type="button"
                 className={
-                  target === KillSwitchStatus.DISABLED
+                  target === KillSwitchCommand.DISABLE
                     ? "btn-danger"
                     : "btn-primary"
                 }
                 onClick={() => setPending(target)}
               >
-                {target === KillSwitchStatus.DISABLED
+                {target === KillSwitchCommand.DISABLE
                   ? "Disable enforcement…"
                   : "Re-arm enforcement…"}
               </button>
@@ -179,24 +181,22 @@ export function KillSwitchPage() {
                 <button
                   type="button"
                   className={
-                    pending === KillSwitchStatus.DISABLED
+                    pending === KillSwitchCommand.DISABLE
                       ? "btn-danger"
                       : "btn-primary"
                   }
-                  disabled={
-                    reason.trim().length === 0 || requestChange.isPending
-                  }
+                  disabled={reason.trim().length === 0 || issue.isPending}
                   onClick={() => void onConfirm()}
                 >
-                  {requestChange.isPending
+                  {issue.isPending
                     ? "Requesting…"
-                    : `Confirm: ${killSwitchStatusLabels[pending]}`}
+                    : `Confirm: ${killSwitchCommandLabels[pending]}`}
                 </button>
                 <button
                   type="button"
                   className="btn-ghost"
                   onClick={resetRequest}
-                  disabled={requestChange.isPending}
+                  disabled={issue.isPending}
                 >
                   Cancel
                 </button>

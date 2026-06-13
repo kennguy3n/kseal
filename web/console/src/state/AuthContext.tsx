@@ -15,7 +15,6 @@ import {
 } from "../api/auth";
 import { createTransport } from "../api/transport";
 import { createClients } from "../api/clients";
-import { createLocalClients } from "../api/localClients";
 import { AuthContext, type AuthContextValue } from "./useAuth";
 
 export function AuthProvider({
@@ -36,9 +35,9 @@ export function AuthProvider({
 
   const baseUrl = session?.apiBaseUrl ?? "";
 
-  const { clients, localClients } = useMemo(() => {
+  const clients = useMemo(() => {
     const t = transport ?? createTransport(baseUrl, () => apiKeyRef.current);
-    return { clients: createClients(t), localClients: createLocalClients(t) };
+    return createClients(t);
   }, [baseUrl, transport]);
 
   const login = useCallback(
@@ -61,8 +60,8 @@ export function AuthProvider({
   }, [queryClient]);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ session, clients, localClients, login, logout }),
-    [session, clients, localClients, login, logout],
+    () => ({ session, clients, login, logout }),
+    [session, clients, login, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file kseal/v1/registry.proto.
  */
 export const file_kseal_v1_registry: GenFile = /*@__PURE__*/
-  fileDesc("Chdrc2VhbC92MS9yZWdpc3RyeS5wcm90bxIIa3NlYWwudjEidgoGVGVuYW50EgoKAmlkGAEgASgJEgwKBG5hbWUYAiABKAkSDAoEc2x1ZxgDIAEoCRIMCgR0aWVyGAQgASgJEg4KBnN0YXR1cxgFIAEoCRISCgpjcmVhdGVkX2F0GAYgASgDEhIKCnVwZGF0ZWRfYXQYByABKAMiwAEKA0FwcBIKCgJpZBgBIAEoCRIRCgl0ZW5hbnRfaWQYAiABKAkSDAoEbmFtZRgDIAEoCRIkCghwbGF0Zm9ybRgEIAEoDjISLmtzZWFsLnYxLlBsYXRmb3JtEhIKCnBhY2thZ2VfaWQYBSABKAkSGgoSc2lnbmluZ19pZGVudGl0aWVzGAYgAygJEg4KBnN0YXR1cxgHIAEoCRISCgpjcmVhdGVkX2F0GAggASgDEhIKCnVwZGF0ZWRfYXQYCSABKAMiuwEKBUJ1aWxkEgoKAmlkGAEgASgJEhEKCXRlbmFudF9pZBgCIAEoCRIOCgZhcHBfaWQYAyABKAkSEgoKYnVpbGRfaGFzaBgEIAEoCRIUCgx2ZXJzaW9uX25hbWUYBSABKAkSFAoMdmVyc2lvbl9jb2RlGAYgASgDEh0KFXByb3RlY3Rpb25fcHJvZmlsZV9pZBgHIAEoCRIQCghtYW5pZmVzdBgIIAEoCRISCgpjcmVhdGVkX2F0GAkgASgDIp4BChFQcm90ZWN0aW9uUHJvZmlsZRIKCgJpZBgBIAEoCRIRCgl0ZW5hbnRfaWQYAiABKAkSDAoEbmFtZRgDIAEoCRIXCg9tb2R1bGVzX2VuYWJsZWQYBCADKAkSLwoMZGVmYXVsdF9tb2RlGAUgASgOMhkua3NlYWwudjEuRW5mb3JjZW1lbnRNb2RlEhIKCmNyZWF0ZWRfYXQYBiABKAMihwIKBlBvbGljeRIKCgJpZBgBIAEoCRIRCgl0ZW5hbnRfaWQYAiABKAkSDgoGYXBwX2lkGAMgASgJEgwKBG5hbWUYBCABKAkSDwoHdmVyc2lvbhgFIAEoBRIzChBlbmZvcmNlbWVudF9tb2RlGAYgASgOMhkua3NlYWwudjEuRW5mb3JjZW1lbnRNb2RlEg0KBXJ1bGVzGAcgASgJEhcKD3Jpc2tfdGhyZXNob2xkcxgIIAEoCRIXCg9tb2R1bGVzX2VuYWJsZWQYCSADKAkSEQoJaXNfYWN0aXZlGAogASgIEhIKCmNyZWF0ZWRfYXQYCyABKAMSEgoKdXBkYXRlZF9hdBgMIAEoAyI/ChNDcmVhdGVUZW5hbnRSZXF1ZXN0EgwKBG5hbWUYASABKAkSDAoEc2x1ZxgCIAEoCRIMCgR0aWVyGAMgASgJIjgKFENyZWF0ZVRlbmFudFJlc3BvbnNlEiAKBnRlbmFudBgBIAEoCzIQLmtzZWFsLnYxLlRlbmFudCIeChBHZXRUZW5hbnRSZXF1ZXN0EgoKAmlkGAEgASgJIjUKEUdldFRlbmFudFJlc3BvbnNlEiAKBnRlbmFudBgBIAEoCzIQLmtzZWFsLnYxLlRlbmFudCI7ChJMaXN0VGVuYW50c1JlcXVlc3QSEQoJcGFnZV9zaXplGAEgASgFEhIKCnBhZ2VfdG9rZW4YAiABKAkiUQoTTGlzdFRlbmFudHNSZXNwb25zZRIhCgd0ZW5hbnRzGAEgAygLMhAua3NlYWwudjEuVGVuYW50EhcKD25leHRfcGFnZV90b2tlbhgCIAEoCSJNChNVcGRhdGVUZW5hbnRSZXF1ZXN0EgoKAmlkGAEgASgJEgwKBG5hbWUYAiABKAkSDAoEdGllchgDIAEoCRIOCgZzdGF0dXMYBCABKAkiOAoUVXBkYXRlVGVuYW50UmVzcG9uc2USIAoGdGVuYW50GAEgASgLMhAua3NlYWwudjEuVGVuYW50IokBChBDcmVhdGVBcHBSZXF1ZXN0EhEKCXRlbmFudF9pZBgBIAEoCRIMCgRuYW1lGAIgASgJEiQKCHBsYXRmb3JtGAMgASgOMhIua3NlYWwudjEuUGxhdGZvcm0SEgoKcGFja2FnZV9pZBgEIAEoCRIaChJzaWduaW5nX2lkZW50aXRpZXMYBSADKAkiLwoRQ3JlYXRlQXBwUmVzcG9uc2USGgoDYXBwGAEgASgLMg0ua3NlYWwudjEuQXBwIi4KDUdldEFwcFJlcXVlc3QSEQoJdGVuYW50X2lkGAEgASgJEgoKAmlkGAIgASgJIiwKDkdldEFwcFJlc3BvbnNlEhoKA2FwcBgBIAEoCzINLmtzZWFsLnYxLkFwcCJLCg9MaXN0QXBwc1JlcXVlc3QSEQoJdGVuYW50X2lkGAEgASgJEhEKCXBhZ2Vfc2l6ZRgCIAEoBRISCgpwYWdlX3Rva2VuGAMgASgJIkgKEExpc3RBcHBzUmVzcG9uc2USGwoEYXBwcxgBIAMoCzINLmtzZWFsLnYxLkFwcBIXCg9uZXh0X3BhZ2VfdG9rZW4YAiABKAkiqAEKEkNyZWF0ZUJ1aWxkUmVxdWVzdBIRCgl0ZW5hbnRfaWQYASABKAkSDgoGYXBwX2lkGAIgASgJEhIKCmJ1aWxkX2hhc2gYAyABKAkSFAoMdmVyc2lvbl9uYW1lGAQgASgJEhQKDHZlcnNpb25fY29kZRgFIAEoAxIdChVwcm90ZWN0aW9uX3Byb2ZpbGVfaWQYBiABKAkSEAoIbWFuaWZlc3QYByABKAkiNQoTQ3JlYXRlQnVpbGRSZXNwb25zZRIeCgVidWlsZBgBIAEoCzIPLmtzZWFsLnYxLkJ1aWxkIjAKD0dldEJ1aWxkUmVxdWVzdBIRCgl0ZW5hbnRfaWQYASABKAkSCgoCaWQYAiABKAkiMgoQR2V0QnVpbGRSZXNwb25zZRIeCgVidWlsZBgBIAEoCzIPLmtzZWFsLnYxLkJ1aWxkIl0KEUxpc3RCdWlsZHNSZXF1ZXN0EhEKCXRlbmFudF9pZBgBIAEoCRIOCgZhcHBfaWQYAiABKAkSEQoJcGFnZV9zaXplGAMgASgFEhIKCnBhZ2VfdG9rZW4YBCABKAkiTgoSTGlzdEJ1aWxkc1Jlc3BvbnNlEh8KBmJ1aWxkcxgBIAMoCzIPLmtzZWFsLnYxLkJ1aWxkEhcKD25leHRfcGFnZV90b2tlbhgCIAEoCSK8AQoTQ3JlYXRlUG9saWN5UmVxdWVzdBIRCgl0ZW5hbnRfaWQYASABKAkSDgoGYXBwX2lkGAIgASgJEgwKBG5hbWUYAyABKAkSMwoQZW5mb3JjZW1lbnRfbW9kZRgEIAEoDjIZLmtzZWFsLnYxLkVuZm9yY2VtZW50TW9kZRINCgVydWxlcxgFIAEoCRIXCg9yaXNrX3RocmVzaG9sZHMYBiABKAkSFwoPbW9kdWxlc19lbmFibGVkGAcgAygJIjgKFENyZWF0ZVBvbGljeVJlc3BvbnNlEiAKBnBvbGljeRgBIAEoCzIQLmtzZWFsLnYxLlBvbGljeSI7ChZHZXRBY3RpdmVQb2xpY3lSZXF1ZXN0EhEKCXRlbmFudF9pZBgBIAEoCRIOCgZhcHBfaWQYAiABKAkiOwoXR2V0QWN0aXZlUG9saWN5UmVzcG9uc2USIAoGcG9saWN5GAEgASgLMhAua3NlYWwudjEuUG9saWN5IjgKE0xpc3RQb2xpY2llc1JlcXVlc3QSEQoJdGVuYW50X2lkGAEgASgJEg4KBmFwcF9pZBgCIAEoCSI6ChRMaXN0UG9saWNpZXNSZXNwb25zZRIiCghwb2xpY2llcxgBIAMoCzIQLmtzZWFsLnYxLlBvbGljeSI2ChVBY3RpdmF0ZVBvbGljeVJlcXVlc3QSEQoJdGVuYW50X2lkGAEgASgJEgoKAmlkGAIgASgJIjoKFkFjdGl2YXRlUG9saWN5UmVzcG9uc2USIAoGcG9saWN5GAEgASgLMhAua3NlYWwudjEuUG9saWN5IosBCh5DcmVhdGVQcm90ZWN0aW9uUHJvZmlsZVJlcXVlc3QSEQoJdGVuYW50X2lkGAEgASgJEgwKBG5hbWUYAiABKAkSFwoPbW9kdWxlc19lbmFibGVkGAMgAygJEi8KDGRlZmF1bHRfbW9kZRgEIAEoDjIZLmtzZWFsLnYxLkVuZm9yY2VtZW50TW9kZSJPCh9DcmVhdGVQcm90ZWN0aW9uUHJvZmlsZVJlc3BvbnNlEiwKB3Byb2ZpbGUYASABKAsyGy5rc2VhbC52MS5Qcm90ZWN0aW9uUHJvZmlsZSIyCh1MaXN0UHJvdGVjdGlvblByb2ZpbGVzUmVxdWVzdBIRCgl0ZW5hbnRfaWQYASABKAkiTwoeTGlzdFByb3RlY3Rpb25Qcm9maWxlc1Jlc3BvbnNlEi0KCHByb2ZpbGVzGAEgAygLMhsua3NlYWwudjEuUHJvdGVjdGlvblByb2ZpbGVCOFo2Z2l0aHViLmNvbS9rZW5uZ3V5M24va3NlYWwvc2VydmVyL2dlbi9rc2VhbC92MTtrc2VhbHYxYgZwcm90bzM", [file_kseal_v1_common]);
+  fileDesc("Chdrc2VhbC92MS9yZWdpc3RyeS5wcm90bxIIa3NlYWwudjEidgoGVGVuYW50EgoKAmlkGAEgASgJEgwKBG5hbWUYAiABKAkSDAoEc2x1ZxgDIAEoCRIMCgR0aWVyGAQgASgJEg4KBnN0YXR1cxgFIAEoCRISCgpjcmVhdGVkX2F0GAYgASgDEhIKCnVwZGF0ZWRfYXQYByABKAMiwAEKA0FwcBIKCgJpZBgBIAEoCRIRCgl0ZW5hbnRfaWQYAiABKAkSDAoEbmFtZRgDIAEoCRIkCghwbGF0Zm9ybRgEIAEoDjISLmtzZWFsLnYxLlBsYXRmb3JtEhIKCnBhY2thZ2VfaWQYBSABKAkSGgoSc2lnbmluZ19pZGVudGl0aWVzGAYgAygJEg4KBnN0YXR1cxgHIAEoCRISCgpjcmVhdGVkX2F0GAggASgDEhIKCnVwZGF0ZWRfYXQYCSABKAMiuwEKBUJ1aWxkEgoKAmlkGAEgASgJEhEKCXRlbmFudF9pZBgCIAEoCRIOCgZhcHBfaWQYAyABKAkSEgoKYnVpbGRfaGFzaBgEIAEoCRIUCgx2ZXJzaW9uX25hbWUYBSABKAkSFAoMdmVyc2lvbl9jb2RlGAYgASgDEh0KFXByb3RlY3Rpb25fcHJvZmlsZV9pZBgHIAEoCRIQCghtYW5pZmVzdBgIIAEoCRISCgpjcmVhdGVkX2F0GAkgASgDIp4BChFQcm90ZWN0aW9uUHJvZmlsZRIKCgJpZBgBIAEoCRIRCgl0ZW5hbnRfaWQYAiABKAkSDAoEbmFtZRgDIAEoCRIXCg9tb2R1bGVzX2VuYWJsZWQYBCADKAkSLwoMZGVmYXVsdF9tb2RlGAUgASgOMhkua3NlYWwudjEuRW5mb3JjZW1lbnRNb2RlEhIKCmNyZWF0ZWRfYXQYBiABKAMihwIKBlBvbGljeRIKCgJpZBgBIAEoCRIRCgl0ZW5hbnRfaWQYAiABKAkSDgoGYXBwX2lkGAMgASgJEgwKBG5hbWUYBCABKAkSDwoHdmVyc2lvbhgFIAEoBRIzChBlbmZvcmNlbWVudF9tb2RlGAYgASgOMhkua3NlYWwudjEuRW5mb3JjZW1lbnRNb2RlEg0KBXJ1bGVzGAcgASgJEhcKD3Jpc2tfdGhyZXNob2xkcxgIIAEoCRIXCg9tb2R1bGVzX2VuYWJsZWQYCSADKAkSEQoJaXNfYWN0aXZlGAogASgIEhIKCmNyZWF0ZWRfYXQYCyABKAMSEgoKdXBkYXRlZF9hdBgMIAEoAyI/ChNDcmVhdGVUZW5hbnRSZXF1ZXN0EgwKBG5hbWUYASABKAkSDAoEc2x1ZxgCIAEoCRIMCgR0aWVyGAMgASgJIjgKFENyZWF0ZVRlbmFudFJlc3BvbnNlEiAKBnRlbmFudBgBIAEoCzIQLmtzZWFsLnYxLlRlbmFudCIeChBHZXRUZW5hbnRSZXF1ZXN0EgoKAmlkGAEgASgJIjUKEUdldFRlbmFudFJlc3BvbnNlEiAKBnRlbmFudBgBIAEoCzIQLmtzZWFsLnYxLlRlbmFudCI7ChJMaXN0VGVuYW50c1JlcXVlc3QSEQoJcGFnZV9zaXplGAEgASgFEhIKCnBhZ2VfdG9rZW4YAiABKAkiUQoTTGlzdFRlbmFudHNSZXNwb25zZRIhCgd0ZW5hbnRzGAEgAygLMhAua3NlYWwudjEuVGVuYW50EhcKD25leHRfcGFnZV90b2tlbhgCIAEoCSJNChNVcGRhdGVUZW5hbnRSZXF1ZXN0EgoKAmlkGAEgASgJEgwKBG5hbWUYAiABKAkSDAoEdGllchgDIAEoCRIOCgZzdGF0dXMYBCABKAkiOAoUVXBkYXRlVGVuYW50UmVzcG9uc2USIAoGdGVuYW50GAEgASgLMhAua3NlYWwudjEuVGVuYW50IokBChBDcmVhdGVBcHBSZXF1ZXN0EhEKCXRlbmFudF9pZBgBIAEoCRIMCgRuYW1lGAIgASgJEiQKCHBsYXRmb3JtGAMgASgOMhIua3NlYWwudjEuUGxhdGZvcm0SEgoKcGFja2FnZV9pZBgEIAEoCRIaChJzaWduaW5nX2lkZW50aXRpZXMYBSADKAkiLwoRQ3JlYXRlQXBwUmVzcG9uc2USGgoDYXBwGAEgASgLMg0ua3NlYWwudjEuQXBwIi4KDUdldEFwcFJlcXVlc3QSEQoJdGVuYW50X2lkGAEgASgJEgoKAmlkGAIgASgJIiwKDkdldEFwcFJlc3BvbnNlEhoKA2FwcBgBIAEoCzINLmtzZWFsLnYxLkFwcCJLCg9MaXN0QXBwc1JlcXVlc3QSEQoJdGVuYW50X2lkGAEgASgJEhEKCXBhZ2Vfc2l6ZRgCIAEoBRISCgpwYWdlX3Rva2VuGAMgASgJIkgKEExpc3RBcHBzUmVzcG9uc2USGwoEYXBwcxgBIAMoCzINLmtzZWFsLnYxLkFwcBIXCg9uZXh0X3BhZ2VfdG9rZW4YAiABKAkiXAoRU2VhcmNoQXBwc1JlcXVlc3QSEQoJdGVuYW50X2lkGAEgASgJEg0KBXF1ZXJ5GAIgASgJEhEKCXBhZ2Vfc2l6ZRgDIAEoBRISCgpwYWdlX3Rva2VuGAQgASgJIkoKElNlYXJjaEFwcHNSZXNwb25zZRIbCgRhcHBzGAEgAygLMg0ua3NlYWwudjEuQXBwEhcKD25leHRfcGFnZV90b2tlbhgCIAEoCSKoAQoSQ3JlYXRlQnVpbGRSZXF1ZXN0EhEKCXRlbmFudF9pZBgBIAEoCRIOCgZhcHBfaWQYAiABKAkSEgoKYnVpbGRfaGFzaBgDIAEoCRIUCgx2ZXJzaW9uX25hbWUYBCABKAkSFAoMdmVyc2lvbl9jb2RlGAUgASgDEh0KFXByb3RlY3Rpb25fcHJvZmlsZV9pZBgGIAEoCRIQCghtYW5pZmVzdBgHIAEoCSI1ChNDcmVhdGVCdWlsZFJlc3BvbnNlEh4KBWJ1aWxkGAEgASgLMg8ua3NlYWwudjEuQnVpbGQiMAoPR2V0QnVpbGRSZXF1ZXN0EhEKCXRlbmFudF9pZBgBIAEoCRIKCgJpZBgCIAEoCSIyChBHZXRCdWlsZFJlc3BvbnNlEh4KBWJ1aWxkGAEgASgLMg8ua3NlYWwudjEuQnVpbGQiXQoRTGlzdEJ1aWxkc1JlcXVlc3QSEQoJdGVuYW50X2lkGAEgASgJEg4KBmFwcF9pZBgCIAEoCRIRCglwYWdlX3NpemUYAyABKAUSEgoKcGFnZV90b2tlbhgEIAEoCSJOChJMaXN0QnVpbGRzUmVzcG9uc2USHwoGYnVpbGRzGAEgAygLMg8ua3NlYWwudjEuQnVpbGQSFwoPbmV4dF9wYWdlX3Rva2VuGAIgASgJIrwBChNDcmVhdGVQb2xpY3lSZXF1ZXN0EhEKCXRlbmFudF9pZBgBIAEoCRIOCgZhcHBfaWQYAiABKAkSDAoEbmFtZRgDIAEoCRIzChBlbmZvcmNlbWVudF9tb2RlGAQgASgOMhkua3NlYWwudjEuRW5mb3JjZW1lbnRNb2RlEg0KBXJ1bGVzGAUgASgJEhcKD3Jpc2tfdGhyZXNob2xkcxgGIAEoCRIXCg9tb2R1bGVzX2VuYWJsZWQYByADKAkiOAoUQ3JlYXRlUG9saWN5UmVzcG9uc2USIAoGcG9saWN5GAEgASgLMhAua3NlYWwudjEuUG9saWN5IjsKFkdldEFjdGl2ZVBvbGljeVJlcXVlc3QSEQoJdGVuYW50X2lkGAEgASgJEg4KBmFwcF9pZBgCIAEoCSI7ChdHZXRBY3RpdmVQb2xpY3lSZXNwb25zZRIgCgZwb2xpY3kYASABKAsyEC5rc2VhbC52MS5Qb2xpY3kiOAoTTGlzdFBvbGljaWVzUmVxdWVzdBIRCgl0ZW5hbnRfaWQYASABKAkSDgoGYXBwX2lkGAIgASgJIjoKFExpc3RQb2xpY2llc1Jlc3BvbnNlEiIKCHBvbGljaWVzGAEgAygLMhAua3NlYWwudjEuUG9saWN5IjYKFUFjdGl2YXRlUG9saWN5UmVxdWVzdBIRCgl0ZW5hbnRfaWQYASABKAkSCgoCaWQYAiABKAkiOgoWQWN0aXZhdGVQb2xpY3lSZXNwb25zZRIgCgZwb2xpY3kYASABKAsyEC5rc2VhbC52MS5Qb2xpY3kiiwEKHkNyZWF0ZVByb3RlY3Rpb25Qcm9maWxlUmVxdWVzdBIRCgl0ZW5hbnRfaWQYASABKAkSDAoEbmFtZRgCIAEoCRIXCg9tb2R1bGVzX2VuYWJsZWQYAyADKAkSLwoMZGVmYXVsdF9tb2RlGAQgASgOMhkua3NlYWwudjEuRW5mb3JjZW1lbnRNb2RlIk8KH0NyZWF0ZVByb3RlY3Rpb25Qcm9maWxlUmVzcG9uc2USLAoHcHJvZmlsZRgBIAEoCzIbLmtzZWFsLnYxLlByb3RlY3Rpb25Qcm9maWxlIjIKHUxpc3RQcm90ZWN0aW9uUHJvZmlsZXNSZXF1ZXN0EhEKCXRlbmFudF9pZBgBIAEoCSJPCh5MaXN0UHJvdGVjdGlvblByb2ZpbGVzUmVzcG9uc2USLQoIcHJvZmlsZXMYASADKAsyGy5rc2VhbC52MS5Qcm90ZWN0aW9uUHJvZmlsZUI4WjZnaXRodWIuY29tL2tlbm5ndXkzbi9rc2VhbC9zZXJ2ZXIvZ2VuL2tzZWFsL3YxO2tzZWFsdjFiBnByb3RvMw", [file_kseal_v1_common]);
 
 /**
  * Tenant is the control-plane source of truth for an isolation boundary.
@@ -627,6 +627,64 @@ export const ListAppsResponseSchema: GenMessage<ListAppsResponse> = /*@__PURE__*
   messageDesc(file_kseal_v1_registry, 18);
 
 /**
+ * SearchAppsRequest filters a tenant's apps by a case-insensitive substring of
+ * the app name or package id. An empty query matches all apps (so a UI can use
+ * one endpoint for both the initial app dropdown and incremental search).
+ *
+ * @generated from message kseal.v1.SearchAppsRequest
+ */
+export type SearchAppsRequest = Message<"kseal.v1.SearchAppsRequest"> & {
+  /**
+   * @generated from field: string tenant_id = 1;
+   */
+  tenantId: string;
+
+  /**
+   * @generated from field: string query = 2;
+   */
+  query: string;
+
+  /**
+   * @generated from field: int32 page_size = 3;
+   */
+  pageSize: number;
+
+  /**
+   * @generated from field: string page_token = 4;
+   */
+  pageToken: string;
+};
+
+/**
+ * Describes the message kseal.v1.SearchAppsRequest.
+ * Use `create(SearchAppsRequestSchema)` to create a new message.
+ */
+export const SearchAppsRequestSchema: GenMessage<SearchAppsRequest> = /*@__PURE__*/
+  messageDesc(file_kseal_v1_registry, 19);
+
+/**
+ * @generated from message kseal.v1.SearchAppsResponse
+ */
+export type SearchAppsResponse = Message<"kseal.v1.SearchAppsResponse"> & {
+  /**
+   * @generated from field: repeated kseal.v1.App apps = 1;
+   */
+  apps: App[];
+
+  /**
+   * @generated from field: string next_page_token = 2;
+   */
+  nextPageToken: string;
+};
+
+/**
+ * Describes the message kseal.v1.SearchAppsResponse.
+ * Use `create(SearchAppsResponseSchema)` to create a new message.
+ */
+export const SearchAppsResponseSchema: GenMessage<SearchAppsResponse> = /*@__PURE__*/
+  messageDesc(file_kseal_v1_registry, 20);
+
+/**
  * @generated from message kseal.v1.CreateBuildRequest
  */
 export type CreateBuildRequest = Message<"kseal.v1.CreateBuildRequest"> & {
@@ -671,7 +729,7 @@ export type CreateBuildRequest = Message<"kseal.v1.CreateBuildRequest"> & {
  * Use `create(CreateBuildRequestSchema)` to create a new message.
  */
 export const CreateBuildRequestSchema: GenMessage<CreateBuildRequest> = /*@__PURE__*/
-  messageDesc(file_kseal_v1_registry, 19);
+  messageDesc(file_kseal_v1_registry, 21);
 
 /**
  * @generated from message kseal.v1.CreateBuildResponse
@@ -688,7 +746,7 @@ export type CreateBuildResponse = Message<"kseal.v1.CreateBuildResponse"> & {
  * Use `create(CreateBuildResponseSchema)` to create a new message.
  */
 export const CreateBuildResponseSchema: GenMessage<CreateBuildResponse> = /*@__PURE__*/
-  messageDesc(file_kseal_v1_registry, 20);
+  messageDesc(file_kseal_v1_registry, 22);
 
 /**
  * @generated from message kseal.v1.GetBuildRequest
@@ -710,7 +768,7 @@ export type GetBuildRequest = Message<"kseal.v1.GetBuildRequest"> & {
  * Use `create(GetBuildRequestSchema)` to create a new message.
  */
 export const GetBuildRequestSchema: GenMessage<GetBuildRequest> = /*@__PURE__*/
-  messageDesc(file_kseal_v1_registry, 21);
+  messageDesc(file_kseal_v1_registry, 23);
 
 /**
  * @generated from message kseal.v1.GetBuildResponse
@@ -727,7 +785,7 @@ export type GetBuildResponse = Message<"kseal.v1.GetBuildResponse"> & {
  * Use `create(GetBuildResponseSchema)` to create a new message.
  */
 export const GetBuildResponseSchema: GenMessage<GetBuildResponse> = /*@__PURE__*/
-  messageDesc(file_kseal_v1_registry, 22);
+  messageDesc(file_kseal_v1_registry, 24);
 
 /**
  * @generated from message kseal.v1.ListBuildsRequest
@@ -759,7 +817,7 @@ export type ListBuildsRequest = Message<"kseal.v1.ListBuildsRequest"> & {
  * Use `create(ListBuildsRequestSchema)` to create a new message.
  */
 export const ListBuildsRequestSchema: GenMessage<ListBuildsRequest> = /*@__PURE__*/
-  messageDesc(file_kseal_v1_registry, 23);
+  messageDesc(file_kseal_v1_registry, 25);
 
 /**
  * @generated from message kseal.v1.ListBuildsResponse
@@ -781,7 +839,7 @@ export type ListBuildsResponse = Message<"kseal.v1.ListBuildsResponse"> & {
  * Use `create(ListBuildsResponseSchema)` to create a new message.
  */
 export const ListBuildsResponseSchema: GenMessage<ListBuildsResponse> = /*@__PURE__*/
-  messageDesc(file_kseal_v1_registry, 24);
+  messageDesc(file_kseal_v1_registry, 26);
 
 /**
  * @generated from message kseal.v1.CreatePolicyRequest
@@ -828,7 +886,7 @@ export type CreatePolicyRequest = Message<"kseal.v1.CreatePolicyRequest"> & {
  * Use `create(CreatePolicyRequestSchema)` to create a new message.
  */
 export const CreatePolicyRequestSchema: GenMessage<CreatePolicyRequest> = /*@__PURE__*/
-  messageDesc(file_kseal_v1_registry, 25);
+  messageDesc(file_kseal_v1_registry, 27);
 
 /**
  * @generated from message kseal.v1.CreatePolicyResponse
@@ -845,7 +903,7 @@ export type CreatePolicyResponse = Message<"kseal.v1.CreatePolicyResponse"> & {
  * Use `create(CreatePolicyResponseSchema)` to create a new message.
  */
 export const CreatePolicyResponseSchema: GenMessage<CreatePolicyResponse> = /*@__PURE__*/
-  messageDesc(file_kseal_v1_registry, 26);
+  messageDesc(file_kseal_v1_registry, 28);
 
 /**
  * @generated from message kseal.v1.GetActivePolicyRequest
@@ -867,7 +925,7 @@ export type GetActivePolicyRequest = Message<"kseal.v1.GetActivePolicyRequest"> 
  * Use `create(GetActivePolicyRequestSchema)` to create a new message.
  */
 export const GetActivePolicyRequestSchema: GenMessage<GetActivePolicyRequest> = /*@__PURE__*/
-  messageDesc(file_kseal_v1_registry, 27);
+  messageDesc(file_kseal_v1_registry, 29);
 
 /**
  * @generated from message kseal.v1.GetActivePolicyResponse
@@ -884,7 +942,7 @@ export type GetActivePolicyResponse = Message<"kseal.v1.GetActivePolicyResponse"
  * Use `create(GetActivePolicyResponseSchema)` to create a new message.
  */
 export const GetActivePolicyResponseSchema: GenMessage<GetActivePolicyResponse> = /*@__PURE__*/
-  messageDesc(file_kseal_v1_registry, 28);
+  messageDesc(file_kseal_v1_registry, 30);
 
 /**
  * @generated from message kseal.v1.ListPoliciesRequest
@@ -906,7 +964,7 @@ export type ListPoliciesRequest = Message<"kseal.v1.ListPoliciesRequest"> & {
  * Use `create(ListPoliciesRequestSchema)` to create a new message.
  */
 export const ListPoliciesRequestSchema: GenMessage<ListPoliciesRequest> = /*@__PURE__*/
-  messageDesc(file_kseal_v1_registry, 29);
+  messageDesc(file_kseal_v1_registry, 31);
 
 /**
  * @generated from message kseal.v1.ListPoliciesResponse
@@ -923,7 +981,7 @@ export type ListPoliciesResponse = Message<"kseal.v1.ListPoliciesResponse"> & {
  * Use `create(ListPoliciesResponseSchema)` to create a new message.
  */
 export const ListPoliciesResponseSchema: GenMessage<ListPoliciesResponse> = /*@__PURE__*/
-  messageDesc(file_kseal_v1_registry, 30);
+  messageDesc(file_kseal_v1_registry, 32);
 
 /**
  * @generated from message kseal.v1.ActivatePolicyRequest
@@ -945,7 +1003,7 @@ export type ActivatePolicyRequest = Message<"kseal.v1.ActivatePolicyRequest"> & 
  * Use `create(ActivatePolicyRequestSchema)` to create a new message.
  */
 export const ActivatePolicyRequestSchema: GenMessage<ActivatePolicyRequest> = /*@__PURE__*/
-  messageDesc(file_kseal_v1_registry, 31);
+  messageDesc(file_kseal_v1_registry, 33);
 
 /**
  * @generated from message kseal.v1.ActivatePolicyResponse
@@ -962,7 +1020,7 @@ export type ActivatePolicyResponse = Message<"kseal.v1.ActivatePolicyResponse"> 
  * Use `create(ActivatePolicyResponseSchema)` to create a new message.
  */
 export const ActivatePolicyResponseSchema: GenMessage<ActivatePolicyResponse> = /*@__PURE__*/
-  messageDesc(file_kseal_v1_registry, 32);
+  messageDesc(file_kseal_v1_registry, 34);
 
 /**
  * @generated from message kseal.v1.CreateProtectionProfileRequest
@@ -994,7 +1052,7 @@ export type CreateProtectionProfileRequest = Message<"kseal.v1.CreateProtectionP
  * Use `create(CreateProtectionProfileRequestSchema)` to create a new message.
  */
 export const CreateProtectionProfileRequestSchema: GenMessage<CreateProtectionProfileRequest> = /*@__PURE__*/
-  messageDesc(file_kseal_v1_registry, 33);
+  messageDesc(file_kseal_v1_registry, 35);
 
 /**
  * @generated from message kseal.v1.CreateProtectionProfileResponse
@@ -1011,7 +1069,7 @@ export type CreateProtectionProfileResponse = Message<"kseal.v1.CreateProtection
  * Use `create(CreateProtectionProfileResponseSchema)` to create a new message.
  */
 export const CreateProtectionProfileResponseSchema: GenMessage<CreateProtectionProfileResponse> = /*@__PURE__*/
-  messageDesc(file_kseal_v1_registry, 34);
+  messageDesc(file_kseal_v1_registry, 36);
 
 /**
  * @generated from message kseal.v1.ListProtectionProfilesRequest
@@ -1028,7 +1086,7 @@ export type ListProtectionProfilesRequest = Message<"kseal.v1.ListProtectionProf
  * Use `create(ListProtectionProfilesRequestSchema)` to create a new message.
  */
 export const ListProtectionProfilesRequestSchema: GenMessage<ListProtectionProfilesRequest> = /*@__PURE__*/
-  messageDesc(file_kseal_v1_registry, 35);
+  messageDesc(file_kseal_v1_registry, 37);
 
 /**
  * @generated from message kseal.v1.ListProtectionProfilesResponse
@@ -1045,5 +1103,5 @@ export type ListProtectionProfilesResponse = Message<"kseal.v1.ListProtectionPro
  * Use `create(ListProtectionProfilesResponseSchema)` to create a new message.
  */
 export const ListProtectionProfilesResponseSchema: GenMessage<ListProtectionProfilesResponse> = /*@__PURE__*/
-  messageDesc(file_kseal_v1_registry, 36);
+  messageDesc(file_kseal_v1_registry, 38);
 

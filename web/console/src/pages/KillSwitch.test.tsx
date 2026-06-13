@@ -7,11 +7,11 @@ import { RegistryService } from "../gen/kseal/v1/registry_service_pb";
 import { ListAppsResponseSchema } from "../gen/kseal/v1/registry_pb";
 import {
   GetKillSwitchStateResponseSchema,
-  KillSwitchService,
-  KillSwitchStateSchema,
-  KillSwitchStatus,
-  RequestKillSwitchChangeResponseSchema,
-} from "../gen-local/kseal/consolelocal/v1/compliance_pb";
+  IssueKillSwitchResponseSchema,
+  KillSwitchCommand,
+  SignedKillSwitchSchema,
+} from "../gen/kseal/v1/compliance_pb";
+import { ComplianceService } from "../gen/kseal/v1/compliance_service_pb";
 import { KillSwitchPage } from "./KillSwitch";
 import { renderWithProviders } from "../test/render";
 
@@ -24,13 +24,16 @@ function withApps(router: ConnectRouter) {
   });
 }
 
-function state(status: KillSwitchStatus) {
-  return create(KillSwitchStateSchema, {
-    status,
-    lastChangedBy: "ops@kseal",
-    lastChangedAt: 1_700_000_000_000n,
-    signingKeyId: "ks-key-1",
-    reason: "baseline",
+function state(command: KillSwitchCommand) {
+  return create(GetKillSwitchStateResponseSchema, {
+    effectiveCommand: command,
+    active: create(SignedKillSwitchSchema, {
+      command,
+      version: 3n,
+      issuedAt: 1_700_000_000_000n,
+      keyId: "ks-key-1",
+      reason: "baseline",
+    }),
   });
 }
 
@@ -38,11 +41,8 @@ describe("KillSwitchPage", () => {
   it("renders the armed state", async () => {
     const transport = createRouterTransport((router) => {
       withApps(router);
-      router.service(KillSwitchService, {
-        getKillSwitchState: () =>
-          create(GetKillSwitchStateResponseSchema, {
-            state: state(KillSwitchStatus.ARMED),
-          }),
+      router.service(ComplianceService, {
+        getKillSwitchState: () => state(KillSwitchCommand.ENABLE),
       });
     });
 
@@ -51,9 +51,7 @@ describe("KillSwitchPage", () => {
       route: "/kill-switch",
     });
 
-    await waitFor(() =>
-      expect(screen.getByText("Armed")).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.getByText("Armed")).toBeInTheDocument());
     expect(
       screen.getByText(/protection is enforcing normally/i),
     ).toBeInTheDocument();
@@ -65,25 +63,29 @@ describe("KillSwitchPage", () => {
 
   it("requires a reason and requests a signed change", async () => {
     const user = userEvent.setup();
-    const requests: { appId: string; status: KillSwitchStatus; reason: string }[] =
-      [];
-    let current = KillSwitchStatus.ARMED;
+    const requests: {
+      appId: string;
+      command: KillSwitchCommand;
+      reason: string;
+    }[] = [];
+    let current = KillSwitchCommand.ENABLE;
 
     const transport = createRouterTransport((router) => {
       withApps(router);
-      router.service(KillSwitchService, {
-        getKillSwitchState: () =>
-          create(GetKillSwitchStateResponseSchema, { state: state(current) }),
-        requestKillSwitchChange(req) {
+      router.service(ComplianceService, {
+        getKillSwitchState: () => state(current),
+        issueKillSwitch(req) {
           requests.push({
             appId: req.appId,
-            status: req.desiredStatus,
+            command: req.command,
             reason: req.reason,
           });
-          current = req.desiredStatus;
-          return create(RequestKillSwitchChangeResponseSchema, {
-            state: state(current),
-            signedChangeRef: "ref-1",
+          current = req.command;
+          return create(IssueKillSwitchResponseSchema, {
+            killSwitch: create(SignedKillSwitchSchema, {
+              command: current,
+              version: 4n,
+            }),
           });
         },
       });
@@ -118,7 +120,7 @@ describe("KillSwitchPage", () => {
     await waitFor(() => expect(requests).toHaveLength(1));
     expect(requests[0]).toEqual({
       appId: "app-9",
-      status: KillSwitchStatus.DISABLED,
+      command: KillSwitchCommand.DISABLE,
       reason: "INC-1234 false positive",
     });
     // After the change the state refetches to DISABLED.

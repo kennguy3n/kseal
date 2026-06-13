@@ -5,44 +5,46 @@ import { createRouterTransport } from "@connectrpc/connect";
 import { create } from "@bufbuild/protobuf";
 import {
   AuditEventSchema,
-  AuditService,
   ListAuditEventsResponseSchema,
-} from "../gen-local/kseal/consolelocal/v1/compliance_pb";
+  VerifyAuditChainResponseSchema,
+} from "../gen/kseal/v1/compliance_pb";
+import { ComplianceService } from "../gen/kseal/v1/compliance_service_pb";
 import { AuditTrailPage } from "./AuditTrail";
 import { renderWithProviders } from "../test/render";
 
-function entry(
-  id: string,
-  sequence: number,
+function event(
+  seq: number,
   action: string,
-  opts: Partial<{ actor: string; entryHash: string }> = {},
+  opts: Partial<{ actorKeyId: string; hash: string }> = {},
 ) {
   return create(AuditEventSchema, {
-    id,
-    sequence: BigInt(sequence),
+    seq: BigInt(seq),
     action,
-    actor: opts.actor ?? "ops@kseal",
+    actorKeyId: opts.actorKeyId ?? "key-ops",
     resourceType: "policy",
     resourceId: "pol-1",
-    timestamp: BigInt(1_700_000_000_000 + sequence),
-    entryHash: opts.entryHash ?? `${id}hashhashhash`,
+    createdAt: BigInt(1_700_000_000_000 + seq),
+    hash: opts.hash ?? `hash${seq}hashhashhash`,
     metadata: { from: "OBSERVE", to: "BLOCK" },
   });
 }
 
 describe("AuditTrailPage", () => {
-  it("renders chain-verified audit entries", async () => {
-    const transport = createRouterTransport(({ service }) => {
-      service(AuditService, {
-        listAuditEvents() {
-          return create(ListAuditEventsResponseSchema, {
+  it("renders audit entries with an intact chain", async () => {
+    const transport = createRouterTransport((router) => {
+      router.service(ComplianceService, {
+        listAuditEvents: () =>
+          create(ListAuditEventsResponseSchema, {
             events: [
-              entry("a", 2, "policy.activate"),
-              entry("b", 1, "killswitch.disable"),
+              event(2, "policy.activate"),
+              event(1, "killswitch.disable"),
             ],
-            chainVerified: true,
-          });
-        },
+          }),
+        verifyAuditChain: () =>
+          create(VerifyAuditChainResponseSchema, {
+            intact: true,
+            verifiedCount: 2n,
+          }),
       });
     });
 
@@ -54,34 +56,35 @@ describe("AuditTrailPage", () => {
     expect(screen.getByText("killswitch.disable")).toBeInTheDocument();
     // metadata is rendered deterministically.
     expect(screen.getAllByText("from=OBSERVE, to=BLOCK").length).toBe(2);
-    // no chain-break alert when verified.
+    // no chain-break alert when intact.
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("warns when the server reports a broken hash chain", async () => {
-    const transport = createRouterTransport(({ service }) => {
-      service(AuditService, {
-        listAuditEvents() {
-          return create(ListAuditEventsResponseSchema, {
-            events: [entry("a", 1, "policy.activate")],
-            chainVerified: false,
-            chainError: "hash mismatch at sequence 1",
-          });
-        },
+  it("warns when VerifyAuditChain reports a broken hash chain", async () => {
+    const transport = createRouterTransport((router) => {
+      router.service(ComplianceService, {
+        listAuditEvents: () =>
+          create(ListAuditEventsResponseSchema, {
+            events: [event(1, "policy.activate")],
+          }),
+        verifyAuditChain: () =>
+          create(VerifyAuditChainResponseSchema, {
+            intact: false,
+            brokenSeq: 1n,
+            verifiedCount: 1n,
+          }),
       });
     });
 
     renderWithProviders(<AuditTrailPage />, { transport, route: "/audit" });
 
     await waitFor(() =>
-      expect(screen.getByRole("alert")).toHaveTextContent(
-        "hash mismatch at sequence 1",
-      ),
+      expect(screen.getByRole("alert")).toHaveTextContent("sequence 1"),
     );
   });
 
   it("degrades gracefully when the RPC is not deployed", async () => {
-    // No AuditService registered -> UNIMPLEMENTED.
+    // No ComplianceService registered -> UNIMPLEMENTED.
     const transport = createRouterTransport(() => {});
 
     renderWithProviders(<AuditTrailPage />, { transport, route: "/audit" });
@@ -93,21 +96,22 @@ describe("AuditTrailPage", () => {
     );
   });
 
-  it("filters by actor and reissues the query", async () => {
+  it("filters by action and reissues the query", async () => {
     const user = userEvent.setup();
     const seen: string[] = [];
-    const transport = createRouterTransport(({ service }) => {
-      service(AuditService, {
+    const transport = createRouterTransport((router) => {
+      router.service(ComplianceService, {
+        verifyAuditChain: () =>
+          create(VerifyAuditChainResponseSchema, { intact: true }),
         listAuditEvents(req) {
-          seen.push(req.actor);
+          seen.push(req.action);
           return create(ListAuditEventsResponseSchema, {
-            events: req.actor
-              ? [entry("a", 1, "policy.activate", { actor: req.actor })]
+            events: req.action
+              ? [event(2, req.action)]
               : [
-                  entry("a", 1, "policy.activate"),
-                  entry("b", 2, "killswitch.disable", { actor: "admin@kseal" }),
+                  event(1, "policy.activate"),
+                  event(2, "killswitch.disable"),
                 ],
-            chainVerified: true,
           });
         },
       });
@@ -117,12 +121,14 @@ describe("AuditTrailPage", () => {
 
     await waitFor(() => expect(screen.getAllByRole("row")).toHaveLength(3)); // header + 2
 
-    await user.type(screen.getByLabelText("Actor"), "admin@kseal");
+    await user.type(screen.getByLabelText("Action"), "killswitch.disable");
 
-    await waitFor(() => expect(seen).toContain("admin@kseal"));
+    await waitFor(() => expect(seen).toContain("killswitch.disable"));
     await waitFor(() => {
       const table = screen.getByRole("table");
-      expect(within(table).getByText("admin@kseal")).toBeInTheDocument();
+      expect(
+        within(table).getByText("killswitch.disable"),
+      ).toBeInTheDocument();
     });
   });
 });

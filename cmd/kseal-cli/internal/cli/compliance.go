@@ -8,7 +8,7 @@ import (
 	"connectrpc.com/connect"
 	"github.com/spf13/cobra"
 
-	"github.com/kennguy3n/kseal/cli/internal/compliancepb"
+	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
 	"github.com/kennguy3n/kseal/tools/datasafety/datasafety"
 	"github.com/kennguy3n/kseal/tools/mastg/mastg"
 	dscontract "github.com/kennguy3n/kseal/tools/privacy-manifest/contract"
@@ -246,17 +246,18 @@ func locateRepoFile(path string) (string, error) {
 	}
 }
 
-// ---- server-backed compliance reads (stream-local, graceful degradation) ----
+// ---- server-backed compliance reads (canonical ComplianceService, graceful degradation) ----
 
 func newAuditTrailCmd(c *CLI) *cobra.Command {
-	var appID string
+	var action, resourceType string
 	var pageSize int32
 	cmd := &cobra.Command{
 		Use:   "audit-trail",
-		Short: "Read the tenant's control-plane audit trail",
+		Short: "Read the tenant's hash-chained control-plane audit trail",
 		Long: "Read operator audit entries for the tenant (control-plane actions; no end-user " +
-			"PII). Depends on a server RPC WS-K is adding; if the server does not implement it, " +
-			"the command reports \"server capability unavailable\" and exits cleanly.",
+			"PII), newest first. Optionally filter by --action or --resource-type. Reads the " +
+			"canonical ComplianceService; on a server build that predates it the command reports " +
+			"\"server capability unavailable\" and exits cleanly.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			tenant, err := c.requireTenant()
 			if err != nil {
@@ -264,10 +265,10 @@ func newAuditTrailCmd(c *CLI) *cobra.Command {
 			}
 			ctx, cancel := c.callCtx(cmd.Context())
 			defer cancel()
-			resp, err := c.compliance().GetAuditTrail(ctx, connect.NewRequest(&compliancepb.GetAuditTrailRequest{
-				TenantId: tenant, AppId: appID, PageSize: pageSize,
+			resp, err := c.compliance().ListAuditEvents(ctx, connect.NewRequest(&ksealv1.ListAuditEventsRequest{
+				TenantId: tenant, Action: action, ResourceType: resourceType, PageSize: pageSize,
 			}))
-			if handled, herr := c.handleCapability(err, "GetAuditTrail"); handled || err != nil {
+			if handled, herr := c.handleCapability(err, "ListAuditEvents"); handled || err != nil {
 				return herr
 			}
 			view := newAuditTrailView(resp.Msg)
@@ -275,7 +276,8 @@ func newAuditTrailCmd(c *CLI) *cobra.Command {
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&appID, "app", "", "filter to a single app id")
+	f.StringVar(&action, "action", "", "filter to a single action (e.g. policy.activate)")
+	f.StringVar(&resourceType, "resource-type", "", "filter to a single resource type")
 	f.Int32Var(&pageSize, "page-size", 0, "max entries to return (0 = server default)")
 	return cmd
 }
@@ -284,9 +286,9 @@ func newKillSwitchCmd(c *CLI) *cobra.Command {
 	var appID string
 	cmd := &cobra.Command{
 		Use:   "kill-switch",
-		Short: "Read the tenant's kill-switch / canary state",
+		Short: "Read the tenant's kill-switch state",
 		Long: "Read the current kill-switch state for the tenant, optionally narrowed to one " +
-			"app. Depends on a server RPC WS-K is adding; degrades gracefully when absent.",
+			"app. Reads the canonical ComplianceService; degrades gracefully when absent.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			tenant, err := c.requireTenant()
 			if err != nil {
@@ -294,13 +296,13 @@ func newKillSwitchCmd(c *CLI) *cobra.Command {
 			}
 			ctx, cancel := c.callCtx(cmd.Context())
 			defer cancel()
-			resp, err := c.compliance().GetKillSwitchState(ctx, connect.NewRequest(&compliancepb.GetKillSwitchStateRequest{
+			resp, err := c.compliance().GetKillSwitchState(ctx, connect.NewRequest(&ksealv1.GetKillSwitchStateRequest{
 				TenantId: tenant, AppId: appID,
 			}))
 			if handled, herr := c.handleCapability(err, "GetKillSwitchState"); handled || err != nil {
 				return herr
 			}
-			view := newKillSwitchView(resp.Msg)
+			view := newKillSwitchView(resp.Msg, tenant, appID)
 			return c.emit(view, killSwitchTable(view))
 		},
 	}
@@ -314,7 +316,7 @@ func newDPRCmd(c *CLI) *cobra.Command {
 		Aliases: []string{"dpr"},
 		Short:   "Read the tenant's record-of-processing-activities",
 		Long: "Read the tenant's data-processing registry (purpose, data categories, legal " +
-			"basis, retention, processors). Depends on a server RPC WS-K is adding; degrades " +
+			"basis, retention, processors). Reads the canonical ComplianceService; degrades " +
 			"gracefully when absent.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			tenant, err := c.requireTenant()
@@ -323,13 +325,13 @@ func newDPRCmd(c *CLI) *cobra.Command {
 			}
 			ctx, cancel := c.callCtx(cmd.Context())
 			defer cancel()
-			resp, err := c.compliance().GetDataProcessingRegistry(ctx, connect.NewRequest(&compliancepb.GetDataProcessingRegistryRequest{
+			resp, err := c.compliance().GetDataProcessingRegistry(ctx, connect.NewRequest(&ksealv1.GetDataProcessingRegistryRequest{
 				TenantId: tenant,
 			}))
 			if handled, herr := c.handleCapability(err, "GetDataProcessingRegistry"); handled || err != nil {
 				return herr
 			}
-			view := newDPRView(resp.Msg)
+			view := newDPRView(resp.Msg, tenant)
 			return c.emit(view, dprTable(view))
 		},
 	}

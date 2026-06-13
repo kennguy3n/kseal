@@ -1,11 +1,11 @@
 import { Code, ConnectError } from "@connectrpc/connect";
 
-// The console-local compliance/ops RPCs (audit trail, data-processing registry,
-// kill switch, canary monitor) are being added to the canonical server by
-// WS-K. Until they are deployed, a server returns UNIMPLEMENTED (no handler) or
-// UNAVAILABLE (route not wired). We treat both as "capability not deployed yet"
-// and render a clean degraded state rather than a hard error — exactly the
-// graceful-degradation contract the console-local client exists for.
+// The compliance/ops views (audit trail, data-processing registry, kill switch,
+// canary monitor) read the canonical ComplianceService. A server build that
+// predates that service (or has the compliance routes unwired) returns
+// UNIMPLEMENTED (no handler) or UNAVAILABLE (route not reachable). We treat both
+// as "capability not deployed yet" and render a clean degraded state rather than
+// a hard error.
 export function isUnavailableError(error: unknown): boolean {
   if (!(error instanceof ConnectError)) return false;
   return error.code === Code.Unimplemented || error.code === Code.Unavailable;
