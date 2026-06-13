@@ -71,10 +71,9 @@ func gatingLine(g GatingSummary) string {
 		}
 		return fmt.Sprintf("**Release blocked (require-pass):** %d pending procedure(s).", g.Pending)
 	}
-	if g.Failed == 0 {
-		return "**No failing procedures.**"
-	}
-	return ""
+	// Not blocked: by the Blocked invariant (Failed > 0 always blocks) there are
+	// no failing procedures here.
+	return "**No failing procedures.**"
 }
 
 func oneLine(s string) string {

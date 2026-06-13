@@ -276,10 +276,8 @@ func newAuditTrailCmd(c *CLI) *cobra.Command {
 			resp, err := c.compliance().GetAuditTrail(ctx, connect.NewRequest(&compliancepb.GetAuditTrailRequest{
 				TenantId: tenant, AppId: appID, PageSize: pageSize,
 			}))
-			if u, handled := c.handleCapability(err, "GetAuditTrail"); handled {
-				return u
-			} else if err != nil {
-				return err
+			if handled, herr := c.handleCapability(err, "GetAuditTrail"); handled || err != nil {
+				return herr
 			}
 			view := newAuditTrailView(resp.Msg)
 			return c.emit(view, auditTrailTable(view))
@@ -308,10 +306,8 @@ func newKillSwitchCmd(c *CLI) *cobra.Command {
 			resp, err := c.compliance().GetKillSwitchState(ctx, connect.NewRequest(&compliancepb.GetKillSwitchStateRequest{
 				TenantId: tenant, AppId: appID,
 			}))
-			if u, handled := c.handleCapability(err, "GetKillSwitchState"); handled {
-				return u
-			} else if err != nil {
-				return err
+			if handled, herr := c.handleCapability(err, "GetKillSwitchState"); handled || err != nil {
+				return herr
 			}
 			view := newKillSwitchView(resp.Msg)
 			return c.emit(view, killSwitchTable(view))
@@ -339,10 +335,8 @@ func newDPRCmd(c *CLI) *cobra.Command {
 			resp, err := c.compliance().GetDataProcessingRegistry(ctx, connect.NewRequest(&compliancepb.GetDataProcessingRegistryRequest{
 				TenantId: tenant,
 			}))
-			if u, handled := c.handleCapability(err, "GetDataProcessingRegistry"); handled {
-				return u
-			} else if err != nil {
-				return err
+			if handled, herr := c.handleCapability(err, "GetDataProcessingRegistry"); handled || err != nil {
+				return herr
 			}
 			view := newDPRView(resp.Msg)
 			return c.emit(view, dprTable(view))
@@ -351,16 +345,18 @@ func newDPRCmd(c *CLI) *cobra.Command {
 	return cmd
 }
 
-// handleCapability implements graceful degradation. When the server does not
-// implement the RPC (Connect code Unimplemented), it prints a clear notice and
-// renders an "available: false" result, returning handled=true with a nil error
-// so the command exits cleanly. Any other error is left to the caller.
-func (c *CLI) handleCapability(err error, rpc string) (error, bool) {
+// handleCapability implements graceful degradation. It returns (handled, err)
+// in idiomatic order: when the server does not implement the RPC (Connect code
+// Unimplemented) it prints a clear notice, renders an "available: false" result,
+// and returns (true, nil) so the command exits cleanly. For any other outcome it
+// returns (false, err) — passing the original error straight back — so callers
+// can collapse both branches into `if handled, herr := ...; handled || err != nil { return herr }`.
+func (c *CLI) handleCapability(err error, rpc string) (handled bool, _ error) {
 	if err == nil {
-		return nil, false
+		return false, nil
 	}
 	if connect.CodeOf(err) != connect.CodeUnimplemented {
-		return err, false
+		return false, err
 	}
 	_, _ = fmt.Fprintf(c.errOut, "server capability unavailable: %s (the server has not deployed this RPC yet)\n", rpc)
 	// Always emit a machine-parseable result on stdout so scripts get consistent
@@ -371,7 +367,7 @@ func (c *CLI) handleCapability(err error, rpc string) (error, bool) {
 	} else {
 		_ = table{Headers: []string{"RPC", "AVAILABLE"}, Rows: [][]string{{rpc, "false"}}}.render(c.out)
 	}
-	return nil, true
+	return true, nil
 }
 
 type capabilityUnavailable struct {

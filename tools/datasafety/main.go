@@ -54,15 +54,18 @@ func run(args []string, stdout, stderr *os.File) error {
 			return err
 		}
 	}
-	md := form.Markdown()
-	if *outMD != "" {
-		if err := writeFile(*outMD, md); err != nil {
+	// Render Markdown only when it will actually be consumed: written to --out-md,
+	// or printed to stdout as the default human-readable output.
+	switch {
+	case *outMD != "":
+		if err := writeFile(*outMD, form.Markdown()); err != nil {
 			return err
 		}
-	}
-	if *outJSON == "" && *outMD == "" {
-		_, err = stdout.Write(md)
-		return err
+	case *outJSON == "":
+		if _, err := stdout.Write(form.Markdown()); err != nil {
+			return err
+		}
+		return nil
 	}
 	_, _ = fmt.Fprintf(stderr, "datasafety: %d data type(s) collected, shares=%t, encrypted-in-transit=%t\n",
 		len(form.DataTypes), form.SharesData, form.EncryptedInTransit)
