@@ -205,6 +205,36 @@ func TestPurgeContinuesPastPerTenantError(t *testing.T) {
 	}
 }
 
+func TestRunPurgesImmediatelyOnStart(t *testing.T) {
+	now := time.Date(2026, 6, 13, 0, 0, 0, 0, time.UTC)
+	store := NewInMemoryAnalyticsStore()
+	_ = store.Write(context.Background(), []StoredEvent{
+		{ID: "stale", TenantID: "tenant-x", TimeBucket: ageBucket(now, 90)},
+		{ID: "fresh", TenantID: "tenant-x", TimeBucket: ageBucket(now, 1)},
+	})
+	resolver := fakeRetentionResolver{days: map[string]int{"tenant-x": 30}}
+	p := NewPurger(store, resolver, 30, WithClock(fakeClock{now}))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// A long interval guarantees that any purge we observe came from the
+	// immediate startup pass, not a ticker tick.
+	go p.Run(ctx, time.Hour, nil)
+
+	deadline := time.After(2 * time.Second)
+	for {
+		remaining := idsByTenant(t, store)["tenant-x"]
+		if len(remaining) == 1 && remaining[0] == "fresh" {
+			return // immediate purge happened
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("expected immediate startup purge to drop the stale event, got %v", remaining)
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
 func idsByTenant(t *testing.T, s *InMemoryAnalyticsStore) map[string][]string {
 	t.Helper()
 	out := map[string][]string{}

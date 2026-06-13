@@ -142,12 +142,22 @@ func (p *Purger) PurgeOnce(ctx context.Context) (PurgeReport, error) {
 	return report, errors.Join(errs...)
 }
 
-// Run purges on the given interval until the context is cancelled. Errors are
-// returned only on shutdown; transient per-pass errors are surfaced via onError
-// if provided, otherwise ignored so a single failure does not stop retention.
+// Run purges immediately on start and then on the given interval until the
+// context is cancelled. Running once up front avoids leaving already-expired raw
+// events in place for a full interval after a (re)deploy, which matters for a
+// privacy control. Transient per-pass errors are surfaced via onError if
+// provided, otherwise ignored so a single failure does not stop retention.
 func (p *Purger) Run(ctx context.Context, interval time.Duration, onError func(error)) {
 	if interval <= 0 {
 		interval = time.Hour
+	}
+	purge := func() {
+		if _, err := p.PurgeOnce(ctx); err != nil && onError != nil {
+			onError(err)
+		}
+	}
+	if ctx.Err() == nil {
+		purge()
 	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -156,9 +166,7 @@ func (p *Purger) Run(ctx context.Context, interval time.Duration, onError func(e
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if _, err := p.PurgeOnce(ctx); err != nil && onError != nil {
-				onError(err)
-			}
+			purge()
 		}
 	}
 }

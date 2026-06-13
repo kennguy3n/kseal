@@ -57,7 +57,13 @@ column (migration `010_cmk_kms.sql`):
 
 Operators manage the column with `registry.CMKResolver.SetTenantCMKKeyURI`. The
 resolver caches lookups for `registry.DefaultCMKCacheTTL` (30s) to keep the
-config-fetch/signing path off the database.
+config-fetch/signing path off the database. The setter invalidates only the
+local process cache, so in a multi-instance deployment other instances may serve
+the previous CMK configuration for up to one TTL (30s) after a change. CMK
+configuration changes are rare operator actions, so this propagation window is
+acceptable; if a tenant is freshly CMK-enabled, rotate its signing key (below)
+once the window has elapsed so newly sealed material lands under the customer
+key everywhere.
 
 ### Fail-closed semantics
 
