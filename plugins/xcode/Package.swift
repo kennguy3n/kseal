@@ -31,6 +31,7 @@ let package = Package(
         .executable(name: "kseal-harden", targets: ["kseal-harden"]),
         .plugin(name: "KsealHardenPlugin", targets: ["KsealHardenPlugin"]),
         .plugin(name: "KsealRegisterPlugin", targets: ["KsealRegisterPlugin"]),
+        .plugin(name: "KsealMasvsReportPlugin", targets: ["KsealMasvsReportPlugin"]),
     ],
     targets: [
         .target(
@@ -60,6 +61,20 @@ let package = Package(
                 ]
             ),
             dependencies: ["kseal-harden"]
+        ),
+        .plugin(
+            name: "KsealMasvsReportPlugin",
+            capability: .command(
+                intent: .custom(
+                    verb: "kseal-masvs-report",
+                    description: "Generate a MASVS evidence report from the emitted build proof."
+                ),
+                permissions: [
+                    .writeToPackageDirectory(
+                        reason: "Write the generated MASVS evidence report (Markdown + JSON) next to the build proof."
+                    )
+                ]
+            )
         ),
         .testTarget(
             name: "KsealHardenCoreTests",

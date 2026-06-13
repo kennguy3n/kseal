@@ -89,6 +89,11 @@ abstract class BuildProofManifestTask : DefaultTask() {
     @get:PathSensitive(PathSensitivity.RELATIVE)
     abstract val hardenedResourcesDir: DirectoryProperty
 
+    @get:InputDirectory
+    @get:Optional
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val hardenedNativeDir: DirectoryProperty
+
     @get:InputFile
     @get:Optional
     @get:PathSensitive(PathSensitivity.NONE)
@@ -153,10 +158,13 @@ abstract class BuildProofManifestTask : DefaultTask() {
         for (report in transformReports.files.filter { it.isFile }.sortedBy { it.name }) {
             val obj = Json.parse(report.readText()) as? Map<*, *> ?: continue
             val name = obj["transform"] as? String ?: continue
+            // A transform report may declare its own status (e.g. "skipped" when a
+            // step had nothing to act on); default to "applied" for older reports.
+            val status = (obj["status"] as? String) ?: "applied"
             val details = obj.entries
-                .filter { it.key != "transform" }
+                .filter { it.key != "transform" && it.key != "status" }
                 .associate { (it.key as String) to it.value }
-            records.add(TransformRecord(name = name, status = "applied", details = details))
+            records.add(TransformRecord(name = name, status = status, details = details))
         }
         return records.sortedBy { it.name }
     }
@@ -165,6 +173,7 @@ abstract class BuildProofManifestTask : DefaultTask() {
         val out = mutableListOf<ArtifactDigest>()
         strippedClassesDir.orNull?.asFile?.let { out += Hashing.artifactDigests(it, "classes") }
         hardenedResourcesDir.orNull?.asFile?.let { out += Hashing.artifactDigests(it, "res") }
+        hardenedNativeDir.orNull?.asFile?.let { out += Hashing.artifactDigests(it, "native") }
         sealedStringsFile.orNull?.asFile?.takeIf { it.isFile }
             ?.let { out += ArtifactDigest("assets/kseal/strings.sealed", Hashing.sha256(it)) }
         mappingOutFile.orNull?.asFile?.takeIf { it.isFile }

@@ -59,11 +59,22 @@ abstract class KsealHardenExtension @Inject constructor(objects: ObjectFactory) 
     abstract val resourcesDir: DirectoryProperty
     abstract val classesDirs: ConfigurableFileCollection
 
+    /**
+     * Roots containing the app's native libraries (`<abi>/lib*.so`), e.g. the
+     * merged `jniLibs` output. Each `.so` is verified for CFI/MTE/BTI/PAC
+     * hardening and recorded in the build proof. Left to the DSL (like
+     * [classesDirs]/[resourcesDir]) so the plugin never guesses AGP's
+     * version-specific intermediate layout.
+     */
+    abstract val nativeLibsDirs: ConfigurableFileCollection
+
     val polymorphism: PolymorphismOptions = objects.newInstance(PolymorphismOptions::class.java)
     val registry: RegistryOptions = objects.newInstance(RegistryOptions::class.java)
+    val masvsReport: MasvsReportOptions = objects.newInstance(MasvsReportOptions::class.java)
 
     fun polymorphism(action: Action<PolymorphismOptions>) = action.execute(polymorphism)
     fun registry(action: Action<RegistryOptions>) = action.execute(registry)
+    fun masvsReport(action: Action<MasvsReportOptions>) = action.execute(masvsReport)
 }
 
 /** Per-build polymorphism seed controls. */
@@ -103,4 +114,20 @@ abstract class RegistryOptions {
     /** Names of the Gradle property / env var holding the control-plane API key. */
     abstract val apiKeyProperty: Property<String>
     abstract val apiKeyEnv: Property<String>
+}
+
+/**
+ * Optional MASVS evidence-report generation, run after the build proof is
+ * written. Disabled unless [enabled] is set and [executable] points at a built
+ * `masvs-report` binary, so projects opt in explicitly.
+ */
+abstract class MasvsReportOptions {
+    /** Master switch for the report task. Default false. */
+    abstract val enabled: Property<Boolean>
+
+    /** Path to the built `masvs-report` executable. */
+    abstract val executable: Property<String>
+
+    /** MASVS control catalog markdown (defaults to the repo's `docs/masvs-mapping.md`). */
+    abstract val catalogFile: RegularFileProperty
 }
