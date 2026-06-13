@@ -161,6 +161,10 @@ do {
     let session = try client.verifyAttestation(nonce: nonce, buildHash: "sha256:dev-build", instanceId: instanceId, token: token)
     if session.accepted {
         print("[trust] accepted token=\(session.tokenId.prefix(8))…")
+        // setTrustToken takes the trust-token id (a UUID): it becomes RequestProof.trustTokenId,
+        // which the server resolves as a UUID for session lookup. The proof HMAC key is the SDK's
+        // instance key, set at init — not the signed JWT. Mirrors the desktop SDK's
+        // establishTrustSession(), which likewise calls setTrustToken(tokenId).
         sdk.setTrustToken(session.tokenId)
         let requestHash = Data(SHA256.hash(data: Data("POST /v1/orders".utf8)))
         let proof = try sdk.getRequestProof(requestHash: requestHash)

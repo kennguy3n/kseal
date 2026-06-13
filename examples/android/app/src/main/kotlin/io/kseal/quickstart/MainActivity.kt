@@ -77,7 +77,11 @@ class MainActivity : AppCompatActivity() {
             }
             log("[trust] accepted token=${session.tokenId.take(8)}…")
 
-            // 4. Bind a protected request to the trust token.
+            // 4. Bind a protected request to the trust token. setTrustToken takes the
+            // trust-token id (a UUID): it becomes RequestProof.trustTokenId, which the
+            // server resolves as a UUID for session lookup. The proof HMAC key is the
+            // SDK's instance key, set at init — not the signed JWT. Mirrors the desktop
+            // SDK's establishTrustSession(), which likewise calls setTrustToken(tokenId).
             sdk.setTrustToken(session.tokenId)
             val requestHash = sha256("POST /v1/orders")
             val proof = sdk.getRequestProof(requestHash)
