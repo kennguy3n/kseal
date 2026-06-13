@@ -111,6 +111,112 @@ final class MachOInspectorTests: XCTestCase {
         XCTAssertNil(try BuildProofManifest.decode(from: Data(json.utf8)).integrity)
     }
 
+    // MARK: posture
+
+    func testPostureReportsAFullyHardenedExecutable() throws {
+        let builder = MachOBuilder(
+            arch: .arm64, fileType: 2, pie: true, uuid: uuid16(1),
+            extraFlags: 0x100_0000, // MH_NO_HEAP_EXECUTION
+            codeSignature: true,
+            symbolStrings: ["___stack_chk_fail", "___memcpy_chk", "_main"]
+        )
+        builder.addSegment("__TEXT", sections: [.data("__text", "__TEXT", Array("code".utf8))])
+        builder.addSegment("__RESTRICT", sections: [.data("__restrict", "__RESTRICT", [])])
+
+        let posture = try MachOInspector().posture(data: builder.build())
+        XCTAssertEqual(posture.format, "macho")
+        XCTAssertEqual(posture.slices.count, 1)
+        let s = posture.slices[0]
+        XCTAssertEqual(s.arch, "arm64")
+        XCTAssertEqual(s.pie, .enabled)
+        XCTAssertEqual(s.nxStack, .enabled)
+        XCTAssertEqual(s.nxHeap, .enabled)
+        XCTAssertEqual(s.codeSignature, .enabled)
+        XCTAssertEqual(s.restrict, .enabled)
+        XCTAssertEqual(s.stackCanary, .enabled)
+        XCTAssertEqual(s.fortify, .enabled)
+        XCTAssertTrue(s.hardened)
+        XCTAssertTrue(posture.allHardened)
+        XCTAssertTrue(s.notes.isEmpty)
+    }
+
+    func testPostureFlagsAbsentMitigationsAsFindings() throws {
+        // Non-PIE executable, executable stack, no code signature, no symbol table.
+        let builder = MachOBuilder(
+            arch: .x86_64, fileType: 2, pie: false, uuid: nil,
+            extraFlags: 0x2_0000 // MH_ALLOW_STACK_EXECUTION
+        )
+        builder.addSegment("__TEXT", sections: [.data("__text", "__TEXT", Array("x".utf8))])
+
+        let s = try MachOInspector().posture(data: builder.build()).slices[0]
+        XCTAssertEqual(s.pie, .absent)
+        XCTAssertEqual(s.nxStack, .absent)
+        XCTAssertEqual(s.codeSignature, .absent)
+        XCTAssertEqual(s.restrict, .absent)
+        // No symbol table => canary/FORTIFY cannot be asserted (not silently absent).
+        XCTAssertEqual(s.stackCanary, .indeterminate)
+        XCTAssertEqual(s.fortify, .indeterminate)
+        XCTAssertFalse(s.hardened)
+        XCTAssertFalse(s.notes.isEmpty)
+    }
+
+    func testPostureMarksPieAndRestrictUnsupportedForDylibs() throws {
+        let builder = MachOBuilder(
+            arch: .arm64, fileType: 6, pie: false, uuid: uuid16(2),
+            codeSignature: true,
+            symbolStrings: ["___stack_chk_guard", "___strcpy_chk"]
+        )
+        builder.addSegment("__TEXT", sections: [.data("__text", "__TEXT", Array("lib".utf8))])
+
+        let s = try MachOInspector().posture(data: builder.build()).slices[0]
+        XCTAssertEqual(s.fileType, "dylib")
+        XCTAssertEqual(s.pie, .unsupported, "PIE is a main-executable concept")
+        XCTAssertEqual(s.restrict, .unsupported, "__RESTRICT applies to executables")
+        XCTAssertEqual(s.stackCanary, .enabled)
+        XCTAssertEqual(s.fortify, .enabled)
+        XCTAssertEqual(s.codeSignature, .enabled)
+        XCTAssertTrue(s.hardened, "unsupported mitigations are not findings")
+    }
+
+    func testPostureDetectsMissingCanaryWhenSymbolsPresent() throws {
+        // A readable symbol table without the canary import => canary absent (finding).
+        let builder = MachOBuilder(
+            arch: .arm64, fileType: 2, pie: true, uuid: uuid16(3),
+            codeSignature: true,
+            symbolStrings: ["_main", "_printf"]
+        )
+        builder.addSegment("__TEXT", sections: [.data("__text", "__TEXT", Array("z".utf8))])
+
+        let s = try MachOInspector().posture(data: builder.build()).slices[0]
+        XCTAssertEqual(s.stackCanary, .absent)
+        XCTAssertEqual(s.fortify, .absent)
+        XCTAssertFalse(s.hardened)
+    }
+
+    func testPostureSortsFatSlicesAndRoundTripsThroughManifest() throws {
+        let arm = MachOBuilder(arch: .arm64, fileType: 2, pie: true, uuid: uuid16(1), codeSignature: true,
+                               symbolStrings: ["___stack_chk_fail", "___memcpy_chk"])
+        arm.addSegment("__TEXT", sections: [.data("__text", "__TEXT", Array("arm".utf8))])
+        arm.addSegment("__RESTRICT", sections: [.data("__restrict", "__RESTRICT", [])])
+        let x86 = MachOBuilder(arch: .x86_64, fileType: 2, pie: true, uuid: uuid16(2), codeSignature: true,
+                               symbolStrings: ["___stack_chk_fail", "___memcpy_chk"])
+        x86.addSegment("__TEXT", sections: [.data("__text", "__TEXT", Array("x86".utf8))])
+        x86.addSegment("__RESTRICT", sections: [.data("__restrict", "__RESTRICT", [])])
+
+        let posture = try MachOInspector().posture(data: MachOBuilder.fat([arm.build(), x86.build()]))
+        XCTAssertEqual(posture.slices.map { $0.arch }, ["arm64", "x86_64"])
+        XCTAssertTrue(posture.allHardened)
+
+        let manifest = BuildProofManifest(
+            sdkVersion: "0.1.0", buildHash: "h", versionName: "1.0", versionCode: 1,
+            polymorphism: .init(seedDigest: "00"), toolVersions: [:], transforms: [], modules: [],
+            provenance: .init(generatedAt: "t", generator: "g", host: "h"),
+            posture: posture
+        )
+        let decoded = try BuildProofManifest.decode(from: try manifest.jsonData())
+        XCTAssertEqual(decoded.posture, posture)
+    }
+
     // MARK: helpers
 
     private func uuid16(_ fill: UInt8) -> [UInt8] { Array(repeating: fill, count: 16) }
@@ -130,17 +236,32 @@ private final class MachOBuilder {
     private let pie: Bool
     private let uuid: [UInt8]?
     private let cryptId: UInt32?
+    private let extraFlags: UInt32
+    private let codeSignature: Bool
+    private let symbolStrings: [String]?
     private var segments: [(name: String, sections: [Section])] = []
 
     private(set) var commandCount = 0
     private(set) var commandsSize = 0
 
-    init(arch: Arch, fileType: UInt32, pie: Bool, uuid: [UInt8]?, cryptId: UInt32? = nil) {
+    init(
+        arch: Arch,
+        fileType: UInt32,
+        pie: Bool,
+        uuid: [UInt8]?,
+        cryptId: UInt32? = nil,
+        extraFlags: UInt32 = 0,
+        codeSignature: Bool = false,
+        symbolStrings: [String]? = nil
+    ) {
         self.arch = arch
         self.fileType = fileType
         self.pie = pie
         self.uuid = uuid
         self.cryptId = cryptId
+        self.extraFlags = extraFlags
+        self.codeSignature = codeSignature
+        self.symbolStrings = symbolStrings
     }
 
     func addSegment(_ name: String, sections: [Section]) {
@@ -150,14 +271,25 @@ private final class MachOBuilder {
     func build() -> Data {
         var loadCommands: [[UInt8]] = []
 
+        // The symbol string table is a NUL-prefixed, NUL-separated blob.
+        var stringTable: [UInt8] = []
+        if let strings = symbolStrings {
+            stringTable.append(0)
+            for s in strings { stringTable.append(contentsOf: Array(s.utf8)); stringTable.append(0) }
+        }
+
         // Pre-compute sizeofcmds so section file offsets can point past the LC region.
         var ncmds = segments.count
         if uuid != nil { ncmds += 1 }
         if cryptId != nil { ncmds += 1 }
+        if codeSignature { ncmds += 1 }
+        if symbolStrings != nil { ncmds += 1 }
         var sizeofcmds = 0
         for seg in segments { sizeofcmds += 72 + seg.sections.count * 80 }
         if uuid != nil { sizeofcmds += 24 }
         if cryptId != nil { sizeofcmds += 24 }
+        if codeSignature { sizeofcmds += 16 }   // linkedit_data_command
+        if symbolStrings != nil { sizeofcmds += 24 } // symtab_command
 
         let headerSize = 32
         var dataArea: [UInt8] = []
@@ -206,6 +338,28 @@ private final class MachOBuilder {
             append32(&lc, 0) // pad
             loadCommands.append(lc)
         }
+        if codeSignature {
+            var lc = [UInt8]()
+            append32(&lc, 0x1d) // LC_CODE_SIGNATURE
+            append32(&lc, 16)
+            append32(&lc, 0) // dataoff
+            append32(&lc, 0) // datasize
+            loadCommands.append(lc)
+        }
+        if symbolStrings != nil {
+            // String table is laid out right after the section data.
+            let stroff = nextOffset
+            dataArea.append(contentsOf: stringTable)
+            nextOffset += stringTable.count
+            var lc = [UInt8]()
+            append32(&lc, 0x2) // LC_SYMTAB
+            append32(&lc, 24)
+            append32(&lc, 0) // symoff
+            append32(&lc, 0) // nsyms
+            append32(&lc, UInt32(stroff)) // stroff
+            append32(&lc, UInt32(stringTable.count)) // strsize
+            loadCommands.append(lc)
+        }
 
         commandCount = ncmds
         commandsSize = sizeofcmds
@@ -217,7 +371,7 @@ private final class MachOBuilder {
         append32(&out, fileType)
         append32(&out, UInt32(ncmds))
         append32(&out, UInt32(sizeofcmds))
-        append32(&out, pie ? 0x20_0000 : 0) // MH_PIE
+        append32(&out, (pie ? 0x20_0000 : 0) | extraFlags) // MH_PIE | extra mitigation flags
         append32(&out, 0) // reserved
         for lc in loadCommands { out.append(contentsOf: lc) }
         out.append(contentsOf: dataArea)

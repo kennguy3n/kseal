@@ -69,12 +69,37 @@ abstract class KsealHardenExtension @Inject constructor(objects: ObjectFactory) 
     abstract val nativeLibsDirs: ConfigurableFileCollection
 
     val polymorphism: PolymorphismOptions = objects.newInstance(PolymorphismOptions::class.java)
+    val obfuscation: ObfuscationOptions = objects.newInstance(ObfuscationOptions::class.java)
     val registry: RegistryOptions = objects.newInstance(RegistryOptions::class.java)
     val masvsReport: MasvsReportOptions = objects.newInstance(MasvsReportOptions::class.java)
 
     fun polymorphism(action: Action<PolymorphismOptions>) = action.execute(polymorphism)
+    fun obfuscation(action: Action<ObfuscationOptions>) = action.execute(obfuscation)
     fun registry(action: Action<RegistryOptions>) = action.execute(registry)
     fun masvsReport(action: Action<MasvsReportOptions>) = action.execute(masvsReport)
+}
+
+/**
+ * Bytecode control-flow obfuscation controls (string-constant encryption +
+ * opaque predicates). **Off by default** and fully fail-safe: when [enabled] is
+ * false the classes pass through unchanged. The pass is name- and
+ * mapping-preserving, so R8's `mapping.txt` keeps resolving for crash
+ * symbolication. kseal deliberately stops short of VM/dispatcher virtualization
+ * (see `docs/build-hardening-android.md`).
+ */
+abstract class ObfuscationOptions {
+    /** Master switch for the bytecode obfuscation pass. Default false. */
+    abstract val enabled: Property<Boolean>
+
+    /**
+     * Strength: `low` (string encryption only — the safe default), `medium`
+     * (adds opaque predicates to a subset of methods) or `high` (opaque
+     * predicates on every eligible method). Case-insensitive.
+     */
+    abstract val strength: Property<String>
+
+    /** Exact string literals that must never be encrypted (e.g. reflection keys). */
+    abstract val keepStrings: ListProperty<String>
 }
 
 /** Per-build polymorphism seed controls. */

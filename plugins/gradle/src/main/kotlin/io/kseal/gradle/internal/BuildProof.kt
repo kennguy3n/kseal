@@ -52,6 +52,7 @@ internal data class BuildProofManifest(
     fun toMap(buildHash: String, createdAtIso: String, registration: Map<String, Any?>?): Map<String, Any?> {
         val m = linkedMapOf<String, Any?>(
             "schema" to SCHEMA,
+            "manifest_revision" to MANIFEST_REVISION,
             "platform" to platform,
             "build_hash" to buildHash,
             "created_at" to createdAtIso,
@@ -66,10 +67,50 @@ internal data class BuildProofManifest(
             "transforms" to transforms.map { it.toMap() },
             "artifacts" to artifacts.sortedBy { it.path }
                 .map { linkedMapOf<String, Any?>("path" to it.path, "sha256" to it.sha256) },
+            // v2 additive sections (backward-compatible: schema id is unchanged
+            // and the build_hash core is untouched; consumers that don't know
+            // these keys simply ignore them).
+            "hash_coverage" to hashCoverage(buildHash),
+            "reproducibility" to reproducibility(),
         )
         if (registration != null) m["registration"] = registration
         return m
     }
+
+    /**
+     * Explicit, auditable description of exactly what the build hash binds. The
+     * `artifacts_root` is an independent SHA-256 over the sorted
+     * `path\u0000sha256` lines, so a verifier holding the hardened artifacts can
+     * recompute it and confirm the manifest covers precisely that artifact set
+     * (no silent gaps). `by_category` surfaces per-plane file counts.
+     */
+    private fun hashCoverage(buildHash: String): Map<String, Any?> {
+        val sorted = artifacts.sortedBy { it.path }
+        val root = Crypto.sha256Hex(sorted.joinToString("\n") { "${it.path}\u0000${it.sha256}" }.toByteArray())
+        val byCategory = sorted.groupingBy { it.path.substringBefore('/') }.eachCount().toSortedMap()
+        return linkedMapOf(
+            "algorithm" to "sha256",
+            "artifact_count" to sorted.size,
+            "by_category" to LinkedHashMap(byCategory),
+            "artifacts_root" to root,
+            "build_hash" to buildHash,
+            // The build hash binds these manifest regions; documented so a
+            // verifier knows which fields are integrity-protected vs. advisory.
+            "covered_fields" to listOf("schema", "platform", "app", "sdk", "seed_digest", "transforms", "artifacts"),
+            "complete" to sorted.isNotEmpty(),
+        )
+    }
+
+    /**
+     * Reproducibility posture. A build is byte-for-byte reproducible from
+     * identical inputs unless the per-build seed was randomized (observe-only
+     * max-polymorphism mode), in which case it is intentionally non-reproducible.
+     */
+    private fun reproducibility(): Map<String, Any?> = linkedMapOf(
+        "reproducible" to (seedDerivation != "random"),
+        "seed_derivation" to seedDerivation,
+        "build_hash_algorithm" to "sha256",
+    )
 
     private fun appMap() = linkedMapOf<String, Any?>(
         "package_id" to packageId,
@@ -84,6 +125,13 @@ internal data class BuildProofManifest(
 
     companion object {
         const val SCHEMA = "kseal.build-proof/v1"
+
+        /**
+         * Additive content revision within the v1 schema. Bumped to 2 when the
+         * `hash_coverage`/`reproducibility` sections were added; the `schema`
+         * identifier is unchanged so existing consumers keep validating.
+         */
+        const val MANIFEST_REVISION = 2
     }
 }
 

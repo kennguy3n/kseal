@@ -40,6 +40,208 @@ public struct MachOInspector {
         return try inspect(data: data)
     }
 
+    // MARK: - Exploit-mitigation posture
+
+    /// Per-slice exploit-mitigation posture parsed from the real Mach-O headers,
+    /// load commands and symbol string table — PIE, non-exec stack/heap, code
+    /// signature, FairPlay encryption, dyld-insertion restriction, stack canary
+    /// and FORTIFY. Mirrors the Android ELF posture so both planes surface a
+    /// consistent, per-binary report. Verification is real (parsed), never
+    /// asserted; what cannot be determined (e.g. a fully stripped symbol table)
+    /// is reported `indeterminate` rather than silently "absent".
+    public func posture(binaryAt url: URL) throws -> Posture {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            throw MachOInspectorError.binaryMissing(url.path)
+        }
+        return try posture(data: try Data(contentsOf: url))
+    }
+
+    public func posture(data: Data) throws -> Posture {
+        let bytes = [UInt8](data)
+        guard bytes.count >= 4 else { throw MachOInspectorError.notMachO }
+        let leading = readBE32(bytes, 0)
+        switch leading {
+        case Magic.fat, Magic.fat64:
+            return try postureFat(bytes, is64: leading == Magic.fat64)
+        default:
+            return Posture(slices: [try postureThin(bytes, fileOffset: 0, fileSize: bytes.count)])
+        }
+    }
+
+    private func postureFat(_ bytes: [UInt8], is64: Bool) throws -> Posture {
+        let count = Int(readBE32(bytes, 4))
+        var slices: [Posture.Slice] = []
+        var cursor = 8
+        let archSize = is64 ? 32 : 20
+        for _ in 0..<count {
+            guard cursor + archSize <= bytes.count else { throw MachOInspectorError.truncated }
+            let offset = is64 ? Int(readBE64(bytes, cursor + 8)) : Int(readBE32(bytes, cursor + 8))
+            let size = is64 ? Int(readBE64(bytes, cursor + 16)) : Int(readBE32(bytes, cursor + 12))
+            guard offset >= 0, size >= 0, offset + size <= bytes.count else { throw MachOInspectorError.truncated }
+            slices.append(try postureThin(bytes, fileOffset: offset, fileSize: size))
+            cursor += archSize
+        }
+        return Posture(slices: slices.sorted { $0.arch < $1.arch })
+    }
+
+    private func postureThin(_ bytes: [UInt8], fileOffset base: Int, fileSize: Int) throws -> Posture.Slice {
+        guard base + 4 <= bytes.count else { throw MachOInspectorError.truncated }
+        let raw = readBE32(bytes, base)
+        let (is64, little): (Bool, Bool)
+        switch raw {
+        case Magic.thin32BE: (is64, little) = (false, false)
+        case Magic.thin32LE: (is64, little) = (false, true)
+        case Magic.thin64BE: (is64, little) = (true, false)
+        case Magic.thin64LE: (is64, little) = (true, true)
+        default: throw MachOInspectorError.notMachO
+        }
+        let headerSize = is64 ? 32 : 28
+        guard base + headerSize <= bytes.count else { throw MachOInspectorError.truncated }
+        func u32(_ at: Int) -> UInt32 { little ? readLE32(bytes, at) : readBE32(bytes, at) }
+
+        let cpuType = Int32(bitPattern: u32(base + 4))
+        let fileType = u32(base + 12)
+        let ncmds = Int(u32(base + 16))
+        let sizeOfCmds = Int(u32(base + 20))
+        let flags = u32(base + 24)
+
+        let lcStart = base + headerSize
+        let lcEnd = lcStart + sizeOfCmds
+        guard lcEnd <= bytes.count, lcEnd <= base + fileSize else { throw MachOInspectorError.truncated }
+
+        var hasCodeSignature = false
+        var encrypted = false
+        var hasRestrict = false
+        var symtab: (stroff: Int, strsize: Int)?
+
+        var cursor = lcStart
+        for _ in 0..<ncmds {
+            guard cursor + 8 <= lcEnd else { throw MachOInspectorError.truncated }
+            let cmd = u32(cursor)
+            let cmdSize = Int(u32(cursor + 4))
+            guard cmdSize >= 8, cursor + cmdSize <= lcEnd else { throw MachOInspectorError.truncated }
+            switch cmd {
+            case LC.segment, LC.segment64:
+                if segmentHasRestrictSection(bytes, cmdStart: cursor, is64: cmd == LC.segment64, u32: u32) {
+                    hasRestrict = true
+                }
+            case LC.codeSignature:
+                hasCodeSignature = true
+            case LC.encryptionInfo, LC.encryptionInfo64:
+                if cursor + 20 <= lcEnd, u32(cursor + 16) != 0 { encrypted = true }
+            case LC.symtab:
+                if cursor + 24 <= lcEnd {
+                    symtab = (stroff: Int(u32(cursor + 16)), strsize: Int(u32(cursor + 20)))
+                }
+            default:
+                break
+            }
+            cursor += cmdSize
+        }
+
+        // Search the real symbol string table for the canary/FORTIFY imports.
+        var canaryFound = false
+        var fortifyFound = false
+        var symbolsReadable = false
+        if let st = symtab, st.strsize > 0 {
+            let start = base + st.stroff
+            let end = start + st.strsize
+            if start >= base, end <= bytes.count, end <= base + fileSize {
+                symbolsReadable = true
+                let table = Array(bytes[start..<end])
+                canaryFound = Self.stackCanarySymbols.contains { containsAscii(table, $0) }
+                fortifyFound = Self.fortifySymbols.contains { containsAscii(table, $0) }
+            }
+        }
+
+        let isExecutable = fileType == FileType.execute
+        var notes: [String] = []
+
+        let pie: PostureStatus
+        if isExecutable {
+            pie = (flags & MH.pie) != 0 ? .enabled : .absent
+            if pie == .absent { notes.append("main executable is not position-independent (MH_PIE clear)") }
+        } else {
+            pie = .unsupported // dylibs/bundles are inherently position-independent
+        }
+
+        let nxStack: PostureStatus = (flags & MH.allowStackExecution) != 0 ? .absent : .enabled
+        if nxStack == .absent { notes.append("executable stack permitted (MH_ALLOW_STACK_EXECUTION set)") }
+
+        let nxHeap: PostureStatus = (flags & MH.noHeapExecution) != 0 ? .enabled : .indeterminate
+
+        let codeSignature: PostureStatus = hasCodeSignature ? .enabled : .absent
+        if codeSignature == .absent { notes.append("no LC_CODE_SIGNATURE load command") }
+
+        let restrict: PostureStatus
+        if hasRestrict {
+            restrict = .enabled
+        } else if isExecutable {
+            restrict = .absent
+        } else {
+            restrict = .unsupported
+        }
+
+        let stackCanary: PostureStatus
+        let fortify: PostureStatus
+        if symbolsReadable {
+            stackCanary = canaryFound ? .enabled : .absent
+            fortify = fortifyFound ? .enabled : .absent
+        } else {
+            stackCanary = .indeterminate
+            fortify = .indeterminate
+            notes.append("symbol string table unavailable; canary/FORTIFY indeterminate")
+        }
+
+        return Posture.Slice(
+            arch: archName(cpuType),
+            fileType: fileTypeName(fileType),
+            pie: pie,
+            nxStack: nxStack,
+            nxHeap: nxHeap,
+            codeSignature: codeSignature,
+            encrypted: encrypted,
+            restrict: restrict,
+            stackCanary: stackCanary,
+            fortify: fortify,
+            notes: notes
+        )
+    }
+
+    private func segmentHasRestrictSection(
+        _ bytes: [UInt8], cmdStart: Int, is64: Bool, u32: (Int) -> UInt32
+    ) -> Bool {
+        let segName = readFixedString(bytes, cmdStart + 8, 16)
+        guard segName == "__RESTRICT" else { return false }
+        let nsectsOffset = is64 ? 64 : 48
+        let segHeaderSize = is64 ? 72 : 56
+        let sectSize = is64 ? 80 : 68
+        guard cmdStart + nsectsOffset + 4 <= bytes.count else { return false }
+        let nsects = Int(u32(cmdStart + nsectsOffset))
+        var sectCursor = cmdStart + segHeaderSize
+        for _ in 0..<nsects {
+            guard sectCursor + sectSize <= bytes.count else { return false }
+            if readFixedString(bytes, sectCursor, 16) == "__restrict" { return true }
+            sectCursor += sectSize
+        }
+        return false
+    }
+
+    /// True if the C-string [needle] (ASCII) occurs in the symbol string table blob.
+    private func containsAscii(_ haystack: [UInt8], _ needle: String) -> Bool {
+        let n = Array(needle.utf8)
+        if n.isEmpty || n.count > haystack.count { return false }
+        var i = 0
+        let last = haystack.count - n.count
+        while i <= last {
+            var j = 0
+            while j < n.count, haystack[i + j] == n[j] { j += 1 }
+            if j == n.count { return true }
+            i += 1
+        }
+        return false
+    }
+
     public func inspect(data: Data) throws -> BuildProofManifest.Integrity {
         let bytes = [UInt8](data)
         guard bytes.count >= 4 else { throw MachOInspectorError.notMachO }
@@ -253,19 +455,107 @@ public struct MachOInspector {
     }
     private enum LC {
         static let segment: UInt32 = 0x1
+        static let symtab: UInt32 = 0x2
         static let segment64: UInt32 = 0x19
         static let uuid: UInt32 = 0x1b
+        static let codeSignature: UInt32 = 0x1d
         static let encryptionInfo: UInt32 = 0x21
         static let encryptionInfo64: UInt32 = 0x2c
     }
     private enum MH {
+        static let allowStackExecution: UInt32 = 0x2_0000
         static let pie: UInt32 = 0x20_0000
+        static let noHeapExecution: UInt32 = 0x100_0000
     }
+    private enum FileType {
+        static let execute: UInt32 = 2
+    }
+
+    /// Undefined imports the compiler emits when stack-protector is on.
+    private static let stackCanarySymbols = ["___stack_chk_fail", "___stack_chk_guard"]
+    /// A representative set of `_FORTIFY_SOURCE` checked-builtin imports.
+    private static let fortifySymbols = [
+        "___memcpy_chk", "___memmove_chk", "___memset_chk",
+        "___strcpy_chk", "___strncpy_chk", "___strcat_chk", "___strncat_chk",
+        "___sprintf_chk", "___snprintf_chk", "___vsnprintf_chk",
+    ]
     private enum CPU {
         static let abi64: Int32 = 0x0100_0000
         static let x86: Int32 = 7
         static let x86_64: Int32 = 7 | 0x0100_0000
         static let arm: Int32 = 12
         static let arm64: Int32 = 12 | 0x0100_0000
+    }
+
+    /// Outcome of a single mitigation check.
+    public enum PostureStatus: String, Codable, Equatable {
+        /// The mitigation is present.
+        case enabled
+        /// The mitigation is applicable to this binary but not present (a finding).
+        case absent
+        /// The mitigation does not apply to this binary kind (e.g. PIE on a dylib).
+        case unsupported
+        /// The mitigation could not be determined from the available data.
+        case indeterminate
+    }
+
+    /// A clear, per-binary exploit-mitigation posture report.
+    public struct Posture: Codable, Equatable {
+        public var format: String
+        public var slices: [Slice]
+
+        public init(format: String = "macho", slices: [Slice]) {
+            self.format = format
+            self.slices = slices
+        }
+
+        /// True only when every slice has a complete, finding-free posture.
+        public var allHardened: Bool { !slices.isEmpty && slices.allSatisfy { $0.hardened } }
+
+        public struct Slice: Codable, Equatable {
+            public var arch: String
+            public var fileType: String
+            public var pie: PostureStatus
+            public var nxStack: PostureStatus
+            public var nxHeap: PostureStatus
+            public var codeSignature: PostureStatus
+            public var encrypted: Bool
+            public var restrict: PostureStatus
+            public var stackCanary: PostureStatus
+            public var fortify: PostureStatus
+            public var notes: [String]
+
+            public init(
+                arch: String,
+                fileType: String,
+                pie: PostureStatus,
+                nxStack: PostureStatus,
+                nxHeap: PostureStatus,
+                codeSignature: PostureStatus,
+                encrypted: Bool,
+                restrict: PostureStatus,
+                stackCanary: PostureStatus,
+                fortify: PostureStatus,
+                notes: [String]
+            ) {
+                self.arch = arch
+                self.fileType = fileType
+                self.pie = pie
+                self.nxStack = nxStack
+                self.nxHeap = nxHeap
+                self.codeSignature = codeSignature
+                self.encrypted = encrypted
+                self.restrict = restrict
+                self.stackCanary = stackCanary
+                self.fortify = fortify
+                self.notes = notes
+            }
+
+            /// No mitigation that *applies* to this slice is absent. `unsupported`
+            /// and `indeterminate` are not counted as findings (we never assert).
+            public var hardened: Bool {
+                ![pie, nxStack, codeSignature, restrict, stackCanary, fortify].contains(.absent)
+            }
+        }
     }
 }

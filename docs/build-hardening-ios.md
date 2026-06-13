@@ -20,6 +20,7 @@ it is bound by the strict public-APIs-only constraint in
 - [Per-build polymorphism seed](#per-build-polymorphism-seed)
 - [String hardening](#string-hardening)
 - [Symbol & metadata stripping](#symbol--metadata-stripping)
+- [Native posture verification](#native-posture-verification)
 - [Registering the build proof](#registering-the-build-proof)
 - [Using the plugin](#using-the-plugin)
 - [XCFramework pipeline](#xcframework-pipeline)
@@ -103,6 +104,44 @@ of platform. It is serialized (sorted keys, slashes unescaped) into the
 client speaks Connect **JSON**. proto3-JSON rules apply: field names are
 camelCase and the int64 `versionCode` is encoded as a **string** on the wire.
 
+### Build-proof v2 (additive, backward-compatible)
+
+The manifest carries an optional `manifestRevision` (currently `2`) **within** the
+unchanged `schemaVersion: "1.0"`. v2 only *adds* fields; existing v1 readers ignore
+them, and a v1 manifest (no `manifestRevision`) still decodes — see
+`testRevision1ManifestDecodesWithoutV2Fields`. The Android plane emits the
+conceptually identical sections in its snake_case style (`manifest_revision`,
+`hash_coverage`, `reproducibility`); both keep the same `schemaVersion`/`schema`.
+
+```jsonc
+{
+  // … all v1 fields …
+  "manifestRevision": 2,
+  "reproducibility": {
+    "reproducible": false,           // false unless the seed was pinned (random => non-reproducible)
+    "seedDerivation": "random",      // "explicit" | "env" | "random"
+    "buildHashAlgorithm": "sha256"
+  },
+  "hashCoverage": {                  // baked by `integrity` from the parsed Mach-O
+    "algorithm": "sha256",
+    "sliceCount": 2,
+    "sectionCount": 14,
+    "bytesCovered": 1048576,
+    "artifactsRoot": "<sha256 hex>", // independently recomputable over arch/segment/section hashes
+    "complete": true
+  },
+  "posture": { /* see “Native posture verification” */ }
+}
+```
+
+`reproducibility` is populated by `generate` from how the seed was sourced
+(`--build-seed` ⇒ `explicit`, `KSEAL_BUILD_SEED` ⇒ `env`, otherwise `random`). The
+default random-seed build is **honestly marked non-reproducible**. `hashCoverage`
+and `posture` are baked post-link by the `integrity` subcommand. `hashCoverage.artifactsRoot`
+is a SHA-256 over the sorted `arch␟segment␟section␟hash` lines (with a synthetic
+`arch␟__loadcommands␟␟<loadCommandsHash>` line per slice), so a verifier holding the
+linked binary can recompute it and confirm coverage with no silent gaps.
+
 ### `buildHash` derivation
 
 `buildHash = SHA256( "kseal-build-hash/v1" ‖ platform ‖ sdkVersion ‖ target ‖
@@ -163,6 +202,38 @@ linker dead-strip flags to *Other Linker Flags*:
 ```
 
 These are documented, accepted release optimizations — not private-API tricks.
+
+## Native posture verification
+
+`kseal-harden integrity --binary <macho> --manifest <in> [--out-manifest <out>]`
+parses the **linked Mach-O** (thin or universal/fat) and bakes two things into the
+manifest, idempotently and **without recomputing `buildHash`**:
+
+1. **Section-hash integrity** (`integrity`) — per-slice SHA-256 of every section and
+   of the load-command region, so the runtime can recompute and detect tampering.
+2. **Exploit-mitigation posture** (`posture`) — real parsing (header flags, load
+   commands, the `LC_SYMTAB` string table), never assertion. Each slice reports a
+   status of `enabled` / `absent` / `unsupported` / `indeterminate` for:
+
+   | Field | Source | Notes |
+   |---|---|---|
+   | `pie` | `MH_PIE` header flag | `unsupported` for dylibs/bundles (a main-executable concept). |
+   | `nxStack` | `MH_ALLOW_STACK_EXECUTION` absent | Non-exec stack. |
+   | `nxHeap` | `MH_NO_HEAP_EXECUTION` present | |
+   | `codeSignature` | `LC_CODE_SIGNATURE` present | |
+   | `restrict` | `__RESTRICT,__restrict` section | `unsupported` for non-executables. |
+   | `stackCanary` | `___stack_chk_*` in the symbol table | `indeterminate` when no symbol table is readable (never silently `absent`). |
+   | `fortify` | `___*_chk` fortified-libc imports | same indeterminacy rule. |
+   | `encrypted` | `LC_ENCRYPTION_INFO[_64]` cryptid≠0 | FairPlay. |
+
+   A slice is `hardened` when none of the applicable mitigations is `absent`;
+   `unsupported`/`indeterminate` are not treated as findings. `posture.allHardened`
+   summarizes across slices. The pass records `macho-section-integrity` and
+   `macho-binary-posture` transforms/modules and lifts `manifestRevision` to the
+   current value.
+
+On a non-Apple host there is no real Mach-O to inspect; the parser is fully covered
+by synthetic-binary unit tests (`MachOInspectorTests`).
 
 ## Registering the build proof
 
@@ -252,13 +323,19 @@ Consistent with the project's honest positioning
 
 - **Unit tests** (`KsealHardenCoreTests`): SHA-256 NIST vectors, seed
   determinism/keystream separation, string round-trip + plaintext absence +
-  polymorphism, manifest schema/serialization, registry **wire format** against a
+  polymorphism, manifest schema/serialization, **build-proof v2** (revision marker,
+  reproducibility-from-seed-derivation, independently-verifiable `hashCoverage`
+  root, and v1-without-v2-fields decode), **Mach-O posture parsing** over synthetic
+  thin and fat binaries (PIE/NX/canary/FORTIFY/code-signature/restrict, plus the
+  `indeterminate`/`unsupported` rules), registry **wire format** against a
   mock transport (path, bearer auth, int64-as-string, manifest-as-string),
   offline fallback, and a **real `strip`** run on a freshly compiled binary.
 - **Integration test** (`KsealHardenIntegrationTests`): builds
   `Fixtures/HardenedApp` with the plugin applied and asserts the manifest fields,
   the seed digest, and that the plaintext is absent from both the generated
-  source and the compiled binary.
+  source and the compiled binary; the `integrity` command end-to-end bakes
+  section-hash integrity **and** posture + `hashCoverage` into a manifest from a
+  real synthetic Mach-O, idempotently and without touching `buildHash`.
 
 Apple-toolchain-dependent paths (`xcodebuild`, `otool`/`lipo`, the nested
 fixture build when no Swift toolchain is reachable) **skip cleanly** with a clear

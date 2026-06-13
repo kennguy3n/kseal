@@ -14,14 +14,16 @@ values. Keep both platforms in lock-step with this file.
 
 ## Pipeline overview
 
-The plugin registers five tasks (group `kseal`). The aggregate task `ksealHarden`
-runs the whole pipeline:
+The plugin registers the tasks below (group `kseal`). The aggregate task
+`ksealHarden` runs the whole pipeline:
 
 | Task | Cacheable | Purpose |
 |------|-----------|---------|
 | `ksealGeneratePolymorphismSeed` | no¹ | Derives the per-build 256-bit polymorphism seed. |
-| `ksealHardenResources` | yes | R8-aware string/resource obfuscation (seals string values). |
 | `ksealStripDebugMetadata` | yes | ASM-based removal of source/line/local-variable debug info. |
+| `ksealObfuscateBytecode` | yes | Per-build, seed-driven DEX/JVM-bytecode obfuscation (string-constant encryption + opaque predicates). Default **off**. |
+| `ksealHardenResources` | yes | R8-aware string/resource obfuscation (seals string values). |
+| `ksealHardenNativeLibraries` | yes | Parses bundled `.so` files and records a real per-binary native posture. |
 | `ksealBuildProofManifest` | yes | Assembles the manifest and computes `build_hash`. |
 | `ksealRegisterBuild` | no² | Registers the proof via `CreateBuild`, or stages it offline. |
 
@@ -74,10 +76,57 @@ reproducibility-friendly). Top-level shape:
 - `polymorphism` — per-build seed-driven randomization (`details.algorithm`, `details.derivation`).
 - `string-resource-seal` — AES-256-GCM sealing of string-resource values (`details.sealed_count`, `details.kept_count`, `details.tokens`).
 - `strip-debug-metadata` — debug-info removal (`details.classes_stripped`, `details.files_copied`).
+- `bytecode-control-flow-obfuscation` — per-build IR/bytecode transform (`details.strength`, `details.classes_processed`, `details.unique_strings_encrypted`, `details.string_loads_rewritten`, `details.methods_with_opaque_predicate`, `details.opaque_predicates_inserted`, `details.decoder_class`). `status` is `"disabled"` when the feature is off (the default), so default builds remain byte-identical.
+- `native-library-harden` — per-binary native posture (`details.library_count`, `details.summary`). `status` is `"skipped"` when the app bundles no `.so` files.
 
 iOS (WS-C) reuses `polymorphism` and `strip-debug-metadata` and adds its own
-platform-specific names; consumers must treat the `transforms` list as open and
-key off `name`.
+platform-specific names (e.g. `string-obfuscation`, `symbol-strip`,
+`macho-section-integrity`, `macho-binary-posture`); consumers must treat the
+`transforms` list as open and key off `name`.
+
+### Bytecode obfuscation pass (per-build polymorphism)
+
+`ksealObfuscateBytecode` runs **after** debug-stripping and **before** R8, on the
+JVM/DEX bytecode (via ASM). It applies two seed-driven transforms while preserving
+every class/method/field name and signature so the R8 mapping — and therefore crash
+symbolication — survives unchanged:
+
+- **String-constant encryption.** Each `String` literal load is replaced by a call
+  into a generated decoder class. Plaintext is XOR-encrypted with a keystream
+  derived deterministically from the per-build seed (`SHA-256(seed ‖ index ‖ ctr)`),
+  so the cleartext never appears in the constant pool, and two builds with different
+  seeds produce different ciphertext (the "decaying bypass" model).
+- **Opaque predicates.** Always-true relations (`c == c`, `c < c + 1`, `c >= 0`)
+  guard never-taken blocks, frustrating static control-flow recovery. The bytecode
+  stays verifiable under the JVM verifier.
+
+Strength is configurable and **defaults to off**; when enabled it defaults to `low`:
+
+| Strength | String encryption | Opaque predicates |
+|----------|-------------------|-------------------|
+| `off` (default) | — | — |
+| `low` | yes (len ≥ 4) | — |
+| `medium` | yes (len ≥ 3) | ~35 % of methods |
+| `high` | yes (len ≥ 2) | every eligible method |
+
+**Why we stop short of VM/dispatcher virtualization.** kseal deliberately avoids
+heavyweight bytecode-VM obfuscation (the DexGuard/iXGuard "virtualization" axis): it
+inflates size and startup well past our budgets (SDK startup < 40 ms, footprint
+< 3–5 MB), is brittle across ART/Dalvik and OS versions, and breaks reliable
+symbolication — all at odds with serving 5000 SME tenants. We instead lean on
+**per-build polymorphism + native verification + mapping-aware integration**, where
+a bypass crafted for one build does not transfer to the next. See
+[`ARCHITECTURE.md#what-to-avoid`](../ARCHITECTURE.md).
+
+### Native posture (`ksealHardenNativeLibraries`)
+
+Bundled `.so` files are parsed (real ELF parsing — program headers, `.dynamic`,
+symbol tables) to produce a **per-binary posture** rather than an assertion. Each
+binary reports a status of `enabled` / `absent` / `unsupported` / `indeterminate`
+for: **RELRO** (full/partial), **stack canary**, **FORTIFY**, **NX** (`GNU_STACK`),
+**PIE**, and the CFI/PAC/BTI/MTE control-flow signals, across `arm64`, `arm`,
+`x86_64` and `x86`. The report is recorded under the `native-library-harden`
+transform `details.summary` and surfaced per-architecture.
 
 ### The build hash
 
@@ -143,6 +192,36 @@ hardened artifacts.
 }
 ```
 
+## Build-proof v2 (additive, backward-compatible)
+
+The manifest carries a `manifest_revision` (currently `2`) **within** the unchanged
+`kseal.build-proof/v1` schema. v2 only *adds* sections; the `schema` id, the
+`build_hash` core inputs, and every v1 field are untouched, so existing consumers
+(and v1-only verifiers) keep working — they simply ignore the new keys.
+
+| Field | Type | In `build_hash`? | Description |
+|-------|------|------------------|-------------|
+| `manifest_revision` | number | **no** | Additive content revision (`2`). Volatile; not part of the hash core. |
+| `hash_coverage` | object | no | Auditable description of what the hash binds. |
+| `hash_coverage.algorithm` | string | no | `"sha256"`. |
+| `hash_coverage.artifact_count` | number | no | Number of hashed artifacts. |
+| `hash_coverage.by_category` | object | no | Per-plane file counts (keyed by the path's first segment). |
+| `hash_coverage.artifacts_root` | string (hex) | no | **Independently verifiable** SHA-256 over the sorted `path\u0000sha256` lines. A holder of the hardened artifacts can recompute this to confirm the manifest covers exactly that set — no silent gaps. |
+| `hash_coverage.covered_fields` | array<string> | no | The manifest regions the `build_hash` integrity-protects. |
+| `hash_coverage.complete` | bool | no | True when ≥1 artifact is covered. |
+| `reproducibility` | object | no | Reproducibility posture. |
+| `reproducibility.reproducible` | bool | no | True unless the seed was randomized (max-polymorphism observe mode is intentionally non-reproducible). |
+| `reproducibility.seed_derivation` | string | no | `explicit` \| `random` \| `content` \| `master-key`. |
+| `reproducibility.build_hash_algorithm` | string | no | `"sha256"`. |
+
+**Platform alignment.** iOS emits the conceptually identical v2 sections
+(`manifestRevision`, `hashCoverage`, `reproducibility`, plus a `posture` block) using
+its existing camelCase Codable key style; the iOS `hashCoverage.artifactsRoot` is the
+same independent-root idea computed over the parsed Mach-O slices/sections. Both
+platforms keep `schemaVersion`/`schema` = `1.0`/`kseal.build-proof/v1` and treat the
+v2 keys as optional, so a manifest written by either plugin still decodes on the
+other's revision-1 reader.
+
 ## Registration (`RegistryService.CreateBuild`)
 
 `ksealRegisterBuild` POSTs a Connect-protocol JSON request to
@@ -186,6 +265,11 @@ ksealHarden {
     injectSdk.set(true)                       // link io.kseal:kseal-android:<version>
     keepStringKeys.add("app_name")            // resource names whose values stay in clear
     keepRuleFiles.from("proguard-rules.pro")  // reflection/serialization keep-rules are honoured
+    obfuscation {
+        enabled.set(false)                    // default off => byte-identical default builds
+        strength.set("low")                   // low | medium | high (when enabled)
+        keepStrings.add("com.example.Reflected") // literals never encrypted
+    }
     polymorphism {
         randomize.set(false)                  // true => fresh seed every build (non-reproducible)
         // explicitSeedHex / masterKeyProperty / masterKeyEnv also supported
@@ -209,7 +293,11 @@ automatically; the values above are otherwise set explicitly.
   resource names/ids), fully-qualified class-name values are left in clear, and
   keep-rule-matched names are preserved — reflection/serialization keep working.
 - **Crash symbolication intact:** the R8 mapping is preserved verbatim; the kseal
-  addendum is comment-only.
+  addendum is comment-only. The bytecode obfuscation pass is name- and
+  signature-preserving (it transforms method bodies only), so `mapping.txt` keeps
+  resolving and `retrace` works unchanged.
+- **Default builds are byte-identical:** bytecode obfuscation is off by default and
+  resolves to a pass-through copy, so enabling kseal does not perturb default output.
 - **Reproducible:** deterministic AES-GCM nonces (HKDF-derived per (key, context),
   one plaintext per pair) and a `created_at`-independent `build_hash` make
   identical inputs produce identical outputs.

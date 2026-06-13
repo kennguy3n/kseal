@@ -81,4 +81,19 @@ final class HardenEngineTests: XCTestCase {
         let json = try output.manifest.jsonString()
         XCTAssertNoThrow(try JSONSerialization.jsonObject(with: Data(json.utf8)))
     }
+
+    func testReproducibilityReflectsSeedDerivation() throws {
+        // Default (random seed) is intentionally non-reproducible on iOS.
+        let randomOut = try HardenEngine(clock: fixedClock).run(request(), seed: seed)
+        XCTAssertEqual(randomOut.manifest.reproducibility?.reproducible, false)
+        XCTAssertEqual(randomOut.manifest.reproducibility?.seedDerivation, "random")
+        XCTAssertEqual(randomOut.manifest.manifestRevision, BuildProofManifest.currentManifestRevision)
+
+        // A pinned seed makes the build reproducible.
+        var req = request()
+        req.seedDerivation = "explicit"
+        let pinnedOut = try HardenEngine(clock: fixedClock).run(req, seed: seed)
+        XCTAssertEqual(pinnedOut.manifest.reproducibility?.reproducible, true)
+        XCTAssertEqual(pinnedOut.manifest.reproducibility?.seedDerivation, "explicit")
+    }
 }

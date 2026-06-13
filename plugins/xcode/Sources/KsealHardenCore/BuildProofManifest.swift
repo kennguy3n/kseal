@@ -14,6 +14,10 @@ import Foundation
 public struct BuildProofManifest: Codable, Equatable {
     public static let currentSchemaVersion = "1.0"
 
+    /// Additive content revision within `currentSchemaVersion`. Bumped to 2 when
+    /// reproducibility / hash-coverage / posture sections were added.
+    public static let currentManifestRevision = 2
+
     /// Manifest schema version (e.g. "1.0").
     public var schemaVersion: String
     /// Build plane platform: "ios" or "android".
@@ -42,6 +46,21 @@ public struct BuildProofManifest: Codable, Equatable {
     /// the runtime uses to detect post-build tampering. Additive: absent in
     /// builds produced before integrity baking (and on the Android plane).
     public var integrity: Integrity?
+
+    // --- Manifest revision 2 additive fields (same `schemaVersion`) ----------
+    // All optional so manifests written before revision 2 still decode cleanly.
+
+    /// Additive content revision within the current `schemaVersion`. Bumped to 2
+    /// when reproducibility / hash-coverage / posture were added; the schema
+    /// version is unchanged so existing consumers keep validating.
+    public var manifestRevision: Int?
+    /// Reproducibility posture (whether the build is deterministically rebuildable).
+    public var reproducibility: Reproducibility?
+    /// Explicit description of what the build hash / integrity evidence covers.
+    public var hashCoverage: HashCoverage?
+    /// Per-binary exploit-mitigation posture (PIE/NX/canary/FORTIFY/…), parsed
+    /// from the linked Mach-O. Populated post-link alongside `integrity`.
+    public var posture: MachOInspector.Posture?
 
     public struct Polymorphism: Codable, Equatable {
         /// SHA-256 of the per-build seed, hex encoded.
@@ -147,6 +166,80 @@ public struct BuildProofManifest: Codable, Equatable {
         }
     }
 
+    /// Whether the build is byte-for-byte reproducible from identical inputs.
+    public struct Reproducibility: Codable, Equatable {
+        /// True when the build can be deterministically reproduced. On iOS this
+        /// requires a pinned seed (`KSEAL_BUILD_SEED`/`--build-seed`); a default
+        /// random seed makes the build intentionally non-reproducible.
+        public var reproducible: Bool
+        /// How the per-build seed was obtained: "explicit", "env" or "random".
+        public var seedDerivation: String
+        /// Algorithm used to compute the build hash.
+        public var buildHashAlgorithm: String
+
+        public init(reproducible: Bool, seedDerivation: String, buildHashAlgorithm: String = "sha256") {
+            self.reproducible = reproducible
+            self.seedDerivation = seedDerivation
+            self.buildHashAlgorithm = buildHashAlgorithm
+        }
+    }
+
+    /// Auditable description of exactly what the integrity evidence covers, with
+    /// an independently recomputable root over the section hashes.
+    public struct HashCoverage: Codable, Equatable {
+        public var algorithm: String
+        public var sliceCount: Int
+        public var sectionCount: Int
+        /// Total file bytes covered by section hashes (zero-fill sections excluded).
+        public var bytesCovered: Int
+        /// SHA-256 over the sorted `arch\u{1f}segment\u{1f}section\u{1f}hash` lines
+        /// (plus each slice's load-command hash), so a verifier can confirm the
+        /// manifest covers precisely this binary without trusting the build host.
+        public var artifactsRoot: String
+        public var complete: Bool
+
+        public init(
+            algorithm: String = "sha256",
+            sliceCount: Int,
+            sectionCount: Int,
+            bytesCovered: Int,
+            artifactsRoot: String,
+            complete: Bool
+        ) {
+            self.algorithm = algorithm
+            self.sliceCount = sliceCount
+            self.sectionCount = sectionCount
+            self.bytesCovered = bytesCovered
+            self.artifactsRoot = artifactsRoot
+            self.complete = complete
+        }
+
+        /// Derives the coverage summary from parsed Mach-O integrity evidence.
+        public static func from(integrity: Integrity) -> HashCoverage {
+            var lines: [String] = []
+            var sectionCount = 0
+            var bytesCovered = 0
+            for slice in integrity.slices.sorted(by: { $0.arch < $1.arch }) {
+                lines.append("\(slice.arch)\u{1f}__loadcommands\u{1f}\u{1f}\(slice.loadCommandsHash)")
+                for section in slice.sections.sorted(by: { ($0.segment, $0.section) < ($1.segment, $1.section) }) {
+                    sectionCount += 1
+                    if !section.hash.isEmpty {
+                        bytesCovered += section.size
+                        lines.append("\(slice.arch)\u{1f}\(section.segment)\u{1f}\(section.section)\u{1f}\(section.hash)")
+                    }
+                }
+            }
+            let root = SHA256.hexDigest(Array(lines.joined(separator: "\n").utf8))
+            return HashCoverage(
+                sliceCount: integrity.slices.count,
+                sectionCount: sectionCount,
+                bytesCovered: bytesCovered,
+                artifactsRoot: root,
+                complete: !integrity.slices.isEmpty
+            )
+        }
+    }
+
     public struct Provenance: Codable, Equatable {
         /// RFC 3339 UTC timestamp the manifest was generated.
         public var generatedAt: String
@@ -175,7 +268,11 @@ public struct BuildProofManifest: Codable, Equatable {
         transforms: [Transform],
         modules: [String],
         provenance: Provenance,
-        integrity: Integrity? = nil
+        integrity: Integrity? = nil,
+        manifestRevision: Int? = currentManifestRevision,
+        reproducibility: Reproducibility? = nil,
+        hashCoverage: HashCoverage? = nil,
+        posture: MachOInspector.Posture? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.platform = platform
@@ -190,6 +287,10 @@ public struct BuildProofManifest: Codable, Equatable {
         self.modules = modules
         self.provenance = provenance
         self.integrity = integrity
+        self.manifestRevision = manifestRevision
+        self.reproducibility = reproducibility
+        self.hashCoverage = hashCoverage
+        self.posture = posture
     }
 
     /// Deterministic, stable JSON (sorted keys, no escaping of slashes) suitable
