@@ -144,6 +144,16 @@ The returned nonce is bound into a platform attestation token and submitted to `
 | [docs/android-policy-review.md](docs/android-policy-review.md) | Play policy + Play Integrity quota model |
 | [docs/feature-parity-matrix.md](docs/feature-parity-matrix.md) | Competitor feature parity matrix |
 | [docs/cost-model.md](docs/cost-model.md) | Cost model at 10M / 100M / 300M MAU |
+| [docs/siem-integration.md](docs/siem-integration.md) | SIEM egress (Splunk / Sentinel / Elastic) |
+| [docs/masvs-evidence.md](docs/masvs-evidence.md) | Per-release MASVS evidence report + native-hardening matrix |
+| [docs/byok.md](docs/byok.md) | Customer-managed keys (BYOK) + server hardening env vars |
+| [docs/desktop-sdk.md](docs/desktop-sdk.md) | macOS + Windows desktop SDK integration |
+| [docs/policy-packs.md](docs/policy-packs.md) | Vertical policy packs + bulk apply workflow |
+| [docs/mssp-console.md](docs/mssp-console.md) | Partner/MSSP console fleet rollups |
+| [docs/multi-region.md](docs/multi-region.md) | Multi-region deployment topology |
+| [docs/deployment-private-link.md](docs/deployment-private-link.md) | Private-link connectivity for regulated tenants |
+| [docs/deployment-onprem.md](docs/deployment-onprem.md) | On-prem / air-gapped verifier bundle |
+| [docs/deployment-disaster-recovery.md](docs/deployment-disaster-recovery.md) | DR runbooks (backup/restore, region failover) |
 | [docs/README.md](docs/README.md) | Documentation index |
 
 ---
@@ -331,14 +341,18 @@ kseal/
 ├── sdk/
 │   ├── android/                 # Android SDK (Kotlin/Java + NDK)
 │   ├── ios/                     # iOS SDK (Swift/ObjC)
+│   ├── desktop/                 # Desktop SDKs: macOS (SwiftPM) + Windows (.NET) on the C FFI
 │   └── rust-core/               # Shared Rust trust core (policy eval, crypto, compression, serialization)
 ├── plugins/
-│   ├── gradle/                  # Gradle build-time hardening plugin
-│   └── xcode/                   # Xcode build-time hardening plugin
+│   ├── gradle/                  # Gradle build-time hardening plugin (+ native .so CFI/MTE posture)
+│   └── xcode/                   # Xcode build-time hardening plugin (+ Mach-O section-hash integrity)
+├── tools/
+│   └── masvs-report/            # Per-release MASVS evidence report generator (Markdown + JSON)
 ├── web/
-│   └── console/                 # React admin console / dashboard
+│   ├── console/                 # React admin console / dashboard
+│   └── partner-console/         # Read-only partner/MSSP console (multi-tenant fleet rollups)
 ├── proto/                       # Protobuf definitions for all services and SDK communication
-├── deploy/                      # Deployment configs (Kubernetes, Terraform, CI templates)
+├── deploy/                      # Deployment configs (Helm, Terraform multi-region/private-link, on-prem bundle)
 ├── docs/                        # Threat models, MASVS mapping, additional docs
 └── tests/                       # Integration and end-to-end tests
 ```
@@ -349,14 +363,14 @@ kseal/
 
 kseal ships in six phases, starting from the highest-value, lowest-compatibility-risk product (API trust) and expanding outward.
 
-| Phase | Theme | Duration | Headline goal |
-|---|---|---|---|
-| **Phase 0** | Research & Threat Model | 6–8 weeks | Validate threat model, MASVS mapping, attestation/perf prototypes, cost model. |
-| **Phase 1** | API Trust Product | 3–4 months | Protect APIs from fake clients and repackaged apps (SDKs + verifiers + trust sessions). |
-| **Phase 2** | Runtime Protection | 4–6 months | RASP modules with `observe → step-up → block` rollout, policy simulator, SIEM. |
-| **Phase 3** | Build-Time Hardening | 6–9 months | Gradle/Xcode plugins, obfuscation, polymorphism, build proof, CI gate, MASVS report. |
-| **Phase 4** | Enterprise Scale | 9–12 months | Multi-region, dedicated tiers, CMK, private link, on-prem verifier, compliance. |
-| **Phase 5** | Desktop | 6+ months post-mobile | macOS/Windows SDKs, desktop API attestation, code integrity, secure update. |
+| Phase | Theme | Duration | Headline goal | Status |
+|---|---|---|---|---|
+| **Phase 0** | Research & Threat Model | 6–8 weeks | Validate threat model, MASVS mapping, attestation/perf prototypes, cost model. | DONE |
+| **Phase 1** | API Trust Product | 3–4 months | Protect APIs from fake clients and repackaged apps (SDKs + verifiers + trust sessions). | DONE |
+| **Phase 2** | Runtime Protection | 4–6 months | RASP modules with `observe → step-up → block` rollout, policy simulator, SIEM. | DONE |
+| **Phase 3** | Build-Time Hardening | 6–9 months | Gradle/Xcode plugins, obfuscation, polymorphism, build proof, CI gate, native hardening, MASVS report. | DONE |
+| **Phase 4** | Enterprise Scale | 9–12 months | Multi-region, dedicated tiers, CMK/BYOK, private link, on-prem verifier, policy packs, MSSP console, compliance. | IN PROGRESS (~78%) |
+| **Phase 5** | Desktop | 6+ months post-mobile | macOS/Windows SDKs, desktop API attestation, code integrity, secure update. | IN PROGRESS (~67%) |
 
 Detailed deliverables and live status are tracked in [PROGRESS.md](PROGRESS.md).
 
@@ -375,7 +389,7 @@ kseal is built against the **[OWASP MASVS](https://mas.owasp.org/MASVS/)** and v
 - **MASVS-RESILIENCE** — anti-tamper, anti-debug, obfuscation as defense-in-depth
 - **MASVS-PRIVACY** — data minimization, transparency, user control
 
-Every protected release can emit a **MASVS evidence report** mapping shipped controls to MASVS categories — see [PROGRESS.md](PROGRESS.md#phase-3-build-time-hardening-6-9-months).
+Every protected release can emit a **MASVS evidence report** mapping shipped controls to MASVS categories — generated by [`tools/masvs-report`](tools/masvs-report) from real build-proof data (also reachable via `kseal build masvs`). See [docs/masvs-evidence.md](docs/masvs-evidence.md).
 
 ---
 
