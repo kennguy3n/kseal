@@ -1,0 +1,145 @@
+import XCTest
+@testable import KsealDesktop
+
+/// Unit-tests the macOS integrity-check logic against controlled signing
+/// snapshots: valid vs. tampered signature, missing notarization, wrong team
+/// id, dylib injection, and disabled hardened runtime.
+final class IntegrityProbeTests: XCTestCase {
+
+    private let strictPolicy = DesktopIntegrityPolicy(
+        expectedTeamIdentifier: "ABCDE12345",
+        expectedSigningIdentifier: "com.example.app",
+        requireValidSignature: true,
+        requireNotarization: true,
+        requireHardenedRuntime: true
+    )
+
+    // MARK: - Code signature
+
+    func testValidSignatureCleanApp() {
+        let env = FakeDesktopEnvironment()
+        let signals = CodeSignatureProbe(env, policy: strictPolicy).evaluate()
+        XCTAssertTrue(signals.isEmpty)
+    }
+
+    func testUnsignedBinaryRaisesTamperAndIntegrity() {
+        let env = FakeDesktopEnvironment()
+        env.signing.isSigned = false
+        env.signing.signatureValid = false
+        let signals = CodeSignatureProbe(env, policy: strictPolicy).evaluate()
+        XCTAssertTrue(signals.contains(.tamper))
+        XCTAssertTrue(signals.contains(.appIntegrity))
+    }
+
+    func testTamperedSignatureRaisesTamper() {
+        let env = FakeDesktopEnvironment()
+        env.signing.signatureValid = false // signed but CDHash/resources mismatch
+        let signals = CodeSignatureProbe(env, policy: strictPolicy).evaluate()
+        XCTAssertTrue(signals.contains(.tamper))
+        XCTAssertTrue(signals.contains(.appIntegrity))
+    }
+
+    func testWrongTeamIdentifierRaisesRepackaged() {
+        let env = FakeDesktopEnvironment()
+        env.signing.teamIdentifier = "ZZZZZ99999"
+        let signals = CodeSignatureProbe(env, policy: strictPolicy).evaluate()
+        XCTAssertTrue(signals.contains(.repackaged))
+        XCTAssertTrue(signals.contains(.appIntegrity))
+        XCTAssertFalse(signals.contains(.tamper)) // signature itself is valid
+    }
+
+    func testWrongSigningIdentifierRaisesRepackaged() {
+        let env = FakeDesktopEnvironment()
+        env.signing.signingIdentifier = "com.attacker.clone"
+        let signals = CodeSignatureProbe(env, policy: strictPolicy).evaluate()
+        XCTAssertTrue(signals.contains(.repackaged))
+    }
+
+    func testUnconfiguredPolicyNeverFalsePositives() {
+        let env = FakeDesktopEnvironment()
+        env.signing.teamIdentifier = "anything"
+        env.signing.signingIdentifier = "anything"
+        // No expected identifiers, signature requirement off.
+        let policy = DesktopIntegrityPolicy(
+            requireValidSignature: false,
+            requireNotarization: false,
+            requireHardenedRuntime: false
+        )
+        XCTAssertTrue(CodeSignatureProbe(env, policy: policy).evaluate().isEmpty)
+    }
+
+    // MARK: - Notarization
+
+    func testMissingNotarizationRaisesIntegrity() {
+        let env = FakeDesktopEnvironment()
+        env.signing.isNotarized = false
+        let signals = NotarizationProbe(env, policy: strictPolicy).evaluate()
+        XCTAssertEqual(signals, [.appIntegrity])
+    }
+
+    func testNotarizationIgnoredWhenNotRequired() {
+        let env = FakeDesktopEnvironment()
+        env.signing.isNotarized = false
+        let policy = DesktopIntegrityPolicy(requireNotarization: false)
+        XCTAssertTrue(NotarizationProbe(env, policy: policy).evaluate().isEmpty)
+    }
+
+    func testNotarizationSkippedForUnsignedBinary() {
+        let env = FakeDesktopEnvironment()
+        env.signing.isSigned = false
+        env.signing.isNotarized = false
+        // Unsigned binaries are owned by the code-signature probe; notarization
+        // does not double-count.
+        XCTAssertTrue(NotarizationProbe(env, policy: strictPolicy).evaluate().isEmpty)
+    }
+
+    // MARK: - Hardened runtime
+
+    func testHardenedRuntimeDisabledRaisesEnvironment() {
+        let env = FakeDesktopEnvironment()
+        env.signing.hardenedRuntimeEnabled = false
+        let signals = HardenedRuntimeProbe(env, policy: strictPolicy).evaluate()
+        XCTAssertEqual(signals, [.environment])
+    }
+
+    func testHardenedRuntimeCleanWhenEnabled() {
+        let env = FakeDesktopEnvironment()
+        XCTAssertTrue(HardenedRuntimeProbe(env, policy: strictPolicy).evaluate().isEmpty)
+    }
+
+    // MARK: - Dylib injection
+
+    func testDyldInsertLibrariesRaisesHooking() {
+        let env = FakeDesktopEnvironment()
+        env.environment["DYLD_INSERT_LIBRARIES"] = "/tmp/evil.dylib"
+        XCTAssertEqual(DylibInjectionProbe(env).evaluate(), [.hooking])
+    }
+
+    func testForeignImageRaisesHooking() {
+        let env = FakeDesktopEnvironment()
+        env.foreignImages = ["/tmp/injected.dylib"]
+        XCTAssertEqual(DylibInjectionProbe(env).evaluate(), [.hooking])
+    }
+
+    func testNoInjectionIsClean() {
+        XCTAssertTrue(DylibInjectionProbe(FakeDesktopEnvironment()).evaluate().isEmpty)
+    }
+
+    func testEmptyInjectionEnvVarIsClean() {
+        let env = FakeDesktopEnvironment()
+        env.environment["DYLD_INSERT_LIBRARIES"] = ""
+        XCTAssertTrue(DylibInjectionProbe(env).evaluate().isEmpty)
+    }
+
+    // MARK: - Debugger (opt-in)
+
+    func testDebuggerProbeDetectsTrace() {
+        let env = FakeDesktopEnvironment()
+        env.traced = true
+        XCTAssertEqual(DebuggerProbe(env).evaluate(), [.debugger])
+    }
+
+    func testDebuggerProbeCleanWhenUntraced() {
+        XCTAssertTrue(DebuggerProbe(FakeDesktopEnvironment()).evaluate().isEmpty)
+    }
+}

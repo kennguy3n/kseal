@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- net8.0 (not net8.0-windows) so the SDK builds and unit-tests on any
+         host. Windows-only Win32 calls (WinVerifyTrust) are P/Invoked directly
+         and guarded by OperatingSystem.IsWindows() / [SupportedOSPlatform],
+         so the cross-platform integrity logic stays testable on Linux CI. -->
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <LangVersion>12</LangVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AssemblyName>Kseal.Desktop</AssemblyName>
+    <RootNamespace>Kseal.Desktop</RootNamespace>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Kseal.Desktop.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Authenticode timestamp (countersignature) inspection via SignedCms. -->
+    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="8.0.1" />
+  </ItemGroup>
+
+</Project>

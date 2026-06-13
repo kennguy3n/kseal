@@ -1,0 +1,314 @@
+import Foundation
+import Dispatch
+import CKseal
+
+/// Weighted risk score plus the confidence the core derived for it.
+struct CoreRiskScore {
+    let score: UInt32
+    let confidence: Confidence
+}
+
+/// Raised when an FFI call returns a failure status.
+public struct TrustCoreError: Error, CustomStringConvertible {
+    public let message: String
+    public var description: String { message }
+}
+
+/// High-level handle to the Rust trust core, hiding the raw FFI surface.
+///
+/// The production implementation, `NativeTrustCore`, delegates to the real Rust
+/// core over the C ABI; there is no stubbed core — tests run the same
+/// implementation against a host build of the library.
+protocol TrustCore: AnyObject {
+    var version: String { get }
+    func loadConfig(_ signedConfigBytes: Data) throws
+    func tryLoadConfig(_ signedConfigBytes: Data) -> Bool
+    func evaluateRisk(_ riskBits: UInt64) throws -> CoreRiskScore
+    func computeRiskLevel(_ riskBits: UInt64) -> TrustLevel
+    /// Scores `riskBits` and derives its trust level atomically, so a concurrent
+    /// config swap cannot split the two across different policies.
+    func evaluateRiskAndLevel(_ riskBits: UInt64) throws -> (CoreRiskScore, TrustLevel)
+    func createEvent(
+        eventType: EventType,
+        riskBits: UInt64,
+        confidence: Confidence,
+        buildHash: String,
+        policyHash: String,
+        installKeyHash: String,
+        coarseTimeBucket: Int64,
+        country: String?
+    ) throws -> Data
+    func batchAndCompress(_ events: [Data]) throws -> Data
+    func generateRequestProof(tokenId: String, requestHash: Data, nonce: Data, sequence: Int64) throws -> Data
+    func generateNonce(_ length: Int) throws -> Data
+    func compress(_ data: Data, level: Int32) throws -> Data
+    func decompress(_ data: Data) throws -> Data
+}
+
+/// Verifies an Ed25519 signature over `config` bytes (stateless helper).
+func verifyConfigSignature(config: Data, signature: Data, publicKey: Data) -> Bool {
+    config.withUnsafeBytes { c in
+        signature.withUnsafeBytes { s in
+            publicKey.withUnsafeBytes { p in
+                kseal_verify_config_signature(
+                    c.bindMemory(to: UInt8.self).baseAddress, UInt(c.count),
+                    s.bindMemory(to: UInt8.self).baseAddress, UInt(s.count),
+                    p.bindMemory(to: UInt8.self).baseAddress, UInt(p.count)
+                ) == 1
+            }
+        }
+    }
+}
+
+/// Real trust core backed by the Rust `kseal-ffi` C ABI.
+///
+/// Owns an opaque core handle for its lifetime; `deinit` releases it (the last
+/// strong reference is dropped only when no call is in flight).
+///
+/// Thread-safety mirrors the Rust borrow semantics of the C ABI: config mutation
+/// (`kseal_load_config` takes `&mut`) runs as a barrier on `coreQueue`, while the
+/// read paths (`&self`: risk evaluation, event/proof creation) run as concurrent
+/// syncs and may proceed in parallel. `generateNonce`/`compress`/`decompress`
+/// are stateless (no core handle) and bypass the queue.
+final class NativeTrustCore: TrustCore {
+
+    private let handle: OpaquePointer
+    private let coreQueue = DispatchQueue(label: "io.kseal.core", attributes: .concurrent)
+
+    private init(handle: OpaquePointer) {
+        self.handle = handle
+    }
+
+    deinit {
+        kseal_core_free(handle)
+    }
+
+    /// Creates a core instance.
+    ///
+    /// - Parameters:
+    ///   - configPublicKey: Ed25519 public key (32 bytes) used to verify signed configs.
+    ///   - proofKey: instance HMAC key for request proofs (Keychain/Secure-Enclave-bound in production).
+    ///   - maxBatchEvents/riskWindow/zstdLevel: 0 selects the core defaults.
+    static func create(
+        configPublicKey: Data,
+        proofKey: Data,
+        platform: Platform = .desktopMac,
+        maxBatchEvents: Int = 0,
+        riskWindow: Int = 0,
+        zstdLevel: Int32 = 0
+    ) throws -> NativeTrustCore {
+        let handle: OpaquePointer? = configPublicKey.withUnsafeBytes { pk in
+            proofKey.withUnsafeBytes { proof in
+                kseal_core_new(
+                    pk.bindMemory(to: UInt8.self).baseAddress, UInt(pk.count),
+                    proof.bindMemory(to: UInt8.self).baseAddress, UInt(proof.count),
+                    platform.rawValue,
+                    UInt(max(0, maxBatchEvents)),
+                    UInt(max(0, riskWindow)),
+                    zstdLevel
+                )
+            }
+        }
+        guard let handle else {
+            throw TrustCoreError(message: "failed to create trust core (bad key arguments?)")
+        }
+        return NativeTrustCore(handle: handle)
+    }
+
+    var version: String {
+        guard let cstr = kseal_version() else { return "" }
+        return String(cString: cstr)
+    }
+
+    func loadConfig(_ signedConfigBytes: Data) throws {
+        try coreQueue.sync(flags: .barrier) {
+            let status = signedConfigBytes.withUnsafeBytes { b in
+                kseal_load_config(handle, b.bindMemory(to: UInt8.self).baseAddress, UInt(b.count))
+            }
+            if status != 0 {
+                throw TrustCoreError(message: "loadConfig failed: status=\(status)")
+            }
+        }
+    }
+
+    func tryLoadConfig(_ signedConfigBytes: Data) -> Bool {
+        coreQueue.sync(flags: .barrier) {
+            signedConfigBytes.withUnsafeBytes { b in
+                kseal_load_config(handle, b.bindMemory(to: UInt8.self).baseAddress, UInt(b.count)) == 0
+            }
+        }
+    }
+
+    func evaluateRisk(_ riskBits: UInt64) throws -> CoreRiskScore {
+        try coreQueue.sync { try unsafeEvaluateRisk(riskBits) }
+    }
+
+    func computeRiskLevel(_ riskBits: UInt64) -> TrustLevel {
+        coreQueue.sync { unsafeComputeRiskLevel(riskBits) }
+    }
+
+    func evaluateRiskAndLevel(_ riskBits: UInt64) throws -> (CoreRiskScore, TrustLevel) {
+        // One dispatch keeps score and level on the same policy; a config swap
+        // (barrier write) cannot interleave between the two FFI reads.
+        try coreQueue.sync { (try unsafeEvaluateRisk(riskBits), unsafeComputeRiskLevel(riskBits)) }
+    }
+
+    // `coreQueue.sync` is non-reentrant, so the on-queue work lives in these
+    // helpers that the combined and single-shot entry points share.
+    private func unsafeEvaluateRisk(_ riskBits: UInt64) throws -> CoreRiskScore {
+        var score: UInt32 = 0
+        var confidence: Int32 = 0
+        let status = kseal_evaluate_risk(handle, riskBits, &score, &confidence)
+        if status != 0 {
+            throw TrustCoreError(message: "evaluateRisk failed: status=\(status)")
+        }
+        return CoreRiskScore(score: score, confidence: Confidence(code: confidence))
+    }
+
+    private func unsafeComputeRiskLevel(_ riskBits: UInt64) -> TrustLevel {
+        TrustLevel(code: kseal_compute_risk_level(handle, riskBits))
+    }
+
+    func createEvent(
+        eventType: EventType,
+        riskBits: UInt64,
+        confidence: Confidence,
+        buildHash: String,
+        policyHash: String,
+        installKeyHash: String,
+        coarseTimeBucket: Int64,
+        country: String?
+    ) throws -> Data {
+        try coreQueue.sync {
+            var out = KsealBuffer()
+            let status = buildHash.withCString { build in
+                policyHash.withCString { policy in
+                    installKeyHash.withCString { install in
+                        withOptionalCString(country) { countryPtr in
+                            kseal_create_event(
+                                handle,
+                                eventType.rawValue,
+                                riskBits,
+                                confidence.rawValue,
+                                build, policy, install,
+                                coarseTimeBucket,
+                                countryPtr,
+                                &out
+                            )
+                        }
+                    }
+                }
+            }
+            if status != 0 {
+                kseal_buffer_free(out)
+                throw TrustCoreError(message: "createEvent failed: status=\(status)")
+            }
+            return Self.consume(&out)
+        }
+    }
+
+    func batchAndCompress(_ events: [Data]) throws -> Data {
+        try coreQueue.sync {
+            var out = KsealBuffer()
+            let status = withBytesViews(events) { views in
+                kseal_batch_and_compress(handle, views.baseAddress, UInt(views.count), &out)
+            }
+            if status != 0 {
+                kseal_buffer_free(out)
+                throw TrustCoreError(message: "batchAndCompress failed: status=\(status)")
+            }
+            return Self.consume(&out)
+        }
+    }
+
+    func generateRequestProof(tokenId: String, requestHash: Data, nonce: Data, sequence: Int64) throws -> Data {
+        try coreQueue.sync {
+            var out = KsealBuffer()
+            let status = tokenId.withCString { tok in
+                requestHash.withUnsafeBytes { rh in
+                    nonce.withUnsafeBytes { nc in
+                        kseal_generate_request_proof(
+                            handle,
+                            tok,
+                            rh.bindMemory(to: UInt8.self).baseAddress, UInt(rh.count),
+                            nc.bindMemory(to: UInt8.self).baseAddress, UInt(nc.count),
+                            sequence,
+                            &out
+                        )
+                    }
+                }
+            }
+            if status != 0 {
+                kseal_buffer_free(out)
+                throw TrustCoreError(message: "generateRequestProof failed: status=\(status)")
+            }
+            return Self.consume(&out)
+        }
+    }
+
+    func generateNonce(_ length: Int) throws -> Data {
+        var out = KsealBuffer()
+        let status = kseal_generate_nonce(UInt(max(0, length)), &out)
+        if status != 0 {
+            kseal_buffer_free(out)
+            throw TrustCoreError(message: "generateNonce failed: status=\(status)")
+        }
+        return Self.consume(&out)
+    }
+
+    func compress(_ data: Data, level: Int32 = 0) throws -> Data {
+        var out = KsealBuffer()
+        let status = data.withUnsafeBytes { b in
+            kseal_compress(b.bindMemory(to: UInt8.self).baseAddress, UInt(b.count), level, &out)
+        }
+        if status != 0 {
+            kseal_buffer_free(out)
+            throw TrustCoreError(message: "compress failed: status=\(status)")
+        }
+        return Self.consume(&out)
+    }
+
+    func decompress(_ data: Data) throws -> Data {
+        var out = KsealBuffer()
+        let status = data.withUnsafeBytes { b in
+            kseal_decompress(b.bindMemory(to: UInt8.self).baseAddress, UInt(b.count), &out)
+        }
+        if status != 0 {
+            kseal_buffer_free(out)
+            throw TrustCoreError(message: "decompress failed: status=\(status)")
+        }
+        return Self.consume(&out)
+    }
+
+    /// Copies a core-owned buffer into a `Data` and releases the original.
+    private static func consume(_ buffer: inout KsealBuffer) -> Data {
+        defer { kseal_buffer_free(buffer) }
+        guard let data = buffer.data, buffer.len > 0 else { return Data() }
+        return Data(bytes: data, count: Int(buffer.len))
+    }
+}
+
+/// Runs `body` with a contiguous array of `KsealBytesView` over `datas`,
+/// keeping each `Data`'s storage pinned for the duration of the call.
+private func withBytesViews<R>(_ datas: [Data], _ body: (UnsafeBufferPointer<KsealBytesView>) -> R) -> R {
+    func recurse(_ index: Int, _ acc: inout [KsealBytesView]) -> R {
+        if index == datas.count {
+            return acc.withUnsafeBufferPointer(body)
+        }
+        return datas[index].withUnsafeBytes { raw in
+            acc.append(KsealBytesView(data: raw.bindMemory(to: UInt8.self).baseAddress, len: UInt(raw.count)))
+            return recurse(index + 1, &acc)
+        }
+    }
+    var acc: [KsealBytesView] = []
+    acc.reserveCapacity(datas.count)
+    return recurse(0, &acc)
+}
+
+/// Calls `body` with a C string for `value`, or `nil` when `value` is `nil`.
+private func withOptionalCString<R>(_ value: String?, _ body: (UnsafePointer<CChar>?) -> R) -> R {
+    if let value {
+        return value.withCString { body($0) }
+    }
+    return body(nil)
+}
