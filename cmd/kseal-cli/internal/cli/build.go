@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 
 	"connectrpc.com/connect"
 	"github.com/spf13/cobra"
@@ -34,8 +35,53 @@ func newBuildCmd(c *CLI) *cobra.Command {
 		newBuildRegisterCmd(c),
 		newBuildGetCmd(c),
 		newBuildListCmd(c),
+		newBuildMASVSCmd(c),
 	)
 	return cmd
+}
+
+func newBuildMASVSCmd(c *CLI) *cobra.Command {
+	return &cobra.Command{
+		Use:   "masvs <build-id>",
+		Short: "Show a build's MASVS evidence report",
+		Long: "Fetch a registered build and render an OWASP MASVS evidence report: the " +
+			"build-hash proof, manifest module/transform provenance, and per-category " +
+			"coverage derived from the module set. Read-only; gaps and limits of the " +
+			"available evidence are reported explicitly.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			tenant, err := c.requireTenant()
+			if err != nil {
+				return err
+			}
+			ctx, cancel := c.callCtx(cmd.Context())
+			defer cancel()
+			resp, err := c.registry().GetBuild(ctx, connect.NewRequest(&ksealv1.GetBuildRequest{TenantId: tenant, Id: args[0]}))
+			if err != nil {
+				return err
+			}
+			report := buildMASVSReport(resp.Msg.GetBuild())
+			return c.emit(report, masvsReportTable(report))
+		},
+	}
+}
+
+func masvsReportTable(r MASVSReport) table {
+	rows := [][]string{
+		{"build_id", r.BuildID},
+		{"app_id", r.AppID},
+		{"build_hash", r.BuildHash},
+		{"version", r.VersionName},
+		{"coverage", fmt.Sprintf("%d/%d categories", r.CoveredCount, r.TotalCategories)},
+	}
+	for _, cat := range r.Categories {
+		status := "gap"
+		if cat.Covered {
+			status = strings.Join(cat.Modules, ", ")
+		}
+		rows = append(rows, []string{"MASVS-" + cat.Category, status})
+	}
+	return table{Headers: []string{"FIELD", "VALUE"}, Rows: rows}
 }
 
 func newBuildRegisterCmd(c *CLI) *cobra.Command {

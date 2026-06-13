@@ -1,0 +1,28 @@
+{
+  "id": "health",
+  "vertical": "health",
+  "name": "Health & regulated",
+  "description": "Privacy- and integrity-first posture for healthcare and regulated apps. Steps up on elevated risk and weights device-integrity, attestation, and network signals to protect sensitive data flows.",
+  "enforcement_mode": "step_up",
+  "modules_enabled": [
+    "integrity",
+    "attestation",
+    "network",
+    "environment",
+    "storage",
+    "crypto",
+    "privacy"
+  ],
+  "risk_thresholds": {
+    "LOW_RISK": 18,
+    "MEDIUM_RISK": 45,
+    "HIGH_RISK": 75,
+    "CRITICAL": 115
+  },
+  "signal_weights": {
+    "5": 75,
+    "6": 55,
+    "8": 60,
+    "0": 45
+  }
+}

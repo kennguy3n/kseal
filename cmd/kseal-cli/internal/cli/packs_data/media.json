@@ -1,0 +1,26 @@
+{
+  "id": "media",
+  "vertical": "media",
+  "name": "Media & content protection",
+  "description": "Anti-piracy and content-protection posture for streaming and media apps. Steps up on tamper, hooking, repack, and root signals that typically precede DRM circumvention and content extraction.",
+  "enforcement_mode": "step_up",
+  "modules_enabled": [
+    "integrity",
+    "rasp",
+    "obfuscation",
+    "anti-hooking",
+    "network"
+  ],
+  "risk_thresholds": {
+    "LOW_RISK": 20,
+    "MEDIUM_RISK": 50,
+    "HIGH_RISK": 80,
+    "CRITICAL": 120
+  },
+  "signal_weights": {
+    "0": 50,
+    "3": 55,
+    "4": 70,
+    "9": 65
+  }
+}
