@@ -2,7 +2,6 @@ package tests
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
@@ -79,10 +78,9 @@ func TestE2EConfig(t *testing.T) {
 	if err := proto.Unmarshal(cfg.ConfigBytes, &pc); err != nil {
 		t.Fatalf("unmarshal policy config: %v", err)
 	}
-	// Reconstruct the ETag exactly as the server does (fmt.Sprintf("%q", hash)
-	// in config/service.go) so the comparison stays correct even if a hash ever
-	// contained characters that %q would escape.
-	if want := fmt.Sprintf("%q", pc.PolicyHash); want != resp.Msg.Etag {
+	// Reconstruct the ETag exactly as the server does: a strong RFC 7232 ETag is
+	// the hex policy hash wrapped in literal double quotes (config/service.go).
+	if want := `"` + pc.PolicyHash + `"`; want != resp.Msg.Etag {
 		t.Fatalf("etag %q does not match policy hash %q", resp.Msg.Etag, want)
 	}
 	if pc.RiskThresholds["HIGH_RISK"] != 90 || pc.RiskThresholds["MEDIUM_RISK"] != 50 {

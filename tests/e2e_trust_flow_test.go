@@ -176,18 +176,13 @@ func TestE2ETrustFlow(t *testing.T) {
 			t.Fatalf("expected DENY for unknown token, got %v", res.Decision)
 		}
 
-		// ROBUSTNESS GAP (reported to component owner): a malformed (non-UUID)
-		// token id should fail closed as a clean DENY, but the Postgres store
-		// currently surfaces the uuid parse error as a Connect Internal error
-		// because registry.wrapPgErr only maps pgx.ErrNoRows to ErrNotFound. We
-		// prove the gap here without locking in the wrong behavior: a future
-		// fail-closed fix (DENY) is also accepted.
-		if r, err := svc.ValidateRequestProof(ctx, connect.NewRequest(proof("not-a-uuid", proofKey, nonce, 1))); err != nil {
-			if connect.CodeOf(err) != connect.CodeInternal {
-				t.Fatalf("malformed token id: expected Internal (current) or DENY (fixed), got code %v", connect.CodeOf(err))
-			}
-		} else if r.Msg.Decision != ksealv1.RequestProofResult_DECISION_DENY {
-			t.Fatalf("malformed token id: expected DENY once fixed, got %v", r.Msg.Decision)
+		// A malformed (non-UUID) token id must fail closed as a clean DENY, never
+		// a 500: ValidateRequestProof validates the id as a UUID up front so an
+		// attacker-controlled value can't reach the uuid-typed column and raise a
+		// Postgres 22P02 that would surface as a Connect Internal error.
+		res = validate(t, ctx, svc, proof("not-a-uuid", proofKey, nonce, 1))
+		if res.Decision != ksealv1.RequestProofResult_DECISION_DENY {
+			t.Fatalf("malformed token id must fail closed to DENY, got %v", res.Decision)
 		}
 
 		// Proof signed with the WRONG key (attacker without the session secret) -> DENY.

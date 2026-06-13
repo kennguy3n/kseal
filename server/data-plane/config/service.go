@@ -47,7 +47,11 @@ func (s *Service) GetConfig(ctx context.Context, req *connect.Request[ksealv1.Co
 	}
 
 	pc := buildPolicyConfig(policy)
-	etag := fmt.Sprintf("%q", pc.PolicyHash)
+	// PolicyHash is a hex-encoded SHA-256 digest (registry.HashPolicy), so it
+	// contains only token-safe characters. Wrap it in literal double quotes per
+	// RFC 7232 (a strong ETag) rather than fmt.Sprintf("%q", ...), which would
+	// Go-escape any special characters and could confuse CDN ETag parsers.
+	etag := `"` + pc.PolicyHash + `"`
 	// If the client already holds this exact policy, advertise a cache hit by
 	// returning the same ETag before doing any marshal/sign work; the SDK/CDN
 	// compares against If-None-Match.
