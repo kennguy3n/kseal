@@ -131,7 +131,7 @@ export function KillSwitchPage() {
         )}
       </Card>
 
-      {!state.isError && (
+      {state.data && !state.isError && (
         <Card
           title={
             target === KillSwitchCommand.DISABLE

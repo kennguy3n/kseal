@@ -129,6 +129,35 @@ describe("KillSwitchPage", () => {
     );
   });
 
+  it("does not offer a change action while state is still loading", async () => {
+    // getKillSwitchState never resolves, so the page stays in the loading
+    // state. The change card must not render with a stale default (which would
+    // otherwise expose an actionable "Disable enforcement" control before the
+    // real state is known — a safety regression).
+    const transport = createRouterTransport((router) => {
+      withApps(router);
+      router.service(ComplianceService, {
+        getKillSwitchState: () => new Promise(() => {}),
+      });
+    });
+
+    renderWithProviders(<KillSwitchPage />, {
+      transport,
+      route: "/kill-switch",
+    });
+
+    // The apps list resolves, so the scope card is interactive; the state card
+    // is still a spinner and no enable/disable action is offered.
+    await waitFor(() =>
+      expect(screen.getByLabelText("App")).toBeInTheDocument(),
+    );
+    expect(
+      screen.queryByRole("button", { name: /enforcement/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/disable protection/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/re-arm protection/i)).not.toBeInTheDocument();
+  });
+
   it("degrades gracefully when the RPC is not deployed", async () => {
     const transport = createRouterTransport((router) => {
       withApps(router);
