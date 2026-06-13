@@ -129,6 +129,7 @@ resource "aws_db_instance" "replica" {
   kms_key_id        = var.kms_key_arn != "" ? var.kms_key_arn : null
 
   port                   = 5432
+  db_subnet_group_name   = aws_db_subnet_group.this.name
   vpc_security_group_ids = [aws_security_group.pg.id]
   parameter_group_name   = aws_db_parameter_group.this.name
   publicly_accessible    = false
@@ -141,6 +142,13 @@ resource "aws_db_instance" "replica" {
   enabled_cloudwatch_logs_exports = ["postgresql", "upgrade"]
 
   tags = local.tags
+
+  lifecycle {
+    precondition {
+      condition     = var.source_db_arn != ""
+      error_message = "source_db_arn is required when role = 'replica'."
+    }
+  }
 }
 
 # ---------------------------------------------------------------------------
