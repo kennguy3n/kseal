@@ -1,0 +1,106 @@
+{
+  "release": "2.0",
+  "platform": "android",
+  "build_hash": "abc123",
+  "summary": {
+    "informational": 2,
+    "observed": 2,
+    "pass": 1
+  },
+  "results": [
+    {
+      "procedure": {
+        "id": "MASVS-STORAGE/no-sensitive-data-in-logs",
+        "category": "MASVS-STORAGE",
+        "objective": "No sensitive data in logs",
+        "control": "Privacy guard strips identifiers at source",
+        "phase": "P1/P2",
+        "mastg_tests": [
+          "MASTG-STORAGE"
+        ],
+        "method": "MASTG-STORAGE",
+        "plane": "device",
+        "steps": "inspect logcat/oslog; assert no PII",
+        "raw": "MASTG-STORAGE: inspect logcat/oslog; assert no PII"
+      },
+      "status": "pass",
+      "note": "logcat clean"
+    },
+    {
+      "procedure": {
+        "id": "MASVS-STORAGE/no-secrets-in-app-storage",
+        "category": "MASVS-STORAGE",
+        "objective": "No secrets in app storage",
+        "control": "No static secrets; keys hardware-bound",
+        "phase": "P1",
+        "mastg_tests": [
+          "MASTG-RESILIENCE",
+          "MASTG-STORAGE"
+        ],
+        "method": "MASTG-RESILIENCE, MASTG-STORAGE",
+        "plane": "device",
+        "steps": "static scan binary; runtime sandbox dump",
+        "raw": "MASTG-STORAGE + MASTG-RESILIENCE: static scan binary; runtime sandbox dump"
+      },
+      "status": "observed",
+      "note": "masvs-report build evidence: partial"
+    },
+    {
+      "procedure": {
+        "id": "MASVS-STORAGE/tenant-data-isolated-at-rest",
+        "category": "MASVS-STORAGE",
+        "objective": "Tenant data isolated at rest",
+        "control": "Logical tenant_id namespacing",
+        "phase": "P1/P4",
+        "mastg_tests": null,
+        "method": "Server test",
+        "plane": "server",
+        "steps": "attempt cross-tenant_id read; assert deny",
+        "raw": "Server test: attempt cross-tenant_id read; assert deny"
+      },
+      "status": "informational",
+      "note": "verified by server-side test; outside MASTG device scope"
+    },
+    {
+      "procedure": {
+        "id": "MASVS-CRYPTO/strong-current-algorithms",
+        "category": "MASVS-CRYPTO",
+        "objective": "Strong, current algorithms",
+        "control": "Modern AEAD + signatures",
+        "phase": "P1",
+        "mastg_tests": [
+          "MASTG-CRYPTO"
+        ],
+        "method": "MASTG-CRYPTO",
+        "plane": "device",
+        "steps": "review algorithms; assert no MD5/SHA-1/ECB",
+        "raw": "MASTG-CRYPTO: review algorithms; assert no MD5/SHA-1/ECB"
+      },
+      "status": "observed",
+      "note": "algorithm review"
+    },
+    {
+      "procedure": {
+        "id": "MASVS-CRYPTO/deterministic-serialization",
+        "category": "MASVS-CRYPTO",
+        "objective": "Deterministic serialization",
+        "control": "Canonical message formats",
+        "phase": "P1",
+        "mastg_tests": null,
+        "method": "Property test",
+        "plane": "other",
+        "steps": "round-trip determinism (tenant-neutral)",
+        "raw": "Property test: round-trip determinism (tenant-neutral)"
+      },
+      "status": "informational",
+      "note": "verified by \"Property test\"; outside MASTG device scope"
+    }
+  ],
+  "gating": {
+    "failed": 0,
+    "failed_ids": null,
+    "blocked": false,
+    "require_pass": false,
+    "pending": 0
+  }
+}

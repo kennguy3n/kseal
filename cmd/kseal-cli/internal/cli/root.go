@@ -84,6 +84,7 @@ func newRootCmd(stdout, stderr io.Writer) (*cobra.Command, *globalFlags) {
 		newProfileCmd(c),
 		newWebhookCmd(c),
 		newEventsCmd(c),
+		newComplianceCmd(c),
 	)
 	return root, gf
 }

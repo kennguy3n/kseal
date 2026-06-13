@@ -1,0 +1,375 @@
+package cli
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+
+	"connectrpc.com/connect"
+	"github.com/spf13/cobra"
+
+	"github.com/kennguy3n/kseal/cli/internal/compliancepb"
+	"github.com/kennguy3n/kseal/tools/datasafety/datasafety"
+	"github.com/kennguy3n/kseal/tools/mastg/mastg"
+	dscontract "github.com/kennguy3n/kseal/tools/privacy-manifest/contract"
+	"github.com/kennguy3n/kseal/tools/privacy-manifest/xcprivacy"
+)
+
+// newComplianceCmd assembles the `compliance` command group: local, offline
+// store-disclosure generators driven by the embedded SDK data contract and the
+// MASVS mapping, plus read-only server queries for audit/compliance state that
+// degrade gracefully when the server has not yet shipped the RPC.
+func newComplianceCmd(c *CLI) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "compliance",
+		Short: "Generate store-disclosure artifacts and read compliance state",
+		Long: "compliance produces self-service NoOps compliance artifacts from the kseal " +
+			"SDK data contract and MASVS mapping (iOS privacy manifest, Google Play " +
+			"Data-Safety answers, MASTG verification report) and reads compliance/audit " +
+			"state from the server. Generators are fully offline and deterministic.",
+	}
+	cmd.AddCommand(
+		newPrivacyManifestCmd(c),
+		newDataSafetyCmd(c),
+		newMASTGCmd(c),
+		newAuditTrailCmd(c),
+		newKillSwitchCmd(c),
+		newDPRCmd(c),
+	)
+	return cmd
+}
+
+// localOnly marks a generator subcommand as offline so the root skips
+// endpoint/API-key resolution.
+func localOnly(cmd *cobra.Command) *cobra.Command {
+	if cmd.Annotations == nil {
+		cmd.Annotations = map[string]string{}
+	}
+	cmd.Annotations[annotationLocalOnly] = "true"
+	return cmd
+}
+
+// loadContract returns the embedded canonical contract, or one loaded from path
+// when the operator overrides it with --contract.
+func loadContract(path string) (*dscontract.Contract, error) {
+	if path == "" {
+		return dscontract.Canonical()
+	}
+	return dscontract.Load(path)
+}
+
+func writeArtifact(c *CLI, out string, data []byte) error {
+	if out == "" {
+		_, err := c.out.Write(data)
+		return err
+	}
+	if dir := filepath.Dir(out); dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("create %s: %w", dir, err)
+		}
+	}
+	if err := os.WriteFile(out, data, 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", out, err)
+	}
+	_, _ = fmt.Fprintf(c.errOut, "wrote %s\n", out)
+	return nil
+}
+
+// ---- iOS privacy manifest ----
+
+func newPrivacyManifestCmd(c *CLI) *cobra.Command {
+	var contractPath, format, out string
+	var includeOptional bool
+	cmd := &cobra.Command{
+		Use:   "privacy-manifest",
+		Short: "Generate an Apple PrivacyInfo.xcprivacy for the kseal SDK",
+		Long: "Generate a valid Apple privacy manifest (PrivacyInfo.xcprivacy) for the kseal " +
+			"SDK from the data contract: privacy-nutrition data types with purposes and the " +
+			"required-reason API declarations. Default output is the plist; use --format json " +
+			"for a machine-readable summary.",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if format != "plist" && format != "json" {
+				return newUsageError("invalid --format %q (want plist|json)", format)
+			}
+			ct, err := loadContract(contractPath)
+			if err != nil {
+				return err
+			}
+			m := xcprivacy.Generate(ct, xcprivacy.Options{IncludeOptional: includeOptional})
+			if format == "json" {
+				data, err := marshalIndent(m)
+				if err != nil {
+					return err
+				}
+				return writeArtifact(c, out, data)
+			}
+			return writeArtifact(c, out, m.XML())
+		},
+	}
+	f := cmd.Flags()
+	f.StringVar(&contractPath, "contract", "", "path to a data-contract JSON (default: embedded canonical contract)")
+	f.StringVar(&format, "format", "plist", "output format: plist|json")
+	f.StringVar(&out, "out", "", "write to this path (default stdout)")
+	f.BoolVar(&includeOptional, "include-optional", false, "include data types that are off by default in the contract")
+	return localOnly(cmd)
+}
+
+// ---- Google Play Data-Safety ----
+
+func newDataSafetyCmd(c *CLI) *cobra.Command {
+	var contractPath, format, out string
+	var includeOptional bool
+	cmd := &cobra.Command{
+		Use:   "data-safety",
+		Short: "Generate Google Play Data-Safety form answers for the kseal SDK",
+		Long: "Generate the Play Console Data-Safety answers from the data contract: data " +
+			"types collected/shared, purposes, encryption-in-transit, and deletion support. " +
+			"Default output is a human-readable Markdown summary; use --format json for the " +
+			"machine-readable form.",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if format != "md" && format != "json" {
+				return newUsageError("invalid --format %q (want md|json)", format)
+			}
+			ct, err := loadContract(contractPath)
+			if err != nil {
+				return err
+			}
+			form := datasafety.Generate(ct, datasafety.Options{IncludeOptional: includeOptional})
+			if format == "json" {
+				data, err := form.JSON()
+				if err != nil {
+					return err
+				}
+				return writeArtifact(c, out, data)
+			}
+			return writeArtifact(c, out, form.Markdown())
+		},
+	}
+	f := cmd.Flags()
+	f.StringVar(&contractPath, "contract", "", "path to a data-contract JSON (default: embedded canonical contract)")
+	f.StringVar(&format, "format", "md", "output format: md|json")
+	f.StringVar(&out, "out", "", "write to this path (default stdout)")
+	f.BoolVar(&includeOptional, "include-optional", false, "include data types that are off by default in the contract")
+	return localOnly(cmd)
+}
+
+// ---- MASTG verification runner ----
+
+func newMASTGCmd(c *CLI) *cobra.Command {
+	var catalogPath, evidencePath, masvsReportPath, format, out string
+	var requirePass bool
+	cmd := &cobra.Command{
+		Use:   "mastg",
+		Short: "Run MASTG verification procedures and emit a per-release report",
+		Long: "Map the repo's MASVS controls (docs/masvs-mapping.md) to OWASP MASTG " +
+			"verification procedures and evaluate them against per-release evidence: explicit " +
+			"assertions (--evidence) and an optional tools/masvs-report overlay (--masvs-report). " +
+			"Only failed procedures gate by default; --require-pass also gates on pending device " +
+			"procedures. Exit code is non-zero when the release is blocked.",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if format != "md" && format != "json" {
+				return newUsageError("invalid --format %q (want md|json)", format)
+			}
+			resolved, err := locateRepoFile(catalogPath)
+			if err != nil {
+				return err
+			}
+			md, err := os.ReadFile(resolved)
+			if err != nil {
+				return fmt.Errorf("read catalog: %w", err)
+			}
+			cat, err := mastg.ParseCatalog(string(md))
+			if err != nil {
+				return err
+			}
+			ev := &mastg.Evidence{}
+			if evidencePath != "" {
+				data, rerr := os.ReadFile(evidencePath)
+				if rerr != nil {
+					return fmt.Errorf("read evidence: %w", rerr)
+				}
+				if ev, err = mastg.LoadEvidence(data); err != nil {
+					return err
+				}
+			}
+			if masvsReportPath != "" {
+				data, rerr := os.ReadFile(masvsReportPath)
+				if rerr != nil {
+					return fmt.Errorf("read masvs-report: %w", rerr)
+				}
+				if err := ev.MergeMASVSReport(data); err != nil {
+					return err
+				}
+			}
+			report := cat.Run(ev, mastg.RunOptions{RequirePass: requirePass})
+			var rendered []byte
+			if format == "json" {
+				if rendered, err = report.JSON(); err != nil {
+					return err
+				}
+			} else {
+				rendered = report.Markdown()
+			}
+			if err := writeArtifact(c, out, rendered); err != nil {
+				return err
+			}
+			if report.Gating.Blocked {
+				return newBlockedError("release blocked: %d failed, %d pending procedure(s)", report.Gating.Failed, report.Gating.Pending)
+			}
+			return nil
+		},
+	}
+	f := cmd.Flags()
+	f.StringVar(&catalogPath, "catalog", "docs/masvs-mapping.md", "path to the MASVS control catalog markdown")
+	f.StringVar(&evidencePath, "evidence", "", "path to per-release evidence JSON (explicit MASTG assertions)")
+	f.StringVar(&masvsReportPath, "masvs-report", "", "path to a tools/masvs-report JSON to overlay as build evidence")
+	f.StringVar(&format, "format", "md", "output format: md|json")
+	f.StringVar(&out, "out", "", "write to this path (default stdout)")
+	f.BoolVar(&requirePass, "require-pass", false, "strict: pending device procedures also block the release")
+	return localOnly(cmd)
+}
+
+// locateRepoFile returns path if it exists, else walks up from the working
+// directory to find it, so the generators work from any subdirectory.
+func locateRepoFile(path string) (string, error) {
+	if _, err := os.Stat(path); err == nil {
+		return path, nil
+	}
+	if filepath.IsAbs(path) {
+		return "", fmt.Errorf("file not found: %s", path)
+	}
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	for {
+		candidate := filepath.Join(dir, path)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", fmt.Errorf("file not found searching up from working dir: %s", path)
+		}
+		dir = parent
+	}
+}
+
+// ---- server-backed compliance reads (stream-local, graceful degradation) ----
+
+func newAuditTrailCmd(c *CLI) *cobra.Command {
+	var appID string
+	var pageSize int32
+	cmd := &cobra.Command{
+		Use:   "audit-trail",
+		Short: "Read the tenant's control-plane audit trail",
+		Long: "Read operator audit entries for the tenant (control-plane actions; no end-user " +
+			"PII). Depends on a server RPC WS-K is adding; if the server does not implement it, " +
+			"the command reports \"server capability unavailable\" and exits cleanly.",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			tenant, err := c.requireTenant()
+			if err != nil {
+				return err
+			}
+			ctx, cancel := c.callCtx(cmd.Context())
+			defer cancel()
+			resp, err := c.compliance().GetAuditTrail(ctx, connect.NewRequest(&compliancepb.GetAuditTrailRequest{
+				TenantId: tenant, AppId: appID, PageSize: pageSize,
+			}))
+			if u, handled := c.handleCapability(err, "GetAuditTrail"); handled {
+				return u
+			} else if err != nil {
+				return err
+			}
+			view := newAuditTrailView(resp.Msg)
+			return c.emit(view, auditTrailTable(view))
+		},
+	}
+	f := cmd.Flags()
+	f.StringVar(&appID, "app", "", "filter to a single app id")
+	f.Int32Var(&pageSize, "page-size", 0, "max entries to return (0 = server default)")
+	return cmd
+}
+
+func newKillSwitchCmd(c *CLI) *cobra.Command {
+	var appID string
+	cmd := &cobra.Command{
+		Use:   "kill-switch",
+		Short: "Read the tenant's kill-switch / canary state",
+		Long: "Read the current kill-switch state for the tenant, optionally narrowed to one " +
+			"app. Depends on a server RPC WS-K is adding; degrades gracefully when absent.",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			tenant, err := c.requireTenant()
+			if err != nil {
+				return err
+			}
+			ctx, cancel := c.callCtx(cmd.Context())
+			defer cancel()
+			resp, err := c.compliance().GetKillSwitchState(ctx, connect.NewRequest(&compliancepb.GetKillSwitchStateRequest{
+				TenantId: tenant, AppId: appID,
+			}))
+			if u, handled := c.handleCapability(err, "GetKillSwitchState"); handled {
+				return u
+			} else if err != nil {
+				return err
+			}
+			view := newKillSwitchView(resp.Msg)
+			return c.emit(view, killSwitchTable(view))
+		},
+	}
+	cmd.Flags().StringVar(&appID, "app", "", "narrow to a single app id (default: tenant-wide)")
+	return cmd
+}
+
+func newDPRCmd(c *CLI) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "data-processing-registry",
+		Aliases: []string{"dpr"},
+		Short:   "Read the tenant's record-of-processing-activities",
+		Long: "Read the tenant's data-processing registry (purpose, data categories, legal " +
+			"basis, retention, processors). Depends on a server RPC WS-K is adding; degrades " +
+			"gracefully when absent.",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			tenant, err := c.requireTenant()
+			if err != nil {
+				return err
+			}
+			ctx, cancel := c.callCtx(cmd.Context())
+			defer cancel()
+			resp, err := c.compliance().GetDataProcessingRegistry(ctx, connect.NewRequest(&compliancepb.GetDataProcessingRegistryRequest{
+				TenantId: tenant,
+			}))
+			if u, handled := c.handleCapability(err, "GetDataProcessingRegistry"); handled {
+				return u
+			} else if err != nil {
+				return err
+			}
+			view := newDPRView(resp.Msg)
+			return c.emit(view, dprTable(view))
+		},
+	}
+	return cmd
+}
+
+// handleCapability implements graceful degradation. When the server does not
+// implement the RPC (Connect code Unimplemented), it prints a clear notice and
+// renders an "available: false" result, returning handled=true with a nil error
+// so the command exits cleanly. Any other error is left to the caller.
+func (c *CLI) handleCapability(err error, rpc string) (error, bool) {
+	if err == nil {
+		return nil, false
+	}
+	if connect.CodeOf(err) != connect.CodeUnimplemented {
+		return err, false
+	}
+	_, _ = fmt.Fprintf(c.errOut, "server capability unavailable: %s (the server has not deployed this RPC yet)\n", rpc)
+	if c.output == outputJSON {
+		_ = renderJSON(c.out, capabilityUnavailable{Available: false, RPC: rpc})
+	}
+	return nil, true
+}
+
+type capabilityUnavailable struct {
+	Available bool   `json:"available"`
+	RPC       string `json:"rpc"`
+}
