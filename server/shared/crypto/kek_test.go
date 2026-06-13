@@ -231,6 +231,34 @@ func TestCMKRejectsPlatformBlobForCMKTenant(t *testing.T) {
 	}
 }
 
+func TestCMKDisabledRejectsCMKBlobWithDiagnostic(t *testing.T) {
+	ctx := context.Background()
+	platform := newPlatformEncryptor(t)
+	kms := newFakeKMS()
+
+	// Seal while tenant-a is CMK-enabled.
+	enabled, err := NewCMKKeyManager(platform, kms,
+		staticResolver{uris: map[string]string{"tenant-a": "kms://customer-a/key-1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := enabled.SealForTenant(ctx, "tenant-a", []byte("cmk secret"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Now CMK is disabled for tenant-a. Opening the CMK envelope via the
+	// platform fallback must return the diagnostic ErrCMKDisabled rather than an
+	// opaque AES-GCM failure, and must not succeed (fail closed).
+	disabled, err := NewCMKKeyManager(platform, kms, staticResolver{uris: map[string]string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := disabled.OpenForTenant(ctx, "tenant-a", sealed); !errors.Is(err, ErrCMKDisabled) {
+		t.Fatalf("expected ErrCMKDisabled, got %v", err)
+	}
+}
+
 func TestCMKResolverErrorFailsClosed(t *testing.T) {
 	ctx := context.Background()
 	mgr, err := NewCMKKeyManager(newPlatformEncryptor(t), newFakeKMS(),

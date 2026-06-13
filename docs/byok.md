@@ -74,6 +74,10 @@ key everywhere.
 - If a CMK-enabled tenant has legacy platform-sealed material, opening returns
   `crypto.ErrNotCMKEnvelope`. **Rotate the tenant's signing key after enabling
   CMK** so material is re-sealed under the customer key.
+- If CMK is later **disabled** for a tenant that still has CMK-sealed material,
+  opening returns `crypto.ErrCMKDisabled` (a diagnostic, not an opaque AES-GCM
+  failure). The open still fails closed: re-enable the tenant's KMS key to read
+  the material, or rotate its signing key to re-seal under the platform KEK.
 
 > Note: SIEM connector secrets continue to use the platform KEK; CMK currently
 > covers control-plane signing keys and webhook secrets.

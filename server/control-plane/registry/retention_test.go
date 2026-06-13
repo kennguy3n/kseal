@@ -50,7 +50,10 @@ func TestRetentionResolverUnknownTenant(t *testing.T) {
 	database := testDB(t)
 	ctx := context.Background()
 	r := NewRetentionResolver(database)
-	if _, _, err := r.RawRetentionDays(ctx, "00000000-0000-0000-0000-000000000000"); err == nil {
-		t.Fatal("expected error for unknown tenant")
+	// A missing tenant reports no override (not an error) so the purger applies
+	// the platform default and orphaned events still age out.
+	days, ok, err := r.RawRetentionDays(ctx, "00000000-0000-0000-0000-000000000000")
+	if err != nil || ok || days != 0 {
+		t.Fatalf("expected unknown tenant to report no override, got days=%d ok=%v err=%v", days, ok, err)
 	}
 }

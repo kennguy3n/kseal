@@ -80,6 +80,11 @@ var (
 	// is not a CMK envelope (e.g. sealed under the platform KEK before CMK was
 	// turned on). Re-seal by rotating the tenant's signing key.
 	ErrNotCMKEnvelope = errors.New("crypto: expected cmk envelope")
+	// ErrCMKDisabled indicates a tenant whose CMK is now disabled still has
+	// CMK-sealed material. The open is denied (fail closed); re-enable the
+	// tenant's KMS key to read it, or rotate its signing key under the platform
+	// KEK. Returned instead of an opaque AES-GCM failure for diagnosability.
+	ErrCMKDisabled = errors.New("crypto: cmk-sealed material but cmk is disabled for tenant")
 )
 
 // CMKKeyManager is the customer-managed-key TenantSealer. CMK-enabled tenants
@@ -151,6 +156,11 @@ func (m *CMKKeyManager) OpenForTenant(ctx context.Context, tenantID string, seal
 		return nil, fmt.Errorf("resolve tenant cmk: %w", err)
 	}
 	if !enabled {
+		if hasCMKMagic(sealed) {
+			// Tenant was CMK-enabled when this was sealed but is no longer.
+			// Surface a diagnostic error rather than an opaque AES-GCM failure.
+			return nil, ErrCMKDisabled
+		}
 		return m.platform.Open(sealed)
 	}
 
@@ -197,13 +207,19 @@ func encodeCMKEnvelope(wrappedDEK, ciphertext []byte) ([]byte, error) {
 	return out, nil
 }
 
+// hasCMKMagic reports whether b begins with the CMK envelope magic, identifying
+// CMK-sealed material without fully decoding it.
+func hasCMKMagic(b []byte) bool {
+	return len(b) >= len(cmkMagic) && [4]byte(b[:4]) == cmkMagic
+}
+
 // decodeCMKEnvelope parses a CMK envelope, validating magic and version and
 // bounds-checking the wrapped-DEK length.
 func decodeCMKEnvelope(b []byte) (wrappedDEK, ciphertext []byte, err error) {
 	if len(b) < cmkHeaderLen {
 		return nil, nil, ErrNotCMKEnvelope
 	}
-	if [4]byte(b[:4]) != cmkMagic {
+	if !hasCMKMagic(b) {
 		return nil, nil, ErrNotCMKEnvelope
 	}
 	if b[4] != cmkVersion {

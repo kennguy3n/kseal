@@ -26,8 +26,9 @@ type RedisConfig struct {
 }
 
 // buildRedisOptions translates a RedisConfig into go-redis options, including
-// the TLS config and AUTH credential. It is pure (no network I/O) so the
-// option-construction logic is unit-testable without a live Redis.
+// the TLS config and AUTH credential. It opens no network connection (it only
+// reads the CA file when one is configured), so the option-construction logic
+// is unit-testable without a live Redis.
 func buildRedisOptions(cfg RedisConfig) (*redis.Options, error) {
 	opts := &redis.Options{
 		Addr:         cfg.Addr,

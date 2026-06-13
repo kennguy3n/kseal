@@ -23,7 +23,11 @@ func NewRetentionResolver(database *db.DB) *RetentionResolver {
 	return &RetentionResolver{db: database}
 }
 
-// RawRetentionDays returns the tenant's configured retention window in days.
+// RawRetentionDays returns the tenant's configured retention window in days. A
+// missing tenant row reports no override (ok=false) rather than an error, so
+// orphaned raw events left behind by a deleted tenant still age out under the
+// platform default instead of being retained indefinitely — a privacy-safe
+// default for the purge routine.
 func (r *RetentionResolver) RawRetentionDays(ctx context.Context, tenantID string) (int, bool, error) {
 	if tenantID == "" {
 		return 0, false, errors.New("registry: empty tenant id for retention lookup")
@@ -34,7 +38,7 @@ func (r *RetentionResolver) RawRetentionDays(ctx context.Context, tenantID strin
 		`SELECT raw_retention_days FROM tenants WHERE id = $1`, tenantID).Scan(&days)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return 0, false, fmt.Errorf("%w: tenant %s", ErrNotFound, tenantID)
+			return 0, false, nil
 		}
 		return 0, false, fmt.Errorf("retention lookup: %w", err)
 	}
