@@ -1,0 +1,12 @@
+# SwiftPM build output
+.build/
+.swiftpm/
+*.xcodeproj
+
+# XCFramework pipeline output
+/build/
+
+# Generated per-build artifacts (emitted by the plugin / kseal-harden)
+KsealSecureStrings.generated.swift
+kseal-build-proof.json
+kseal-build-proof.offline.json
