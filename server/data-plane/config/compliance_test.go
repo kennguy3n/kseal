@@ -146,3 +146,65 @@ func TestKillSwitchChangesETag(t *testing.T) {
 		t.Fatal("issuing a kill switch must bust the cached ETag")
 	}
 }
+
+func TestBuildScopedKillSwitchDeliveredViaConfig(t *testing.T) {
+	svc, store, tn, app := setup(t)
+	createPolicy(t, store, tn.Id, app.Id, "stable", true)
+	cs := compliance.NewMemStore(store)
+	const build = "buildhash-abc"
+	if _, err := cs.IssueKillSwitch(context.Background(), compliance.KillSwitchInput{
+		TenantID: tn.Id, AppID: app.Id, BuildHash: build,
+		Command: ksealv1.KillSwitchCommand_KILL_SWITCH_COMMAND_DISABLE,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	svc.AttachCompliance(nil, cs, mustFlags(t, "*:"+compliance.FlagKillSwitch+"=true"))
+
+	// No build hash: the build-scoped switch must not apply.
+	resp, err := svc.GetConfig(context.Background(), connect.NewRequest(&ksealv1.ConfigRequest{TenantId: tn.Id, AppId: app.Id}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Msg.KillSwitch != nil {
+		t.Fatalf("build-scoped switch must not apply to a request without build_hash, got %+v", resp.Msg.KillSwitch)
+	}
+
+	// Matching build hash: the build-scoped switch is delivered.
+	resp, err = svc.GetConfig(context.Background(), connect.NewRequest(&ksealv1.ConfigRequest{TenantId: tn.Id, AppId: app.Id, BuildHash: build}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Msg.KillSwitch == nil || resp.Msg.KillSwitch.BuildHash != build {
+		t.Fatalf("matching build_hash must deliver the build-scoped switch, got %+v", resp.Msg.KillSwitch)
+	}
+}
+
+func TestCacheControlPrivateWhenInstanceSpecific(t *testing.T) {
+	svc, store, tn, app := setup(t)
+	stable := createPolicy(t, store, tn.Id, app.Id, "stable", true)
+	cand := createPolicy(t, store, tn.Id, app.Id, "candidate", false)
+	reg := canary.NewRegistry()
+	reg.Replace([]*ksealv1.CanaryStatus{{
+		TenantId: tn.Id, AppId: app.Id, CandidatePolicyId: cand.Id, StablePolicyId: stable.Id,
+		Percent: 100, State: ksealv1.CanaryState_CANARY_STATE_ACTIVE,
+	}})
+	svc.AttachCompliance(reg, nil, mustFlags(t, tn.Id+":"+compliance.FlagCanaryRollout+"=true"))
+
+	// Stable (no candidate, no kill switch) stays publicly cacheable.
+	stableResp, err := svc.GetConfig(context.Background(), connect.NewRequest(&ksealv1.ConfigRequest{TenantId: tn.Id, AppId: app.Id}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cc := stableResp.Header().Get("Cache-Control"); cc == "" || cc[:6] != "public" {
+		t.Fatalf("stable config must be public, got %q", cc)
+	}
+
+	// A served canary candidate is instance-specific and must be private.
+	candResp, err := svc.GetConfig(context.Background(), connect.NewRequest(&ksealv1.ConfigRequest{TenantId: tn.Id, AppId: app.Id, InstanceId: "inst-1"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cc := candResp.Header().Get("Cache-Control"); cc == "" || cc[:7] != "private" {
+		t.Fatalf("canary candidate config must be private, got %q", cc)
+	}
+}

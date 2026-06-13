@@ -251,6 +251,16 @@ func (s *PostgresStore) IssueKillSwitch(ctx context.Context, in KillSwitchInput)
 	}
 	var ks *ksealv1.SignedKillSwitch
 	err = s.db.WithTenantTx(ctx, in.TenantID, func(tx pgx.Tx) error {
+		// Serialize per-scope version increments so concurrent issues for the same
+		// (tenant, app, build) cannot read the same MAX(version) and produce a
+		// duplicate, violating the anti-rollback monotonic invariant. Mirrors the
+		// advisory lock guarding the audit seq in appendAuditTx; the scope lock is
+		// taken first so the lock order (scope -> tenant) is consistent.
+		if _, err := tx.Exec(ctx,
+			`SELECT pg_advisory_xact_lock(hashtext($1 || '\x00' || $2 || '\x00' || $3))`,
+			in.TenantID, in.AppID, in.BuildHash); err != nil {
+			return err
+		}
 		var version int64
 		if err := tx.QueryRow(ctx,
 			`SELECT COALESCE(MAX(version), 0) + 1 FROM kill_switches
@@ -339,14 +349,17 @@ func (s *PostgresStore) SetCanary(ctx context.Context, in CanaryInput) (*ksealv1
 	err := s.db.WithTenantTx(ctx, in.TenantID, func(tx pgx.Tx) error {
 		updated := nowMillis()
 		lastEvent := fmt.Sprintf("rollout set to %d%%", in.Percent)
-		// Preserve a previously recorded last-known-good if one exists.
+		// A caller-supplied stable (the current active policy) always wins so
+		// re-canarying after a rollback targets the new active policy; only fall
+		// back to the previously recorded last-known-good when the caller could
+		// not resolve one (empty).
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO canary_rollouts
 			    (tenant_id, app_id, candidate_policy_id, stable_policy_id, percent, state, rollback_threshold, last_event, updated_at_ms)
 			VALUES ($1,$2,$3,$4,$5,1,$6,$7,$8)
 			ON CONFLICT (tenant_id, app_id) DO UPDATE SET
 			    candidate_policy_id = EXCLUDED.candidate_policy_id,
-			    stable_policy_id = CASE WHEN canary_rollouts.stable_policy_id <> '' THEN canary_rollouts.stable_policy_id ELSE EXCLUDED.stable_policy_id END,
+			    stable_policy_id = CASE WHEN EXCLUDED.stable_policy_id <> '' THEN EXCLUDED.stable_policy_id ELSE canary_rollouts.stable_policy_id END,
 			    percent = EXCLUDED.percent,
 			    state = 1,
 			    rollback_threshold = EXCLUDED.rollback_threshold,

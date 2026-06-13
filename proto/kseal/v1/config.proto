@@ -68,6 +68,10 @@ message ConfigRequest {
   // canary bucketing. Empty disables candidate selection for the caller
   // (fail-safe: it stays on the stable config). Never a device fingerprint.
   string instance_id = 5;
+  // Registered build hash of the running binary. Lets the server deliver a
+  // build-scoped kill switch (the most specific scope) in addition to
+  // app/tenant-scoped ones. Empty falls back to app/tenant scope resolution.
+  string build_hash = 6;
 }
 
 // ConfigResponse returns the signed config plus cache validators.

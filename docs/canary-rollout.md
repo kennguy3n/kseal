@@ -35,7 +35,14 @@ The data plane keeps a **lock-free, atomic-pointer snapshot** of active
 rollouts (`canary.Registry`). `ConfigService.GetConfig` calls `Cohort(...)` to
 pick the candidate or stable policy with zero DB round-trips; resolving a
 candidate is fail-safe (any error falls back to the active policy, so a rollout
-misconfiguration never denies config).
+misconfiguration never denies config). A served candidate is instance-specific,
+so its response is marked `Cache-Control: private`; the shared stable config
+stays publicly cacheable for the TTL.
+
+`stable_policy_id` is resolved from the **current active policy** on every
+`SetCanaryRollout`, so re-canarying after a rollback targets the freshly
+activated policy rather than a stale one; it only falls back to the previously
+recorded last-known-good when no active policy can be resolved.
 
 ## Health & auto-rollback
 

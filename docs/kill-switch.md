@@ -34,10 +34,14 @@ sig = Ed25519_sign( tenant_signing_key,
 
 `ConfigService.GetConfig` attaches the effective `SignedKillSwitch` to
 `ConfigResponse.kill_switch` when the `kill_switch` flag is enabled for the
-tenant. The kill-switch identity (`command`, `version`) is folded into the
-config `ETag`, so issuing or changing a switch busts cached config within the
-TTL instead of waiting for expiry. Lookup is fail-safe: any error yields no
-kill switch rather than failing the config fetch.
+tenant. The SDK sends `ConfigRequest.build_hash` (the registered hash of the
+running binary), so the **most specific** switch — including a build-scoped one
+— is resolved and delivered; an empty `build_hash` falls back to app/tenant
+scope. The kill-switch identity (`command`, `version`) is folded into the config
+`ETag`, so issuing or changing a switch busts cached config within the TTL
+instead of waiting for expiry. Because a delivered switch makes the response
+scope-specific, such responses are marked `Cache-Control: private`. Lookup is
+fail-safe: any error yields no kill switch rather than failing the config fetch.
 
 ## Fail-safe verification
 

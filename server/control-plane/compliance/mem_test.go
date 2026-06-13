@@ -285,6 +285,60 @@ func TestCanaryPromotePreservesStable(t *testing.T) {
 	}
 }
 
+func TestCanarySetHonorsNewStableAfterRollback(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newTestStore(t)
+	const tenant, app = "t1", "app1"
+
+	// Initial rollout against stable "v1", then roll back.
+	if _, err := s.SetCanary(ctx, CanaryInput{TenantID: tenant, AppID: app, CandidatePolicyID: "cand1", StablePolicyID: "v1", Percent: 50}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RollbackCanary(ctx, tenant, app, "breach", "actor", CanaryObservation{BlockRate: 0.5, SampleCount: 100}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Admin activated a new policy "v2"; re-canary must target v2 as stable,
+	// not the stale "v1" preserved from the previous rollout.
+	cs, err := s.SetCanary(ctx, CanaryInput{TenantID: tenant, AppID: app, CandidatePolicyID: "cand2", StablePolicyID: "v2", Percent: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cs.StablePolicyId != "v2" {
+		t.Fatalf("re-canary must adopt the new stable v2, got %q", cs.StablePolicyId)
+	}
+
+	// When the caller cannot resolve a stable (empty), fall back to last-known-good.
+	cs, err = s.SetCanary(ctx, CanaryInput{TenantID: tenant, AppID: app, CandidatePolicyID: "cand3", StablePolicyID: "", Percent: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cs.StablePolicyId != "v2" {
+		t.Fatalf("empty stable must fall back to last-known-good v2, got %q", cs.StablePolicyId)
+	}
+}
+
+func TestListAuditNoTrailingEmptyPage(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newTestStore(t)
+	const tenant = "t1"
+	for i := 0; i < 4; i++ {
+		mustAppend(t, s, tenant, "policy.update")
+	}
+	// Page size equal to the exact count: a token must NOT be emitted, so the
+	// client never makes a follow-up request that returns zero results.
+	page, next, err := s.ListAudit(ctx, tenant, AuditFilter{}, 4, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page) != 4 {
+		t.Fatalf("expected all 4 events, got %d", len(page))
+	}
+	if next != "" {
+		t.Fatalf("exact-fill page must not emit a next token, got %q", next)
+	}
+}
+
 func mustAppend(t *testing.T, s *MemStore, tenant, action string) {
 	t.Helper()
 	if _, err := s.AppendAudit(context.Background(), tenant, Entry{Action: action}); err != nil {

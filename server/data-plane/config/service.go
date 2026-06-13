@@ -62,7 +62,7 @@ func (s *Service) GetConfig(ctx context.Context, req *connect.Request[ksealv1.Co
 	if m.TenantId == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("tenant_id required"))
 	}
-	policy, err := s.resolvePolicy(ctx, m)
+	policy, candidate, err := s.resolvePolicy(ctx, m)
 	if errors.Is(err, registry.ErrNotFound) {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("no active policy"))
 	}
@@ -111,7 +111,16 @@ func (s *Service) GetConfig(ctx context.Context, req *connect.Request[ksealv1.Co
 		KillSwitch:   killSwitch,
 	})
 	resp.Header().Set("ETag", etag)
-	resp.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", int(s.ttl.Seconds())))
+	// A canary candidate or a kill switch makes the response vary within a
+	// (tenant, app) by instance/build, so it must not be served from a shared
+	// cache. Connect uses POST (not cached by default), but mark such responses
+	// private defensively against aggressive proxies; the stable, shared config
+	// stays publicly cacheable for the TTL.
+	if candidate || killSwitch != nil {
+		resp.Header().Set("Cache-Control", fmt.Sprintf("private, max-age=%d", int(s.ttl.Seconds())))
+	} else {
+		resp.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", int(s.ttl.Seconds())))
+	}
 	return resp, nil
 }
 
@@ -120,23 +129,23 @@ func (s *Service) GetConfig(ctx context.Context, req *connect.Request[ksealv1.Co
 // otherwise the active (stable) policy. It is fail-safe — any error resolving a
 // candidate falls back to the active policy so a rollout misconfiguration never
 // denies config.
-func (s *Service) resolvePolicy(ctx context.Context, m *ksealv1.ConfigRequest) (*ksealv1.Policy, error) {
+func (s *Service) resolvePolicy(ctx context.Context, m *ksealv1.ConfigRequest) (policy *ksealv1.Policy, servedCandidate bool, err error) {
 	active, err := s.store.GetActivePolicy(ctx, m.TenantId, m.AppId)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if s.canary == nil || m.InstanceId == "" || !s.flags.Enabled(m.TenantId, compliance.FlagCanaryRollout) {
-		return active, nil
+		return active, false, nil
 	}
 	policyID, candidate := s.canary.Cohort(m.TenantId, m.AppId, m.InstanceId)
 	if !candidate || policyID == "" {
-		return active, nil
+		return active, false, nil
 	}
 	cand, err := s.store.GetPolicy(ctx, m.TenantId, policyID)
 	if err != nil || cand == nil {
-		return active, nil
+		return active, false, nil
 	}
-	return cand, nil
+	return cand, true, nil
 }
 
 // resolveKillSwitch returns the signed kill switch in effect for the scope when
@@ -150,7 +159,9 @@ func (s *Service) resolveKillSwitch(ctx context.Context, m *ksealv1.ConfigReques
 	if err != nil {
 		return nil
 	}
-	_, active := compliance.GetKillSwitchState(switches, m.AppId, "")
+	// Pass the caller's build hash so a build-scoped switch (the most specific
+	// scope) is delivered when present; empty falls back to app/tenant scope.
+	_, active := compliance.GetKillSwitchState(switches, m.AppId, m.BuildHash)
 	return active
 }
 

@@ -119,14 +119,13 @@ func (s *MemStore) ListAudit(_ context.Context, tenantID string, f AuditFilter, 
 			continue
 		}
 		if len(out) == size {
+			// A further matching event exists beyond this full page, so emit a
+			// cursor. When the chain is exhausted at exactly `size` items this
+			// branch never runs and next stays empty — no trailing empty page.
 			next = strconv.FormatInt(out[len(out)-1].Seq, 10)
 			break
 		}
 		out = append(out, cloneAudit(ev))
-	}
-	if next == "" && len(out) == size {
-		// Exactly filled the page; emit a cursor so the caller can continue.
-		next = strconv.FormatInt(out[len(out)-1].Seq, 10)
 	}
 	return out, next, nil
 }
@@ -261,8 +260,14 @@ func (s *MemStore) SetCanary(_ context.Context, in CanaryInput) (*ksealv1.Canary
 		LastEvent:         fmt.Sprintf("rollout set to %d%%", in.Percent),
 		UpdatedAt:         nowMillis(),
 	}
-	if prev, ok := s.canaries[key]; ok && prev.StablePolicyId != "" {
-		cs.StablePolicyId = prev.StablePolicyId // preserve last-known-good
+	if cs.StablePolicyId == "" {
+		// Only fall back to the previously recorded stable when the caller could
+		// not resolve a current active policy; a caller-supplied stable always
+		// wins so re-canarying after a rollback targets the new active policy,
+		// not a stale one.
+		if prev, ok := s.canaries[key]; ok && prev.StablePolicyId != "" {
+			cs.StablePolicyId = prev.StablePolicyId
+		}
 	}
 	s.canaries[key] = cs
 	if _, err := s.appendLocked(in.TenantID, canaryEntry("canary.set", in.AppID, in.ActorKeyID, map[string]string{
