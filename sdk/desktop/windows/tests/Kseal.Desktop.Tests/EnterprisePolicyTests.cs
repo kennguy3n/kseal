@@ -90,6 +90,15 @@ public class EnterprisePolicyTests : IDisposable
     }
 
     [Fact]
+    public void AllowsModuleRejectsParentTraversal()
+    {
+        var p = new EnterprisePolicy { InjectionAllowlist = [@"C:\agents\"] };
+        // A '..' segment that escapes the allowlisted prefix must not be allowlisted.
+        Assert.False(p.AllowsModule(@"C:\agents\..\evil.dll"));
+        Assert.False(p.AllowsModule(@"C:\agents\sub\..\..\evil.dll"));
+    }
+
+    [Fact]
     public void FileProviderReadsPolicy()
     {
         string path = Path.Combine(_dir, "policy.json");

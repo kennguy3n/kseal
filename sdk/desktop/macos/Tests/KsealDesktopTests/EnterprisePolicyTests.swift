@@ -49,6 +49,13 @@ final class EnterprisePolicyTests: XCTestCase {
         XCTAssertFalse(p.allowsModule("/Library/Acme/plugin.dylib.bak")) // exact only
     }
 
+    func testAllowsModuleRejectsParentTraversal() {
+        let p = EnterprisePolicy(injectionAllowlist: ["/opt/agents/"])
+        // A '..' segment that escapes the allowlisted prefix must not be allowlisted.
+        XCTAssertFalse(p.allowsModule("/opt/agents/../evil.dylib"))
+        XCTAssertFalse(p.allowsModule("/opt/agents/sub/../../evil.dylib"))
+    }
+
     func testFileProviderReadsPolicy() throws {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("kseal-policy-\(UUID().uuidString).json")

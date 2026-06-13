@@ -76,6 +76,9 @@ public struct EnterprisePolicy: Equatable, Sendable, Codable {
     /// Whether a foreign module `path` is allowlisted (exact match, or under an
     /// allowlist entry that names a directory prefix ending in `/`).
     public func allowsModule(_ path: String) -> Bool {
+        // Fail closed on a path that could escape an allowlisted prefix via a
+        // parent-directory segment (e.g. /Library/Acme/../evil.dylib).
+        if Self.hasParentTraversal(path) { return false }
         for entry in injectionAllowlist where !entry.isEmpty {
             if entry.hasSuffix("/") {
                 if path.hasPrefix(entry) { return true }
@@ -84,6 +87,11 @@ public struct EnterprisePolicy: Equatable, Sendable, Codable {
             }
         }
         return false
+    }
+
+    /// True if any path segment (split on either separator) is exactly `..`.
+    private static func hasParentTraversal(_ path: String) -> Bool {
+        path.split(whereSeparator: { $0 == "/" || $0 == "\\" }).contains("..")
     }
 }
 

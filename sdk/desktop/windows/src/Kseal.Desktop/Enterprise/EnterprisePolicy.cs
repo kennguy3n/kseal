@@ -82,6 +82,9 @@ public sealed record EnterprisePolicy
     /// </summary>
     public bool AllowsModule(string path)
     {
+        // Fail closed on a path that could escape an allowlisted prefix via a
+        // parent-directory segment (e.g. C:\Acme\..\evil.dll): never allowlist it.
+        if (HasParentTraversal(path)) return false;
         foreach (string entry in InjectionAllowlist)
         {
             if (string.IsNullOrEmpty(entry)) continue;
@@ -93,6 +96,16 @@ public sealed record EnterprisePolicy
             {
                 return true;
             }
+        }
+        return false;
+    }
+
+    // True if any path segment (split on either separator) is exactly "..".
+    private static bool HasParentTraversal(string path)
+    {
+        foreach (string seg in path.Split('/', '\\'))
+        {
+            if (seg == "..") return true;
         }
         return false;
     }
@@ -180,24 +193,33 @@ public sealed class RegistryEnterprisePolicyProvider : IEnterprisePolicyProvider
 
     public EnterprisePolicy CurrentPolicy()
     {
-        using RegistryKey? key = Registry.LocalMachine.OpenSubKey(_subKey);
-        if (key is null) return EnterprisePolicy.Strict;
-
-        var verbosity = TelemetryVerbosity.Standard;
-        if (key.GetValue("TelemetryVerbosity") is string raw
-            && Enum.TryParse(raw, ignoreCase: true, out TelemetryVerbosity parsed))
+        try
         {
-            verbosity = parsed;
+            using RegistryKey? key = Registry.LocalMachine.OpenSubKey(_subKey);
+            if (key is null) return EnterprisePolicy.Strict;
+
+            var verbosity = TelemetryVerbosity.Standard;
+            if (key.GetValue("TelemetryVerbosity") is string raw
+                && Enum.TryParse(raw, ignoreCase: true, out TelemetryVerbosity parsed))
+            {
+                verbosity = parsed;
+            }
+
+            return new EnterprisePolicy
+            {
+                PermitDebugger = ReadFlag(key, "PermitDebugger"),
+                RequireHardwareBackedProofKey = ReadFlag(key, "RequireHardwareBackedProofKey"),
+                // REG_MULTI_SZ → string[]; absent/other types fall back to empty.
+                InjectionAllowlist = key.GetValue("InjectionAllowlist") as string[] ?? [],
+                TelemetryVerbosity = verbosity,
+            };
         }
-
-        return new EnterprisePolicy
+        // A restrictive registry ACL must never crash SDK init: fail safe to strict,
+        // mirroring FileEnterprisePolicyProvider.
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Security.SecurityException)
         {
-            PermitDebugger = ReadFlag(key, "PermitDebugger"),
-            RequireHardwareBackedProofKey = ReadFlag(key, "RequireHardwareBackedProofKey"),
-            // REG_MULTI_SZ → string[]; absent/other types fall back to empty.
-            InjectionAllowlist = key.GetValue("InjectionAllowlist") as string[] ?? [],
-            TelemetryVerbosity = verbosity,
-        };
+            return EnterprisePolicy.Strict;
+        }
     }
 
     // A REG_DWORD treated as a boolean flag (non-zero == true).
