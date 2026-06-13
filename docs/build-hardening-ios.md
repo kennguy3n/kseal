@@ -121,6 +121,16 @@ randomized transforms via SHA-256 in counter mode
 material is never reused. **Only the seed digest is published** — the raw seed is
 never logged, printed, or committed.
 
+When `KSEAL_BUILD_SEED` is pinned, the build-tool plugin forwards it to
+`kseal-harden` as an explicit `--build-seed` argument. This is deliberate: it
+makes the seed part of the build command's cache key so SwiftPM re-hardens when
+the pinned seed changes (an environment variable alone is invisible to the build
+graph and would let a stale, previously hardened output be reused). The default
+random-seed path passes no seed argument, so ordinary incremental builds reuse
+the prior hardened output and only redraw a seed on a clean build. The pinned
+value stays on the trusted build host (in the local build manifest) and is never
+committed or shipped.
+
 ## String hardening
 
 Integrators list sensitive literals in `kseal-secure-strings.json` next to their

@@ -99,8 +99,10 @@ func runGenerate(_ opts: Args) {
 
     var toolVersions: [String: String] = [:]
     for pair in opts.values("tool-version") {
-        let parts = pair.split(separator: "=", maxSplits: 1)
-        if parts.count == 2 { toolVersions[String(parts[0])] = String(parts[1]) }
+        // Keep empty subsequences so "swift=" records an empty version rather
+        // than being silently dropped; only require a non-empty tool name.
+        let parts = pair.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+        if parts.count == 2, !parts[0].isEmpty { toolVersions[String(parts[0])] = String(parts[1]) }
     }
 
     let request = HardenRequest(
@@ -115,7 +117,7 @@ func runGenerate(_ opts: Args) {
         extraToolVersions: toolVersions
     )
 
-    let seed = PolymorphismSeed.resolve()
+    let seed = PolymorphismSeed.resolve(explicitHex: opts.value("build-seed"))
     do {
         let output = try HardenEngine().run(request, seed: seed)
         try FileManager.default.createDirectory(at: outStrings.deletingLastPathComponent(), withIntermediateDirectories: true)

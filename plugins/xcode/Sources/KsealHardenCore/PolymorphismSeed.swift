@@ -42,9 +42,13 @@ public struct PolymorphismSeed: Equatable {
     /// reproducible-build pipelines deterministic while defaulting to per-build
     /// randomness.
     public static func resolve(
+        explicitHex: String? = nil,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         byteCount: Int = 32
     ) -> PolymorphismSeed {
+        if let hex = explicitHex, let seed = PolymorphismSeed(hex: hex) {
+            return seed
+        }
         if let hex = environment["KSEAL_BUILD_SEED"], let seed = PolymorphismSeed(hex: hex) {
             return seed
         }

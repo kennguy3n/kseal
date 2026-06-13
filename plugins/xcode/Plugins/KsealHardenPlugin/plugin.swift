@@ -53,6 +53,15 @@ struct KsealHardenPlugin: BuildToolPlugin {
         if let profile = env["KSEAL_PROTECTION_PROFILE_ID"], !profile.isEmpty {
             arguments += ["--protection-profile-id", profile]
         }
+        // When a seed is explicitly pinned, forward it as an argument so it is
+        // part of this build command's cache key. Otherwise SwiftPM, which keys
+        // re-runs on inputs/outputs/arguments, could serve a previously hardened
+        // output after the pinned seed changed (the env var alone is invisible to
+        // the build graph). The default random-seed path passes no seed, so
+        // incremental builds correctly reuse the prior output.
+        if let seed = env["KSEAL_BUILD_SEED"], !seed.isEmpty {
+            arguments += ["--build-seed", seed]
+        }
 
         var inputFiles: [Path] = []
         if FileManager.default.fileExists(atPath: secureStrings.string) {

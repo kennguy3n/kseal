@@ -25,6 +25,25 @@ final class PolymorphismSeedTests: XCTestCase {
         XCTAssertEqual(seed.hex, hex)
     }
 
+    func testResolvePrefersExplicitHexOverEnvironment() {
+        let explicit = String(repeating: "cd", count: 32)
+        let envHex = String(repeating: "ab", count: 32)
+        let seed = PolymorphismSeed.resolve(
+            explicitHex: explicit,
+            environment: ["KSEAL_BUILD_SEED": envHex]
+        )
+        XCTAssertEqual(seed.hex, explicit)
+    }
+
+    func testResolveIgnoresInvalidExplicitHexAndUsesEnvironment() {
+        let envHex = String(repeating: "ab", count: 32)
+        let seed = PolymorphismSeed.resolve(
+            explicitHex: "not-hex",
+            environment: ["KSEAL_BUILD_SEED": envHex]
+        )
+        XCTAssertEqual(seed.hex, envHex)
+    }
+
     func testResolveFallsBackToRandom() {
         let seed = PolymorphismSeed.resolve(environment: [:])
         XCTAssertEqual(seed.bytes.count, 32)

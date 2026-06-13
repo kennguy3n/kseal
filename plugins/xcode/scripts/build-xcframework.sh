@@ -55,14 +55,17 @@ mkdir -p "$ARCHIVE_DIR"
 archive_slice() {
     local destination="$1" name="$2"
     echo "[xcframework] archiving KsealSDK ($name)"
-    xcodebuild archive \
-        -workspace "$SDK_IOS_DIR" \
+    # sdk/ios is a SwiftPM package (no .xcworkspace). Run xcodebuild from inside
+    # the package directory so it picks up Package.swift and the auto-generated
+    # KsealSDK scheme; do NOT pass -workspace (that expects a .xcworkspace file).
+    ( cd "$SDK_IOS_DIR" && xcodebuild archive \
         -scheme KsealSDK \
         -destination "$destination" \
         -archivePath "$ARCHIVE_DIR/$name.xcarchive" \
+        -derivedDataPath "$OUT_DIR/DerivedData" \
         SKIP_INSTALL=NO \
         BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
-        ONLY_ACTIVE_ARCH=NO
+        ONLY_ACTIVE_ARCH=NO )
 }
 
 archive_slice "generic/platform=iOS" "ios"
