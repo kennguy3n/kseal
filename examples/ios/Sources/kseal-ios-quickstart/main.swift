@@ -49,8 +49,19 @@ struct KsealTrustClient {
     let tenantId: String
     let appId: String
 
+    /// Builds the RPC URL by string. Connect paths contain a '/' (Service/Method);
+    /// `appendingPathComponent` is meant for a single segment and percent-encodes
+    /// the '/' to %2F on some Foundation versions (e.g. swift-corelibs on Linux),
+    /// so concatenate instead — this matches the Android client and is correct
+    /// across platforms.
+    private func rpcURL(_ method: String) -> URL {
+        let base = baseURL.absoluteString
+        let trimmed = base.hasSuffix("/") ? String(base.dropLast()) : base
+        return URL(string: "\(trimmed)/kseal.v1.\(method)")!
+    }
+
     private func post(_ method: String, body: Data, contentType: String) throws -> Data {
-        var req = URLRequest(url: baseURL.appendingPathComponent("kseal.v1.\(method)"))
+        var req = URLRequest(url: rpcURL(method))
         req.httpMethod = "POST"
         req.setValue(contentType, forHTTPHeaderField: "Content-Type")
         req.httpBody = body
@@ -120,7 +131,9 @@ struct KsealTrustClient {
                 var shift = 0, len = 0
                 while i < b.count { let x = Int(b[i]); i += 1; len |= (x & 0x7f) << shift; if x & 0x80 == 0 { break }; shift += 7 }
                 i += len
-            default: i = b.count
+            case 1: i += 8   // fixed64 — skip so an added wide field can't stall the scan
+            case 5: i += 4   // fixed32 — skip
+            default: i = b.count  // group/unknown wire type — stop
             }
         }
         switch decision { case 1: return "ALLOW"; case 2: return "STEP_UP"; case 3: return "DENY"; default: return "UNSPECIFIED" }

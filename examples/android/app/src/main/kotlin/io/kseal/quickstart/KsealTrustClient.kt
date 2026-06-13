@@ -130,7 +130,9 @@ class KsealTrustClient(
                     val s = String(bytes, i, len, Charsets.UTF_8); i += len
                     if (field == 2) reason = s
                 }
-                else -> break
+                1 -> i += 8 // fixed64 — skip so an added wide field can't stall the scan
+                5 -> i += 4 // fixed32 — skip
+                else -> break // group/unknown wire type — stop
             }
         }
         val name = when (decision) {

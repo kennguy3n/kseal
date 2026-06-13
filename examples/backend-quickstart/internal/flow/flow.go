@@ -47,6 +47,7 @@ const playKeyID = "kseal-quickstart-google-kid"
 // Env holds the wired, real server services plus the mock attestation key.
 type Env struct {
 	db       *db.DB
+	rdb      *redis.Client
 	store    registry.Store
 	trustSvc *trust.Service
 	querySvc *query.Service
@@ -100,6 +101,7 @@ func Connect(ctx context.Context, dsn, redisAddr string) (*Env, error) {
 
 	return &Env{
 		db:        database,
+		rdb:       rdb,
 		store:     store,
 		trustSvc:  trustSvc,
 		querySvc:  querySvc,
@@ -108,9 +110,12 @@ func Connect(ctx context.Context, dsn, redisAddr string) (*Env, error) {
 	}, nil
 }
 
-// Close releases the database pool. The Redis client is owned by the nonce store
-// and closed by process exit; the example is short-lived.
+// Close releases the database pool and the Redis client, so callers (including
+// t.Cleanup in the test) fully release every connection they opened.
 func (e *Env) Close() {
+	if e.rdb != nil {
+		_ = e.rdb.Close()
+	}
 	if e.db != nil {
 		e.db.Close()
 	}
