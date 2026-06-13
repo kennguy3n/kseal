@@ -1,0 +1,101 @@
+# Production overlay: HA, autoscaling, hard guarantees, scoped egress, full
+# observability. Pin images by digest at deploy time (server.image.digest /
+# console.image.digest) for immutable rollouts.
+env: prod
+
+server:
+  replicaCount: 3
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 50
+    targetCPUUtilizationPercentage: 65
+    customMetric:
+      enabled: true
+      name: kseal_rpc_requests_per_second
+      targetAverageValue: "120"
+  pdb:
+    enabled: true
+    minAvailable: "60%"
+  # Hard anti-affinity: never co-locate two server pods on a node in prod.
+  podAntiAffinityPreset: hard
+  resources:
+    requests:
+      cpu: 500m
+      memory: 384Mi
+    limits:
+      memory: 768Mi
+  config:
+    logLevel: info
+    corsOrigins:
+      - https://console.kseal.example.com
+
+console:
+  replicaCount: 3
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+  pdb:
+    enabled: true
+    minAvailable: 2
+  apiBaseUrl: https://api.kseal.example.com
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    # Connect/gRPC over h2c upstream.
+    nginx.ingress.kubernetes.io/backend-protocol: "GRPC"
+  apiHost: api.kseal.example.com
+  consoleHost: console.kseal.example.com
+  tls:
+    - hosts:
+        - api.kseal.example.com
+        - console.kseal.example.com
+      secretName: kseal-prod-tls
+
+externalSecrets:
+  enabled: true
+  refreshInterval: 30m
+  secretStoreRef:
+    name: kseal
+    kind: ClusterSecretStore
+  remoteKeys:
+    kek: kseal/prod/kek
+    postgresDsn: kseal/prod/postgres-dsn
+    redisAddr: kseal/prod/redis-addr
+
+# Scope every egress flow to the production data-plane CIDRs (example ranges).
+networkPolicy:
+  enabled: true
+  egress:
+    postgres:
+      cidr: 10.30.0.0/16
+      port: 5432
+    redis:
+      cidr: 10.31.0.0/16
+      port: 6379
+    otelCollector:
+      enabled: true
+      namespaceSelector:
+        kubernetes.io/metadata.name: monitoring
+      podSelector:
+        app.kubernetes.io/name: opentelemetry-collector
+      port: 4317
+    siemSinks:
+      - cidr: 203.0.113.0/24
+        port: 443
+
+migrations:
+  enabled: true
+  timeoutSeconds: 240
+
+metrics:
+  serviceMonitor:
+    enabled: true
+    interval: 15s
+  prometheusRule:
+    enabled: true

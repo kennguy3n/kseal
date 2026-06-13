@@ -1,0 +1,62 @@
+# Staging overlay: production-shaped but smaller, full security + observability.
+env: staging
+
+server:
+  replicaCount: 2
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 12
+  config:
+    logLevel: info
+    corsOrigins:
+      - https://console.staging.kseal.example.com
+
+console:
+  replicaCount: 2
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 6
+  apiBaseUrl: https://api.staging.kseal.example.com
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-staging
+  apiHost: api.staging.kseal.example.com
+  consoleHost: console.staging.kseal.example.com
+  tls:
+    - hosts:
+        - api.staging.kseal.example.com
+        - console.staging.kseal.example.com
+      secretName: kseal-staging-tls
+
+externalSecrets:
+  enabled: true
+  refreshInterval: 1h
+  remoteKeys:
+    kek: kseal/staging/kek
+    postgresDsn: kseal/staging/postgres-dsn
+    redisAddr: kseal/staging/redis-addr
+
+# Scope SIEM egress to the staging sink CIDRs (example RFC5737 ranges).
+networkPolicy:
+  enabled: true
+  egress:
+    postgres:
+      cidr: 10.20.0.0/16
+      port: 5432
+    redis:
+      cidr: 10.21.0.0/16
+      port: 6379
+    siemSinks:
+      - cidr: 198.51.100.0/24
+        port: 443
+
+metrics:
+  serviceMonitor:
+    enabled: true
+  prometheusRule:
+    enabled: true

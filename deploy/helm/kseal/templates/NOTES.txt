@@ -1,0 +1,36 @@
+kseal {{ .Chart.AppVersion }} deployed as release "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
+
+Components:
+  server   : {{ include "kseal.fullname" . }}-server  (Connect/h2c on :{{ .Values.server.port }})
+{{- if .Values.console.enabled }}
+  console  : {{ include "kseal.fullname" . }}-console  (nginx on :{{ .Values.console.port }})
+{{- end }}
+
+Health / readiness:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "kseal.fullname" . }}-server {{ .Values.server.port }}:{{ .Values.server.service.port }}
+  curl -s localhost:{{ .Values.server.port }}/readyz   # 200 = Postgres + Redis healthy
+  curl -s localhost:{{ .Values.server.port }}/healthz  # liveness
+  curl -s localhost:{{ .Values.server.port }}/metrics  # Prometheus metrics
+
+{{- if .Values.externalSecrets.enabled }}
+
+Secrets are sourced from the external store "{{ .Values.externalSecrets.secretStoreRef.name }}"
+({{ .Values.externalSecrets.secretStoreRef.kind }}) via the External Secrets Operator into
+Secret "{{ include "kseal.secretName" . }}" (keys: KSEAL_KEK, KSEAL_POSTGRES_DSN, KSEAL_REDIS_ADDR).
+Verify it synced:
+  kubectl -n {{ .Release.Namespace }} get externalsecret {{ include "kseal.fullname" . }}-secrets
+{{- else }}
+
+externalSecrets is DISABLED: this release expects a pre-existing Secret named
+"{{ include "kseal.secretName" . }}" with keys KSEAL_KEK, KSEAL_POSTGRES_DSN, KSEAL_REDIS_ADDR.
+{{- end }}
+
+{{- if .Values.server.autoscaling.enabled }}
+
+Autoscaling is ON (CPU{{ if .Values.server.autoscaling.customMetric.enabled }} + custom metric {{ .Values.server.autoscaling.customMetric.name }}{{ end }}).
+{{- if .Values.server.autoscaling.customMetric.enabled }}
+The custom metric requires prometheus-adapter — see deploy/observability/prometheus/prometheus-adapter-rules.yaml.
+{{- end }}
+{{- end }}
+
+Full topology, scaling, secret, and release-gate docs: docs/deployment.md

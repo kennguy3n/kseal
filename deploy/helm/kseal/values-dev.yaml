@@ -1,0 +1,52 @@
+# Dev overlay: small footprint, autoscaling off, secrets from a plain in-cluster
+# Secret (no external store needed for a throwaway dev cluster).
+env: dev
+
+server:
+  replicaCount: 1
+  autoscaling:
+    enabled: false
+  pdb:
+    enabled: false
+  podAntiAffinityPreset: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+  config:
+    logLevel: debug
+    corsOrigins:
+      - http://localhost:5173
+      - https://console.dev.kseal.example.com
+
+console:
+  replicaCount: 1
+  autoscaling:
+    enabled: false
+  pdb:
+    enabled: false
+  podAntiAffinityPreset: ""
+  apiBaseUrl: https://api.dev.kseal.example.com
+
+# In dev we relax the SIEM egress and allow broad outbound; still default-deny
+# by default with explicit allowances.
+networkPolicy:
+  enabled: true
+
+externalSecrets:
+  # Dev clusters often have no external secret store; point at a plain Secret
+  # you create out-of-band (never commit it):
+  #   kubectl create secret generic kseal-dev-secrets \
+  #     --from-literal=KSEAL_KEK=$(head -c32 /dev/urandom | base64) \
+  #     --from-literal=KSEAL_POSTGRES_DSN='postgres://...' \
+  #     --from-literal=KSEAL_REDIS_ADDR='redis:6379'
+  enabled: false
+  existingSecret: kseal-dev-secrets
+
+metrics:
+  serviceMonitor:
+    enabled: false
+  prometheusRule:
+    enabled: false

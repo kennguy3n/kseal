@@ -76,16 +76,61 @@ lint: proto-lint ## Run all linters.
 	cd server && go vet ./...
 	cd sdk/rust-core && cargo clippy --all-targets -- -D warnings
 
-## ---- docker ----
+## ---- docker (prod-mirroring local stack) ----
 
-.PHONY: docker-up
-docker-up: ## Start the full stack (server, postgres, redis, console).
-	docker compose up --build -d
+.PHONY: up
+up: ## Bring up the full stack and wait until the server is ready.
+	docker compose up --build -d --wait
+	@echo "kseal is up:"
+	@echo "  server   http://localhost:8080  (/healthz /readyz /metrics)"
+	@echo "  console  http://localhost:5173"
 
-.PHONY: docker-down
-docker-down: ## Stop the stack (keeps the Postgres volume).
+.PHONY: down
+down: ## Stop the stack (keeps the Postgres volume).
 	docker compose down
 
-.PHONY: docker-clean
-docker-clean: ## Stop the stack AND delete volumes (destroys Postgres data).
+.PHONY: clean
+clean: ## Stop the stack AND delete volumes (destroys Postgres data).
 	docker compose down -v
+
+.PHONY: logs
+logs: ## Tail logs from all services.
+	docker compose logs -f
+
+.PHONY: ps
+ps: ## Show stack status + health.
+	docker compose ps
+
+.PHONY: smoke
+smoke: ## Bring up the stack and assert server /readyz + console respond.
+	docker compose up --build -d --wait
+	@echo "==> server /readyz"; curl -fsS http://localhost:8080/readyz && echo
+	@echo "==> server /healthz"; curl -fsS http://localhost:8080/healthz && echo
+	@echo "==> console /"; curl -fsS -o /dev/null -w '%{http_code}\n' http://localhost:5173/
+	@echo "smoke OK"
+
+# Backwards-compatible aliases.
+.PHONY: docker-up docker-down docker-clean
+docker-up: up   ## Alias for `up`.
+docker-down: down ## Alias for `down`.
+docker-clean: clean ## Alias for `clean`.
+
+## ---- deploy artifact validation ----
+
+.PHONY: deploy-lint
+deploy-lint: ## Lint the Helm chart + validate rendered manifests (needs helm, kubeconform).
+	helm lint deploy/helm/kseal
+	@for env in dev staging prod; do \
+		echo "==> kubeconform ($$env)"; \
+		helm template kseal deploy/helm/kseal -f deploy/helm/kseal/values-$$env.yaml \
+			| kubeconform -strict -summary -ignore-missing-schemas -kubernetes-version 1.29.0; \
+	done
+
+.PHONY: tf-validate
+tf-validate: ## terraform fmt -check + validate every module and env (no apply).
+	terraform -chdir=deploy/terraform fmt -check -recursive
+	@for dir in deploy/terraform/modules/* deploy/terraform/envs/*; do \
+		echo "==> terraform validate $$dir"; \
+		terraform -chdir="$$dir" init -backend=false -input=false >/dev/null; \
+		terraform -chdir="$$dir" validate; \
+	done

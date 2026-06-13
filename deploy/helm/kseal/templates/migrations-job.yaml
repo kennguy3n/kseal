@@ -1,0 +1,96 @@
+{{- if .Values.migrations.enabled }}
+# Pre-deploy migration gate (Helm hook).
+#
+# The kseal server applies its embedded SQL migrations on startup (idempotent,
+# checksum-guarded, transactional — see server/shared/db/migrate.go). There is
+# no migrate-only subcommand, so this hook runs the *real* server binary as a
+# one-shot job: it boots, waits for /readyz to report 200 (= migrations applied
+# AND Postgres+Redis healthy), then shuts the server down and exits 0.
+#
+# Why a hook and not just rely on per-pod startup migration:
+#   * fail the release fast and atomically if a migration is bad, before any new
+#     app replica rolls out;
+#   * avoid N freshly-scaled replicas racing to migrate an empty DB concurrently.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "kseal.fullname" . }}-migrate
+  labels:
+    {{- include "kseal.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrate
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.migrations.backoffLimit }}
+  # Bound total runtime so a stuck gate cannot wedge a release indefinitely.
+  activeDeadlineSeconds: {{ add .Values.migrations.timeoutSeconds 60 }}
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        {{- include "kseal.labels" . | nindent 8 }}
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ include "kseal.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: migrate
+          image: {{ include "kseal.server.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "kseal.fullname" . }}-server
+            - secretRef:
+                name: {{ include "kseal.secretName" . }}
+          env:
+            - name: KSEAL_READYZ_TIMEOUT
+              value: {{ .Values.migrations.timeoutSeconds | quote }}
+            - name: KSEAL_GATE_PORT
+              value: {{ .Values.server.port | quote }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              /usr/local/bin/kseal-server &
+              srv=$!
+              echo "migration-gate: started kseal-server (pid $srv); waiting for /readyz"
+              i=0
+              until wget -q -O- "http://127.0.0.1:${KSEAL_GATE_PORT}/readyz" >/dev/null 2>&1; do
+                i=$((i + 1))
+                if [ "$i" -ge "${KSEAL_READYZ_TIMEOUT}" ]; then
+                  echo "migration-gate: timed out after ${KSEAL_READYZ_TIMEOUT}s waiting for readiness" >&2
+                  kill "$srv" 2>/dev/null || true
+                  exit 1
+                fi
+                if ! kill -0 "$srv" 2>/dev/null; then
+                  echo "migration-gate: server exited before readiness (migration failure?)" >&2
+                  wait "$srv" || true
+                  exit 1
+                fi
+                sleep 1
+              done
+              echo "migration-gate: server reported ready — migrations applied"
+              kill "$srv" 2>/dev/null || true
+              wait "$srv" 2>/dev/null || true
+              exit 0
+          resources:
+            {{- toYaml .Values.migrations.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+{{- end }}

@@ -1,0 +1,30 @@
+# prometheus-adapter rule that publishes the custom per-pod RPS metric the
+# server HPA scales on (server.autoscaling.customMetric.name =
+# kseal_rpc_requests_per_second). It turns the cumulative counter
+# kseal_rpc_requests_total into a per-pod rate exposed on the
+# custom.metrics.k8s.io API as a Pods metric.
+#
+# Apply this ConfigMap and point prometheus-adapter at it
+# (--config=/etc/adapter/config.yaml), or paste the `rules:` block below into
+# the prometheus-adapter Helm chart's `rules.custom` values.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kseal-prometheus-adapter-rules
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/part-of: kseal
+data:
+  config.yaml: |
+    rules:
+      - seriesQuery: 'kseal_rpc_requests_total{namespace!="",pod!=""}'
+        resources:
+          overrides:
+            namespace:
+              resource: namespace
+            pod:
+              resource: pod
+        name:
+          matches: "^kseal_rpc_requests_total$"
+          as: "kseal_rpc_requests_per_second"
+        metricsQuery: 'sum(rate(<<.Series>>{<<.LabelMatchers>>}[2m])) by (<<.GroupBy>>)'

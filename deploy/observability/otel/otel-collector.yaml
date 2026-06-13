@@ -1,0 +1,226 @@
+# OpenTelemetry Collector for kseal: receives OTLP traces from the server and
+# scrapes its Prometheus /metrics, then fans out to a tracing backend and a
+# metrics TSDB. Deployed as a Deployment + Service + ConfigMap so it validates
+# with kubeconform and installs without the OpenTelemetry Operator.
+#
+# NOTE: the kseal server configures a global tracer provider but does not yet
+# attach an OTLP span exporter (server/shared/telemetry/telemetry.go). Traces
+# will start flowing once that exporter is wired (data-plane workstream); the
+# metrics pipeline (scrape of /metrics) is useful immediately. See
+# docs/deployment.md.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kseal-otel-collector
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: opentelemetry-collector
+    app.kubernetes.io/part-of: kseal
+data:
+  collector.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+      # Scrape the kseal server's Prometheus metrics directly.
+      prometheus:
+        config:
+          scrape_configs:
+            - job_name: kseal-server
+              scrape_interval: 30s
+              kubernetes_sd_configs:
+                - role: pod
+              relabel_configs:
+                - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_part_of]
+                  action: keep
+                  regex: kseal
+                - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_component]
+                  action: keep
+                  regex: server
+                - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+                  action: keep
+                  regex: "true"
+                - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_port, __meta_kubernetes_pod_ip]
+                  action: replace
+                  regex: (\d+);(.+)
+                  replacement: $2:$1
+                  target_label: __address__
+                - source_labels: [__meta_kubernetes_namespace]
+                  target_label: namespace
+                - source_labels: [__meta_kubernetes_pod_name]
+                  target_label: pod
+
+    processors:
+      memory_limiter:
+        check_interval: 5s
+        limit_percentage: 80
+        spike_limit_percentage: 25
+      batch:
+        timeout: 5s
+        send_batch_size: 1024
+      # Attach k8s metadata and detect cloud/host resource attributes.
+      k8sattributes: {}
+      resourcedetection:
+        detectors: [env, system]
+        timeout: 5s
+
+    exporters:
+      # Tracing backend (Tempo/Jaeger/vendor). Endpoint set via env at deploy.
+      otlp/traces:
+        endpoint: ${env:KSEAL_TRACES_OTLP_ENDPOINT}
+        tls:
+          insecure: false
+      # Metrics TSDB via remote write (Prometheus/Mimir/Cortex).
+      prometheusremotewrite:
+        endpoint: ${env:KSEAL_METRICS_RW_ENDPOINT}
+        resource_to_telemetry_conversion:
+          enabled: true
+      debug:
+        verbosity: basic
+
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+
+    service:
+      extensions: [health_check]
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, k8sattributes, resourcedetection, batch]
+          exporters: [otlp/traces]
+        metrics:
+          receivers: [otlp, prometheus]
+          processors: [memory_limiter, k8sattributes, resourcedetection, batch]
+          exporters: [prometheusremotewrite]
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kseal-otel-collector
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: opentelemetry-collector
+    app.kubernetes.io/part-of: kseal
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kseal-otel-collector
+  labels:
+    app.kubernetes.io/name: opentelemetry-collector
+    app.kubernetes.io/part-of: kseal
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "namespaces", "nodes"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kseal-otel-collector
+  labels:
+    app.kubernetes.io/name: opentelemetry-collector
+    app.kubernetes.io/part-of: kseal
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kseal-otel-collector
+subjects:
+  - kind: ServiceAccount
+    name: kseal-otel-collector
+    namespace: monitoring
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kseal-otel-collector
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: opentelemetry-collector
+    app.kubernetes.io/part-of: kseal
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: opentelemetry-collector
+      app.kubernetes.io/part-of: kseal
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: opentelemetry-collector
+        app.kubernetes.io/part-of: kseal
+    spec:
+      serviceAccountName: kseal-otel-collector
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: collector
+          image: otel/opentelemetry-collector-contrib:0.103.1
+          args: ["--config=/conf/collector.yaml"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: KSEAL_TRACES_OTLP_ENDPOINT
+              value: "tempo.monitoring.svc.cluster.local:4317"
+            - name: KSEAL_METRICS_RW_ENDPOINT
+              value: "http://prometheus.monitoring.svc.cluster.local:9090/api/v1/write"
+          ports:
+            - name: otlp-grpc
+              containerPort: 4317
+            - name: otlp-http
+              containerPort: 4318
+            - name: health
+              containerPort: 13133
+          livenessProbe:
+            httpGet:
+              path: /
+              port: health
+          readinessProbe:
+            httpGet:
+              path: /
+              port: health
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+          volumeMounts:
+            - name: config
+              mountPath: /conf
+      volumes:
+        - name: config
+          configMap:
+            name: kseal-otel-collector
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kseal-otel-collector
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: opentelemetry-collector
+    app.kubernetes.io/part-of: kseal
+spec:
+  selector:
+    app.kubernetes.io/name: opentelemetry-collector
+    app.kubernetes.io/part-of: kseal
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: otlp-grpc
+      protocol: TCP
+    - name: otlp-http
+      port: 4318
+      targetPort: otlp-http
+      protocol: TCP

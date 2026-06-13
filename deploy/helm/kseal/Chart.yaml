@@ -1,0 +1,25 @@
+apiVersion: v2
+name: kseal
+description: >-
+  kseal continuous app-trust platform — unified control-plane + data-plane
+  server and the operator console. Self-healing, autoscaling, least-privilege
+  deployment for multi-tenant (5000+ SME) operation.
+type: application
+# Chart version is independent of the app; bump on chart changes.
+version: 0.1.0
+# Tracks the kseal server/console image tag this chart was validated against.
+appVersion: "0.1.0"
+kubeVersion: ">=1.27.0-0"
+home: https://github.com/kennguy3n/kseal
+sources:
+  - https://github.com/kennguy3n/kseal
+maintainers:
+  - name: kseal platform
+keywords:
+  - security
+  - attestation
+  - rasp
+  - app-trust
+  - multi-tenant
+annotations:
+  category: Security
