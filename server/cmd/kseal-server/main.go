@@ -1,11 +1,10 @@
 // Command kseal-server is the unified kseal control-plane + data-plane server.
 // It loads config, connects to Postgres and Redis, runs migrations, builds every
-// service, and serves the five Connect APIs plus health and metrics endpoints
+// service, and serves the six Connect APIs plus health and metrics endpoints
 // over h2c.
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -157,7 +156,7 @@ func run() error {
 	mux.Handle(ksealv1connect.NewSiemServiceHandler(siemSvc, opts))
 
 	// Single /metrics exposition combining the platform and SIEM registries.
-	mux.Handle("/metrics", combinedMetrics(tel.Metrics.Handler(), siemMetrics.Handler()))
+	mux.Handle("/metrics", siem.CombinedMetricsHandler(tel.Metrics.Handler(), siemMetrics.Handler()))
 	mux.Handle("/healthz", telemetry.HealthHandler())
 	mux.Handle("/readyz", telemetry.HealthHandler(
 		telemetry.Check{Name: "postgres", Func: database.Ping},
@@ -258,36 +257,6 @@ func (s siemSink) Emit(e ingest.StoredEvent) {
 		Country:          e.Country,
 	})
 }
-
-// combinedMetrics serves several Prometheus handlers' output on one endpoint.
-// The platform and SIEM registries are disjoint (neither registers go/process
-// collectors), so concatenating their expositions yields a single valid scrape.
-func combinedMetrics(handlers ...http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		first := true
-		for _, h := range handlers {
-			rec := &bufferingResponseWriter{header: http.Header{}}
-			h.ServeHTTP(rec, r)
-			if first {
-				if ct := rec.header.Get("Content-Type"); ct != "" {
-					w.Header().Set("Content-Type", ct)
-				}
-				first = false
-			}
-			_, _ = w.Write(rec.buf.Bytes())
-		}
-	})
-}
-
-// bufferingResponseWriter captures a handler's body and headers in memory.
-type bufferingResponseWriter struct {
-	header http.Header
-	buf    bytes.Buffer
-}
-
-func (w *bufferingResponseWriter) Header() http.Header         { return w.header }
-func (w *bufferingResponseWriter) Write(b []byte) (int, error) { return w.buf.Write(b) }
-func (w *bufferingResponseWriter) WriteHeader(int)             {}
 
 // controlPlaneProcedures lists procedures that require a valid API key. Device
 // -plane procedures (trust, config, ingest) authenticate via request body and

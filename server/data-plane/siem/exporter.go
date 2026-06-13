@@ -385,13 +385,16 @@ func (p *tenantPipe) deliverToConnector(ctx context.Context, cws ConnectorWithSe
 	if c.Kind == ksealv1.SiemKind_SIEM_KIND_SPLUNK_HEC {
 		rr.headers["X-Splunk-Request-Channel"] = rr.headers["X-Kseal-Idempotency-Key"]
 	}
-	p.ex.metrics.observeBatch(len(records))
 
 	br := p.breakerFor(c.Id)
 	if !br.allow(p.ex.now()) {
 		p.ex.metrics.recordOutcome(kind, outcomeCircuitOpen)
 		return
 	}
+	// Record batch size only for batches we actually attempt to deliver, so the
+	// histogram reflects delivered batch sizes rather than ones short-circuited
+	// by an open breaker.
+	p.ex.metrics.observeBatch(len(records))
 
 	body, enc, err := maybeGzip(rr, p.ex.cfg.GzipMinBytes)
 	if err != nil {

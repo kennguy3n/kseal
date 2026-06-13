@@ -3,6 +3,7 @@ package siem
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -94,10 +95,15 @@ func renderSentinel(c *ksealv1.SiemConnector, secret []byte, records []map[strin
 	if err != nil {
 		return renderedRequest{}, err
 	}
-	url := fmt.Sprintf("%s/dataCollectionRules/%s/streams/%s?api-version=2023-01-01",
-		strings.TrimRight(c.Endpoint, "/"), c.SentinelDcrImmutableId, c.SentinelStreamName)
+	// Path-escape the DCR id and stream name: they are tenant-supplied and land
+	// in the URL path, so escaping prevents a stray character from altering the
+	// request target.
+	dcrURL := fmt.Sprintf("%s/dataCollectionRules/%s/streams/%s?api-version=2023-01-01",
+		strings.TrimRight(c.Endpoint, "/"),
+		url.PathEscape(c.SentinelDcrImmutableId),
+		url.PathEscape(c.SentinelStreamName))
 	return renderedRequest{
-		url: url,
+		url: dcrURL,
 		headers: map[string]string{
 			"Authorization":           "Bearer " + string(secret),
 			"Content-Type":            "application/json",
