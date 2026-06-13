@@ -1,0 +1,175 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $egress := .Values.networkPolicy.egress }}
+# 1) Default-deny: every kseal pod denies all ingress and egress. The allow
+#    policies below re-open only the flows each component actually needs.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "kseal.fullname" . }}-default-deny
+  labels:
+    {{- include "kseal.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/part-of: kseal
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+# 2) Server ingress: ingress controller (API traffic) + Prometheus (/metrics).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "kseal.fullname" . }}-server-ingress
+  labels:
+    {{- include "kseal.labels" . | nindent 4 }}
+    app.kubernetes.io/component: server
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "kseal.server.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.ingressController.namespaceSelector | nindent 14 }}
+          {{- with .Values.networkPolicy.ingressController.podSelector }}
+          podSelector:
+            matchLabels:
+              {{- toYaml . | nindent 14 }}
+          {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.server.port }}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.monitoring.namespaceSelector | nindent 14 }}
+          {{- with .Values.networkPolicy.monitoring.podSelector }}
+          podSelector:
+            matchLabels:
+              {{- toYaml . | nindent 14 }}
+          {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.server.port }}
+---
+# 3) Server egress: DNS, Postgres, Redis, OTel collector, and SIEM/webhook sinks.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "kseal.fullname" . }}-server-egress
+  labels:
+    {{- include "kseal.labels" . | nindent 4 }}
+    app.kubernetes.io/component: server
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "kseal.server.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Egress
+  egress:
+    {{- if $egress.dns.enabled }}
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    {{- end }}
+    - to:
+        - ipBlock:
+            cidr: {{ $egress.postgres.cidr | quote }}
+      ports:
+        - protocol: TCP
+          port: {{ $egress.postgres.port }}
+    - to:
+        - ipBlock:
+            cidr: {{ $egress.redis.cidr | quote }}
+      ports:
+        - protocol: TCP
+          port: {{ $egress.redis.port }}
+    {{- if $egress.otelCollector.enabled }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              {{- toYaml $egress.otelCollector.namespaceSelector | nindent 14 }}
+          podSelector:
+            matchLabels:
+              {{- toYaml $egress.otelCollector.podSelector | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ $egress.otelCollector.port }}
+    {{- end }}
+    {{- with $egress.siemSinks }}
+    # SIEM / tenant webhook sinks (HMAC-signed fan-out from the data plane).
+    {{- range . }}
+    - to:
+        - ipBlock:
+            cidr: {{ .cidr | quote }}
+      ports:
+        - protocol: TCP
+          port: {{ .port }}
+    {{- end }}
+    {{- end }}
+{{- if .Values.console.enabled }}
+---
+# 4) Console ingress: only the ingress controller may reach nginx on :80.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "kseal.fullname" . }}-console-ingress
+  labels:
+    {{- include "kseal.labels" . | nindent 4 }}
+    app.kubernetes.io/component: console
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "kseal.console.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.ingressController.namespaceSelector | nindent 14 }}
+          {{- with .Values.networkPolicy.ingressController.podSelector }}
+          podSelector:
+            matchLabels:
+              {{- toYaml . | nindent 14 }}
+          {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.console.port }}
+---
+# 5) Console egress: DNS only. The browser (not the pod) calls the API, so the
+#    static-asset pod needs no outbound app traffic.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "kseal.fullname" . }}-console-egress
+  labels:
+    {{- include "kseal.labels" . | nindent 4 }}
+    app.kubernetes.io/component: console
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "kseal.console.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Egress
+  egress:
+    {{- if $egress.dns.enabled }}
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    {{- end }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,39 @@
+{{- if .Values.server.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "kseal.fullname" . }}-server
+  labels:
+    {{- include "kseal.labels" . | nindent 4 }}
+    app.kubernetes.io/component: server
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "kseal.fullname" . }}-server
+  minReplicas: {{ .Values.server.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.server.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.server.autoscaling.targetCPUUtilizationPercentage }}
+    {{- if .Values.server.autoscaling.customMetric.enabled }}
+    # Custom per-pod RPS metric, published by prometheus-adapter from
+    # kseal_rpc_requests_total. Scales out under request pressure before CPU
+    # saturates, protecting RPC p99.
+    - type: Pods
+      pods:
+        metric:
+          name: {{ .Values.server.autoscaling.customMetric.name }}
+        target:
+          type: AverageValue
+          averageValue: {{ .Values.server.autoscaling.customMetric.targetAverageValue | quote }}
+    {{- end }}
+  {{- with .Values.server.autoscaling.behavior }}
+  behavior:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}

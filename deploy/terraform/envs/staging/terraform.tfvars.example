@@ -1,0 +1,14 @@
+# Copy to terraform.tfvars and fill in. Do NOT commit real values.
+# Generate the KEK out-of-band and pass via the environment instead of a file:
+#   export TF_VAR_kek="$(head -c 32 /dev/urandom | base64)"
+
+region                     = "us-east-1"
+name                       = "kseal-staging"
+vpc_id                     = "vpc-xxxxxxxx"
+private_subnet_ids         = ["subnet-aaaa", "subnet-bbbb", "subnet-cccc"]
+workload_security_group_id = "sg-xxxxxxxx"
+kms_key_arn                = "arn:aws:kms:us-east-1:111122223333:key/abcd-..."
+oidc_provider_arn          = "arn:aws:iam::111122223333:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/EXAMPLED539D4633E53DE1B71EXAMPLE"
+oidc_provider_url          = "oidc.eks.us-east-1.amazonaws.com/id/EXAMPLED539D4633E53DE1B71EXAMPLE"
+artifacts_bucket_name      = "kseal-staging-artifacts-111122223333"
+# kek = "..."   # prefer TF_VAR_kek env var over putting this in a file

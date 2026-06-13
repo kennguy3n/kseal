@@ -1,0 +1,16 @@
+# Local kind cluster for smoke-testing the kseal Helm chart. Two workers so pod
+# anti-affinity and topology spread have somewhere to schedule.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      - containerPort: 30080
+        hostPort: 30080
+        protocol: TCP
+  - role: worker
+    labels:
+      topology.kubernetes.io/zone: zone-a
+  - role: worker
+    labels:
+      topology.kubernetes.io/zone: zone-b

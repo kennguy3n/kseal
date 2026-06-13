@@ -1,0 +1,14 @@
+{{- if .Values.server.pdb.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "kseal.fullname" . }}-server
+  labels:
+    {{- include "kseal.labels" . | nindent 4 }}
+    app.kubernetes.io/component: server
+spec:
+  minAvailable: {{ .Values.server.pdb.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "kseal.server.selectorLabels" . | nindent 6 }}
+{{- end }}

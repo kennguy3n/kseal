@@ -1,0 +1,42 @@
+# Helm overlay for the kind smoke test. Builds nothing managed externally:
+# secrets come from a plain in-cluster Secret, autoscaling/PDB/NetworkPolicy are
+# relaxed for a single-shot smoke, and the server image is whatever was loaded
+# into the kind nodes (see smoke.sh).
+env: dev
+
+server:
+  replicaCount: 1
+  image:
+    repository: kseal-server
+    tag: kind
+    pullPolicy: IfNotPresent
+  autoscaling:
+    enabled: false
+  pdb:
+    enabled: false
+  podAntiAffinityPreset: ""
+  resources:
+    requests:
+      cpu: 50m
+      memory: 96Mi
+    limits:
+      memory: 256Mi
+
+console:
+  enabled: false
+
+networkPolicy:
+  enabled: false
+
+externalSecrets:
+  enabled: false
+  existingSecret: kseal-smoke-secrets
+
+metrics:
+  serviceMonitor:
+    enabled: false
+  prometheusRule:
+    enabled: false
+
+migrations:
+  enabled: false

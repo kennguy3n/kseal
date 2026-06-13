@@ -1,0 +1,365 @@
+# Default values for the kseal chart.
+#
+# These defaults are safe, secure-by-default, and production-shaped. Per-env
+# overlays live in values-dev.yaml / values-staging.yaml / values-prod.yaml and
+# only set what differs. Nothing here contains a real secret: sensitive material
+# (KSEAL_KEK, Postgres DSN, Redis URL) is sourced from the cluster secret store
+# via External Secrets — see `externalSecrets` below.
+
+# nameOverride / fullnameOverride let you pin resource names independent of the
+# release name (e.g. when several releases share a namespace).
+nameOverride: ""
+fullnameOverride: ""
+
+# env is the logical deployment environment. It is propagated to KSEAL_ENV and
+# drives the server's prod-mode behaviour (e.g. KSEAL_KEK becomes mandatory when
+# env is one of prod/production/staging — see server/shared/config).
+env: prod
+
+# commonLabels are merged onto every rendered object (for cost allocation,
+# ownership, and per-tenant fleet queries).
+commonLabels: {}
+
+# image settings shared by server and console. Pin by digest in prod for
+# immutable, reproducible rollouts.
+image:
+  registry: ghcr.io
+  repository: kennguy3n/kseal
+  pullPolicy: IfNotPresent
+  # pullSecrets references pre-created docker-registry secrets.
+  pullSecrets: []
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  # The workloads never call the Kubernetes API; do not mount a token.
+  automountServiceAccountToken: false
+
+# Pod-level security context applied to the server + migration hook. Locked
+# down: non-root (the server image bakes uid 10001), read-only rootfs, no
+# privilege escalation, all caps dropped, seccomp RuntimeDefault.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  capabilities:
+    drop: ["ALL"]
+
+# Console runs the upstream nginx image (web/console/Dockerfile, owned by the
+# web workstream — not modifiable here). Stock nginx renders /env.js and binds
+# :80 at startup, so it needs a writable rootfs and a minimal capability set.
+# This is the secure-as-possible profile for that image; the long-term fix is
+# to base the console on nginxinc/nginx-unprivileged (tracked in
+# docs/deployment.md). seccomp + no-privilege-escalation + tight cap set remain.
+consolePodSecurityContext:
+  seccompProfile:
+    type: RuntimeDefault
+consoleContainerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop: ["ALL"]
+    add: ["CHOWN", "SETGID", "SETUID", "NET_BIND_SERVICE"]
+
+# -----------------------------------------------------------------------------
+# server: the unified kseal control-plane + data-plane API (h2c on :8080).
+# -----------------------------------------------------------------------------
+server:
+  image:
+    # Overrides the shared image.repository/registry when set.
+    repository: ""
+    tag: ""          # defaults to .Chart.AppVersion
+    digest: ""       # when set, takes precedence over tag (immutable deploys)
+  replicaCount: 3
+  # Connect/h2c port the server listens on (KSEAL_HTTP_ADDR).
+  port: 8080
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      # No CPU limit by default: CPU throttling hurts p99 RPC latency. Memory is
+      # capped to give the OOM killer a deterministic bound.
+      memory: 512Mi
+
+  # Tunables surfaced as KSEAL_* env vars. Durations use Go duration syntax.
+  config:
+    logLevel: info
+    nonceTTL: 5m
+    trustTokenTTL: 15m
+    configTTL: 5m
+    rateLimitRPS: 100
+    rateLimitBurst: 200
+    ingestQuotaPerMinute: 60000
+    redisDB: 0
+    # CORS origins permitted to call the API from a browser (the console).
+    corsOrigins:
+      - https://console.kseal.example.com
+    # Per-tenant feature flags (KSEAL_FEATURE_FLAGS), e.g. "tenantX:rasp=true".
+    featureFlags: ""
+
+  # Horizontal autoscaling. Scales on CPU and a custom requests-per-second
+  # metric published by prometheus-adapter from kseal_rpc_requests_total.
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 50
+    targetCPUUtilizationPercentage: 65
+    # Custom Pods metric: average RPS per pod. Requires prometheus-adapter to
+    # expose `kseal_rpc_requests_per_second` (see deploy/observability/prometheus
+    # /prometheus-adapter-rules.yaml).
+    customMetric:
+      enabled: true
+      name: kseal_rpc_requests_per_second
+      targetAverageValue: "120"
+    behavior:
+      scaleDown:
+        stabilizationWindowSeconds: 300
+        policies:
+          - type: Percent
+            value: 50
+            periodSeconds: 60
+      scaleUp:
+        stabilizationWindowSeconds: 0
+        policies:
+          - type: Percent
+            value: 100
+            periodSeconds: 30
+          - type: Pods
+            value: 4
+            periodSeconds: 30
+        selectPolicy: Max
+
+  pdb:
+    enabled: true
+    minAvailable: "50%"
+
+  # Spread pods across nodes and zones for resilience. Uses topologySpread plus
+  # a soft pod anti-affinity on hostname.
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector: null   # filled by template with the server selector
+  podAntiAffinityPreset: soft   # soft | hard | ""
+
+  nodeSelector: {}
+  tolerations: []
+
+  service:
+    type: ClusterIP
+    port: 8080
+    annotations: {}
+
+  # Probes hit the server's real endpoints (telemetry.HealthHandler):
+  #   /healthz — liveness (always 200 once the process is up)
+  #   /readyz  — readiness (checks Postgres + Redis)
+  probes:
+    startup:
+      path: /readyz
+      periodSeconds: 3
+      failureThreshold: 40   # up to ~2m for first migration + warmup
+    liveness:
+      path: /healthz
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      timeoutSeconds: 3
+      failureThreshold: 3
+    readiness:
+      path: /readyz
+      initialDelaySeconds: 3
+      periodSeconds: 5
+      timeoutSeconds: 3
+      failureThreshold: 3
+      successThreshold: 1
+
+  # extraEnv appends raw env entries (e.g. valueFrom) without templating.
+  extraEnv: []
+
+# -----------------------------------------------------------------------------
+# console: static React dashboard served by nginx on :80.
+# -----------------------------------------------------------------------------
+console:
+  enabled: true
+  image:
+    repository: ""        # defaults to "<image.repository>-console"
+    tag: ""
+    digest: ""
+  replicaCount: 2
+  port: 80
+  # Full origin of the kseal API the browser should call (rendered into env.js
+  # at container start by the console entrypoint — KSEAL_API_BASE_URL).
+  apiBaseUrl: https://api.kseal.example.com
+
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      memory: 128Mi
+
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 75
+
+  pdb:
+    enabled: true
+    minAvailable: 1
+
+  # Spread console pods across zones; labelSelector is filled by the template
+  # with the console selector when left null.
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector: null
+  podAntiAffinityPreset: soft
+
+  nodeSelector: {}
+  tolerations: []
+
+  service:
+    type: ClusterIP
+    port: 80
+    annotations: {}
+
+  # nginx serves the SPA on /, so probes use a GET / (200 = index.html). The
+  # console image has no dedicated health endpoint.
+  probes:
+    liveness:
+      path: /
+      initialDelaySeconds: 5
+      periodSeconds: 15
+      timeoutSeconds: 3
+      failureThreshold: 3
+    readiness:
+      path: /
+      initialDelaySeconds: 3
+      periodSeconds: 10
+      timeoutSeconds: 3
+      failureThreshold: 3
+
+# -----------------------------------------------------------------------------
+# migrations: pre-deploy hook that applies DB schema before new code rolls out.
+# The server auto-migrates on startup (idempotent, checksum-guarded), so the
+# hook runs the real server binary as a one-shot "migration gate": it boots,
+# waits for /readyz (= migrations applied + deps healthy), then exits 0. This
+# fails the release fast on a bad migration and stops N replicas racing to
+# migrate a fresh DB concurrently. See docs/deployment.md.
+# -----------------------------------------------------------------------------
+migrations:
+  enabled: true
+  # Max time to wait for /readyz before the gate fails the release.
+  timeoutSeconds: 180
+  backoffLimit: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+
+# -----------------------------------------------------------------------------
+# ingress (optional). Disabled by default; cloud TLS/routing is environment
+# specific. When enabled, routes console + API host to their services.
+# -----------------------------------------------------------------------------
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  apiHost: api.kseal.example.com
+  consoleHost: console.kseal.example.com
+  tls: []
+
+# -----------------------------------------------------------------------------
+# networkPolicy: default-deny ingress + egress with scoped allowances.
+# -----------------------------------------------------------------------------
+networkPolicy:
+  enabled: true
+  # Label selector identifying the cluster ingress controller namespace/pods
+  # allowed to reach the workloads. Adjust to your ingress controller.
+  ingressController:
+    namespaceSelector:
+      kubernetes.io/metadata.name: ingress-nginx
+    podSelector: {}
+  # Label selector for the namespace running Prometheus, allowed to scrape
+  # /metrics on the server.
+  monitoring:
+    namespaceSelector:
+      kubernetes.io/metadata.name: monitoring
+    podSelector: {}
+  # Egress destinations the server is allowed to reach, beyond in-cluster DNS.
+  egress:
+    # Postgres (managed instance reached by IP/CIDR + port).
+    postgres:
+      cidr: 0.0.0.0/0
+      port: 5432
+    # Redis.
+    redis:
+      cidr: 0.0.0.0/0
+      port: 6379
+    # OTel collector (OTLP gRPC) for traces/metrics export.
+    otelCollector:
+      enabled: true
+      namespaceSelector:
+        kubernetes.io/metadata.name: monitoring
+      podSelector:
+        app.kubernetes.io/name: opentelemetry-collector
+      port: 4317
+    # SIEM / webhook sinks. The data plane fans validated telemetry out to
+    # tenant-registered webhook URLs (HTTPS). List the egress CIDRs + ports
+    # those sinks live on. Default allows outbound 443 only.
+    siemSinks:
+      - cidr: 0.0.0.0/0
+        port: 443
+    # Allow DNS resolution (kube-dns) — required for any name resolution.
+    dns:
+      enabled: true
+
+# -----------------------------------------------------------------------------
+# externalSecrets: pull KSEAL_KEK, Postgres DSN, and Redis URL from an external
+# secret store (AWS/GCP/Vault) via the External Secrets Operator. No secret
+# values live in the chart or git.
+# -----------------------------------------------------------------------------
+externalSecrets:
+  enabled: true
+  # Name of a pre-created ClusterSecretStore/SecretStore.
+  secretStoreRef:
+    name: kseal
+    kind: ClusterSecretStore
+  refreshInterval: 1h
+  # Keys in the external store that back each server secret. Override per env.
+  remoteKeys:
+    kek: kseal/prod/kek                 # base64, decodes to 32 bytes
+    postgresDsn: kseal/prod/postgres-dsn
+    redisAddr: kseal/prod/redis-addr
+  # When externalSecrets.enabled is false, the chart expects a pre-existing
+  # Secret named like the release with these keys (used by dev/local only).
+  existingSecret: ""
+
+# -----------------------------------------------------------------------------
+# metrics: Prometheus Operator integration (ServiceMonitor + PrometheusRule).
+# Disabled by default so the chart installs on clusters without the operator;
+# enable in clusters that run kube-prometheus-stack.
+# -----------------------------------------------------------------------------
+metrics:
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    scrapeTimeout: 10s
+    labels: {}
+  prometheusRule:
+    enabled: false
+    labels: {}

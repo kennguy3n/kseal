@@ -1,0 +1,130 @@
+{{- if .Values.metrics.prometheusRule.enabled }}
+# Requires the Prometheus Operator CRDs (kube-prometheus-stack). The same rules
+# are available as a standalone file for non-operator Prometheus at
+# deploy/observability/alerts/kseal-alerts.yaml — keep both in sync.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "kseal.fullname" . }}
+  labels:
+    {{- include "kseal.labels" . | nindent 4 }}
+    {{- with .Values.metrics.prometheusRule.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: kseal.availability
+      rules:
+        - alert: KsealServerDown
+          expr: max(up{job=~".*kseal.*server.*"}) == 0
+          for: 2m
+          labels:
+            severity: critical
+            service: kseal
+          annotations:
+            summary: "kseal server is down"
+            description: "No kseal server replica has been scrapeable for 2m."
+        - alert: KsealServerNoReadyReplicas
+          expr: |
+            sum(rate(kseal_rpc_requests_total[5m])) == 0
+            and on() max(up{job=~".*kseal.*server.*"}) == 1
+          for: 10m
+          labels:
+            severity: warning
+            service: kseal
+          annotations:
+            summary: "kseal server serving no traffic"
+            description: "Server is up but processed zero RPCs for 10m; check ingress/routing."
+    - name: kseal.latency-errors
+      rules:
+        - alert: KsealHighRPCErrorRate
+          expr: |
+            sum(rate(kseal_rpc_requests_total{code!="ok"}[10m]))
+              / clamp_min(sum(rate(kseal_rpc_requests_total[10m])), 1)
+            > 0.05
+          for: 10m
+          labels:
+            severity: warning
+            service: kseal
+          annotations:
+            summary: "Elevated RPC error rate (>5%)"
+            description: "More than 5% of Connect RPCs returned non-ok codes over 10m."
+        - alert: KsealCriticalRPCErrorRate
+          expr: |
+            sum(rate(kseal_rpc_requests_total{code!="ok"}[5m]))
+              / clamp_min(sum(rate(kseal_rpc_requests_total[5m])), 1)
+            > 0.20
+          for: 5m
+          labels:
+            severity: critical
+            service: kseal
+          annotations:
+            summary: "Critical RPC error rate (>20%)"
+            description: "More than 20% of Connect RPCs returned non-ok codes over 5m."
+        - alert: KsealRPCLatencyP99High
+          expr: |
+            histogram_quantile(0.99,
+              sum by (le) (rate(kseal_rpc_duration_seconds_bucket[5m]))
+            ) > 0.4
+          for: 10m
+          labels:
+            severity: warning
+            service: kseal
+          annotations:
+            summary: "RPC p99 latency above 400ms"
+            description: "Aggregate RPC p99 latency exceeded 400ms for 10m."
+    - name: kseal.saturation
+      rules:
+        - alert: KsealRateLimitingSpike
+          expr: sum(rate(kseal_rate_limited_total[5m])) > 50
+          for: 10m
+          labels:
+            severity: warning
+            service: kseal
+          annotations:
+            summary: "Sustained rate limiting"
+            description: "Tenants are being rate limited at >50 rps for 10m; review quotas or capacity."
+        - alert: KsealTenantRateLimitedHeavily
+          expr: sum by (tenant) (rate(kseal_rate_limited_total[5m])) > 20
+          for: 15m
+          labels:
+            severity: info
+            service: kseal
+          annotations:
+            summary: "Tenant {{`{{ $labels.tenant }}`}} heavily rate limited"
+            description: "Tenant {{`{{ $labels.tenant }}`}} sustained >20 rps of rate-limited requests for 15m."
+    - name: kseal.webhooks
+      rules:
+        - alert: KsealWebhookDeliveryFailing
+          expr: |
+            sum(rate(kseal_webhook_dispatch_total{outcome=~"failure|error"}[10m]))
+              / clamp_min(sum(rate(kseal_webhook_dispatch_total[10m])), 1)
+            > 0.10
+          for: 10m
+          labels:
+            severity: warning
+            service: kseal
+          annotations:
+            summary: "Webhook/SIEM delivery failing (>10%)"
+            description: "More than 10% of webhook (SIEM sink) deliveries failed over 10m."
+        - alert: KsealWebhookDLQGrowing
+          expr: sum(rate(kseal_webhook_dispatch_total{outcome="exhausted"}[15m])) > 0
+          for: 15m
+          labels:
+            severity: warning
+            service: kseal
+          annotations:
+            summary: "Webhook deliveries exhausting retries (DLQ)"
+            description: "Webhook events are exhausting all retries; downstream SIEM sink may be down."
+    - name: kseal.security
+      rules:
+        - alert: KsealHighBlockRate
+          expr: max by (tenant, app) (kseal_block_rate) > 0.5
+          for: 15m
+          labels:
+            severity: warning
+            service: kseal
+          annotations:
+            summary: "High block rate for {{`{{ $labels.tenant }}`}}/{{`{{ $labels.app }}`}}"
+            description: "Observed block rate >50% for 15m; possible attack or misconfigured policy."
+{{- end }}

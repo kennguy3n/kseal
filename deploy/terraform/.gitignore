@@ -1,0 +1,13 @@
+# Local Terraform working state — never commit.
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+
+# Secret/var inputs — only the *.example templates are committed.
+*.tfvars
+!*.tfvars.example
+backend.hcl
+!backend.hcl.example
