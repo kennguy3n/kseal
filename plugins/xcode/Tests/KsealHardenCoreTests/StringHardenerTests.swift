@@ -54,6 +54,26 @@ final class StringHardenerTests: XCTestCase {
         XCTAssertEqual(StringHardener.sanitizeIdentifier(""), "_")
     }
 
+    func testKeywordIdentifiersAreBacktickEscaped() {
+        let hardener = StringHardener()
+        let source = hardener.generateSwiftSource(
+            hardener.harden(entries: ["class": "a", "return": "b", "normal": "c"], seed: seed)
+        )
+        XCTAssertTrue(source.contains("static var `class`: String"))
+        XCTAssertTrue(source.contains("static var `return`: String"))
+        XCTAssertTrue(source.contains("static var normal: String"))
+    }
+
+    func testCollidingIdentifiersAreDisambiguated() {
+        let hardener = StringHardener()
+        // "api.url" and "api-url" both sanitize to "api_url".
+        let source = hardener.generateSwiftSource(
+            hardener.harden(entries: ["api.url": "x", "api-url": "y"], seed: seed)
+        )
+        XCTAssertTrue(source.contains("static var api_url: String"))
+        XCTAssertTrue(source.contains("static var api_url_2: String"))
+    }
+
     func testUnicodeRoundTrip() {
         let hardener = StringHardener()
         let value = "café—naïve—日本語"

@@ -160,7 +160,15 @@ public struct RegistryClient {
             "manifest": manifestJSON,
         ]
         let body = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
-        let url = config.baseURL.appendingPathComponent(Self.createBuildPath.trimmingCharacters(in: CharacterSet(charactersIn: "/")))
+        // Build the endpoint by string concatenation rather than
+        // `appendingPathComponent`, which percent-encodes embedded slashes
+        // differently across Foundation implementations (Apple vs. Linux
+        // swift-corelibs). The Connect path is a single fixed RPC route.
+        let base = config.baseURL.absoluteString
+        let trimmedBase = base.hasSuffix("/") ? String(base.dropLast()) : base
+        guard let url = URL(string: trimmedBase + Self.createBuildPath) else {
+            throw RegistryError.transport("invalid registry URL: \(trimmedBase)\(Self.createBuildPath)")
+        }
         return HTTPRequestSpec(
             url: url,
             method: "POST",

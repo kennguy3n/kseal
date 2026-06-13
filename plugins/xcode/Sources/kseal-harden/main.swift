@@ -131,7 +131,7 @@ func runGenerate(_ opts: Args) {
 func runRegister(_ opts: Args) {
     let manifestURL = URL(fileURLWithPath: opts.require("manifest"))
     let artifactURL = URL(fileURLWithPath: opts.value("offline-artifact")
-        ?? manifestURL.deletingLastPathComponent().appendingPathComponent("build-proof.offline.json").path)
+        ?? manifestURL.deletingLastPathComponent().appendingPathComponent("kseal-build-proof.offline.json").path)
 
     let manifest: BuildProofManifest
     do {

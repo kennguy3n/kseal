@@ -67,6 +67,18 @@ final class RegistryClientTests: XCTestCase {
         XCTAssertEqual(nested["buildHash"] as? String, "hash-abc")
     }
 
+    func testRequestURLNormalizesTrailingSlashAndBasePath() throws {
+        let cfg = RegistryConfig(
+            baseURL: URL(string: "https://registry.kseal.test/api/")!,
+            apiKey: "ksk_abc_secret", tenantId: "t", appId: "a"
+        )
+        let req = try RegistryClient(config: cfg, transport: MockTransport())
+            .makeCreateBuildRequest(manifest: manifest())
+        // Trailing slash collapsed, base path preserved, RPC route appended verbatim.
+        XCTAssertEqual(req.url.absoluteString,
+                       "https://registry.kseal.test/api/kseal.v1.RegistryService/CreateBuild")
+    }
+
     func testCreateBuildParsesId() throws {
         let respBody = try JSONSerialization.data(withJSONObject: ["build": ["id": "build-xyz"]])
         let transport = MockTransport(response: HTTPResponseSpec(statusCode: 200, body: respBody))

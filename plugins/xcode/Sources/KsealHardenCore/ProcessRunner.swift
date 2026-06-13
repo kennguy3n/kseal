@@ -36,9 +36,18 @@ public struct SystemProcessRunner: ProcessRunning {
         process.standardOutput = outPipe
         process.standardError = errPipe
         try process.run()
-        let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
-        let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
+
+        // Drain stdout and stderr concurrently. Reading one pipe to EOF before
+        // the other can deadlock if the child fills the second pipe's buffer
+        // (~64KB) while we are still blocked on the first.
+        var outData = Data()
+        var errData = Data()
+        let group = DispatchGroup()
+        let queue = DispatchQueue(label: "kseal.process.read", attributes: .concurrent)
+        queue.async(group: group) { outData = outPipe.fileHandleForReading.readDataToEndOfFile() }
+        queue.async(group: group) { errData = errPipe.fileHandleForReading.readDataToEndOfFile() }
         process.waitUntilExit()
+        group.wait()
         return ProcessResult(
             exitCode: process.terminationStatus,
             standardOutput: String(decoding: outData, as: UTF8.self),

@@ -82,10 +82,19 @@ public struct StringHardener {
         lines.append("        return String(decoding: out, as: UTF8.self)")
         lines.append("    }")
         lines.append("")
+        var used: Set<String> = []
         for entry in hardened {
-            let member = Self.sanitizeIdentifier(entry.identifier)
+            // Disambiguate identifiers that sanitize to the same member so the
+            // generated source never declares the same property twice.
+            var member = Self.sanitizeIdentifier(entry.identifier)
+            if used.contains(member) {
+                var suffix = 2
+                while used.contains("\(member)_\(suffix)") { suffix += 1 }
+                member = "\(member)_\(suffix)"
+            }
+            used.insert(member)
             lines.append("    /// Hardened value for `\(entry.identifier)`.")
-            lines.append("    static var \(member): String {")
+            lines.append("    static var \(Self.escapeKeyword(member)): String {")
             lines.append("        reveal(\(byteArrayLiteral(entry.ciphertext)), \(byteArrayLiteral(entry.key)))")
             lines.append("    }")
         }
@@ -111,5 +120,24 @@ public struct StringHardener {
             result = "_" + result
         }
         return result
+    }
+
+    /// Swift reserved words that must be back-tick escaped when used as a member
+    /// name (e.g. `class`, `return`, `import`).
+    static let swiftKeywords: Set<String> = [
+        "associatedtype", "borrowing", "class", "consuming", "deinit", "enum",
+        "extension", "fileprivate", "func", "import", "init", "inout", "internal",
+        "let", "open", "operator", "private", "precedencegroup", "protocol",
+        "public", "rethrows", "static", "struct", "subscript", "typealias", "var",
+        "break", "case", "continue", "default", "defer", "do", "else",
+        "fallthrough", "for", "guard", "if", "in", "repeat", "return", "switch",
+        "where", "while", "as", "Any", "catch", "false", "is", "nil", "super",
+        "self", "Self", "throw", "throws", "true", "try",
+    ]
+
+    /// Back-tick escapes `name` when it collides with a Swift keyword so the
+    /// generated declaration compiles.
+    static func escapeKeyword(_ name: String) -> String {
+        swiftKeywords.contains(name) ? "`\(name)`" : name
     }
 }
