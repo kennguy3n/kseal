@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -151,11 +152,17 @@ func run() error {
 	querySvc := query.NewService(store, analytics)
 
 	// Raw-telemetry retention: purge per-tenant raw events past their window
-	// (platform default KSEAL_RAW_RETENTION_DAYS), retaining aggregates.
+	// (platform default KSEAL_RAW_RETENTION_DAYS), retaining aggregates. Tracked
+	// in bg so it drains before the DB pool closes on shutdown.
+	var bg sync.WaitGroup
 	purger := ingest.NewPurger(analytics, registry.NewRetentionResolver(database), cfg.RawRetentionDays)
-	go purger.Run(rootCtx, time.Hour, func(err error) {
-		logger.Error().Err(err).Msg("raw-event retention purge failed")
-	})
+	bg.Add(1)
+	go func() {
+		defer bg.Done()
+		purger.Run(rootCtx, time.Hour, func(err error) {
+			logger.Error().Err(err).Msg("raw-event retention purge failed")
+		})
+	}()
 
 	// Interceptors.
 	limiter := middleware.NewRedisRateLimiter(rdb, cfg.RateLimitPerSecond, cfg.RateLimitBurst, "rl")
@@ -205,8 +212,16 @@ func run() error {
 	case <-rootCtx.Done():
 		logger.Info().Msg("shutdown signal received")
 	case err := <-errCh:
+		stop()
+		bg.Wait()
 		return err
 	}
+
+	// Cancel background workers and let them drain before the deferred Postgres /
+	// Redis closes run, so an in-flight retention purge cannot race the pool
+	// shutdown and emit a spurious error.
+	stop()
+	bg.Wait()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
