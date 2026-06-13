@@ -1,0 +1,4 @@
+module CKseal {
+    header "kseal.h"
+    export *
+}
