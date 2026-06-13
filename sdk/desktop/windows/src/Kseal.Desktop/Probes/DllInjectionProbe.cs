@@ -5,14 +5,22 @@ namespace Kseal.Desktop;
 /// application directory nor the operating system. This is the Windows analogue
 /// of the mobile hooking signal.
 /// </summary>
-public sealed class DllInjectionProbe(IWindowsEnvironment env) : IProbe
+/// <param name="env">Code-integrity surface to inspect.</param>
+/// <param name="isAllowed">
+/// Enterprise allowlist predicate; a module path it accepts is a sanctioned
+/// plugin/agent and does not raise the signal. The default allows nothing,
+/// preserving the strict (pre-policy) behavior.
+/// </param>
+public sealed class DllInjectionProbe(IWindowsEnvironment env, Func<string, bool>? isAllowed = null) : IProbe
 {
+    private readonly Func<string, bool> _isAllowed = isAllowed ?? (_ => false);
+
     public string Id => "windows.dllInjection";
 
     public IReadOnlySet<RiskSignal> Evaluate()
     {
         var signals = new HashSet<RiskSignal>();
-        if (env.ForeignLoadedModulePaths().Count > 0)
+        if (env.ForeignLoadedModulePaths().Any(path => !_isAllowed(path)))
         {
             signals.Add(RiskSignal.Hooking);
         }

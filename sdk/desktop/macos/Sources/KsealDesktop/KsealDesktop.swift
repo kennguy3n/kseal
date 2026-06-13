@@ -14,19 +14,25 @@ public struct KsealDesktopOptions {
     public var enabledProbes: Set<String>?
     /// Telemetry events buffered before a batch is flushed.
     public var maxBatchEvents: Int
+    /// Enterprise compatibility controls. `nil` reads the OS-managed
+    /// configuration at `initialize` (strict when none); a non-nil value
+    /// overrides it (useful for hosts that supply the policy directly / tests).
+    public var enterprisePolicy: EnterprisePolicy?
 
     public init(
         configPublicKey: Data = Data(repeating: 0, count: 32),
         buildHash: String = "",
         integrityPolicy: DesktopIntegrityPolicy = DesktopIntegrityPolicy(),
         enabledProbes: Set<String>? = nil,
-        maxBatchEvents: Int = 32
+        maxBatchEvents: Int = 32,
+        enterprisePolicy: EnterprisePolicy? = nil
     ) {
         self.configPublicKey = configPublicKey
         self.buildHash = buildHash
         self.integrityPolicy = integrityPolicy
         self.enabledProbes = enabledProbes
         self.maxBatchEvents = maxBatchEvents
+        self.enterprisePolicy = enterprisePolicy
     }
 }
 
@@ -51,6 +57,14 @@ public final class KsealDesktop {
     private let installIdentityHash: String
     private let clock: Clock
 
+    /// Whether the request-proof key is sealed by a hardware-backed element
+    /// (Secure Enclave). False on hosts that fall back to the software store.
+    public let proofKeyIsHardwareBacked: Bool
+
+    /// The effective enterprise compatibility controls in force (surfaced for
+    /// auditing what a managed configuration relaxed).
+    public let enterprisePolicy: EnterprisePolicy
+
     private let probes: [Probe]
     private let lock = NSLock()
     private var sequence: Int64 = 0
@@ -66,7 +80,9 @@ public final class KsealDesktop {
         telemetrySink: TelemetrySink,
         attestor: CodeIntegrityAttestor,
         installIdentityHash: String,
-        clock: Clock
+        clock: Clock,
+        proofKeyIsHardwareBacked: Bool = false,
+        enterprisePolicy: EnterprisePolicy = .strict
     ) {
         self.core = core
         self.env = env
@@ -76,7 +92,9 @@ public final class KsealDesktop {
         self.attestor = attestor
         self.installIdentityHash = installIdentityHash
         self.clock = clock
-        self.probes = Self.buildProbes(env: env, options: options)
+        self.proofKeyIsHardwareBacked = proofKeyIsHardwareBacked
+        self.enterprisePolicy = enterprisePolicy
+        self.probes = Self.buildProbes(env: env, options: options, enterprise: enterprisePolicy)
     }
 
     /// The Rust trust core version string.
@@ -168,6 +186,9 @@ public final class KsealDesktop {
     /// only the packed risk bitset and coarse metadata — no PII.
     public func reportEvent(_ eventType: EventType) {
         let bits = RiskSignal.pack(runProbes())
+        // Minimal telemetry verbosity drops clean (no-signal) events to cut
+        // volume; standard/verbose record everything the host reports.
+        if enterprisePolicy.telemetryVerbosity == .minimal && bits == 0 { return }
         guard let event = try? makeEvent(eventType, bits: bits) else { return }
 
         var toFlush: [Data]?
@@ -240,6 +261,12 @@ public final class KsealDesktop {
         for probe in probes {
             out.formUnion(probe.evaluate())
         }
+        // Fail closed for regulated deployments: if hardware-backed proof keys
+        // are required but unavailable, surface the missing-secure-hardware
+        // signal so the server can adjudicate it. Off by default.
+        if enterprisePolicy.requireHardwareBackedProofKey && !proofKeyIsHardwareBacked {
+            out.insert(.secureHwMissing)
+        }
         return out
     }
 
@@ -254,21 +281,30 @@ public final class KsealDesktop {
         }
     }
 
-    private static func buildProbes(env: DesktopEnvironment, options: KsealDesktopOptions) -> [Probe] {
+    private static func buildProbes(
+        env: DesktopEnvironment,
+        options: KsealDesktopOptions,
+        enterprise: EnterprisePolicy
+    ) -> [Probe] {
         let policy = options.integrityPolicy
         let all: [Probe] = [
             CodeSignatureProbe(env, policy: policy),
             NotarizationProbe(env, policy: policy),
             HardenedRuntimeProbe(env, policy: policy),
-            DylibInjectionProbe(env),
+            DylibInjectionProbe(env, isAllowed: enterprise.allowsModule),
             DebuggerProbe(env),
         ]
-        guard let enabled = options.enabledProbes else {
+        let selected: [Probe]
+        if let enabled = options.enabledProbes {
+            selected = all.filter { enabled.contains($0.id) }
+        } else {
             // Default desktop set omits the aggressive anti-debug probe; the host
             // opts in explicitly (see ARCHITECTURE.md desktop caution).
-            return all.filter { $0.id != "macos.debugger" }
+            selected = all.filter { $0.id != "macos.debugger" }
         }
-        return all.filter { enabled.contains($0.id) }
+        // A managed developer machine may permit debugging: drop the debugger
+        // probe so legitimate debugging does not raise a signal.
+        return enterprise.permitDebugger ? selected.filter { $0.id != "macos.debugger" } : selected
     }
 
     // MARK: - Lifecycle
@@ -298,7 +334,10 @@ public final class KsealDesktop {
 
         let storageDir = storageDirectory(tenantId: tenantId, appId: appId)
         let env = makeDefaultDesktopEnvironment()
-        let proofKey = DefaultProofKeyProvider(directory: storageDir).proofKey()
+        let keyStore = makeDefaultHardwareKeyStore(
+            label: StorageScope.component(tenantId: tenantId, appId: appId))
+        let proofKeyProvider = HardwareBoundProofKeyProvider(directory: storageDir, store: keyStore)
+        let proofKey = proofKeyProvider.proofKey()
         let core = try NativeTrustCore.create(
             configPublicKey: options.configPublicKey,
             proofKey: proofKey,
@@ -307,6 +346,9 @@ public final class KsealDesktop {
         )
         let configProvider = FileConfigProvider(directory: storageDir)
         let installHash = InstallIdentity(directory: storageDir).tenantScopedHash(tenantId: tenantId, appId: appId)
+        // Read the OS-managed enterprise configuration unless the host supplied
+        // one directly; absent any managed config this is the strict baseline.
+        let enterprisePolicy = options.enterprisePolicy ?? makeDefaultEnterprisePolicyProvider().currentPolicy()
 
         let sdk = KsealDesktop(
             core: core,
@@ -316,7 +358,9 @@ public final class KsealDesktop {
             telemetrySink: BufferingTelemetrySink(),
             attestor: attestor,
             installIdentityHash: installHash,
-            clock: SystemClock()
+            clock: SystemClock(),
+            proofKeyIsHardwareBacked: proofKeyProvider.isHardwareBacked,
+            enterprisePolicy: enterprisePolicy
         )
         sdk.loadCachedConfigIfPresent()
         instance = sdk

@@ -7,6 +7,7 @@ import Foundation
 struct DylibInjectionProbe: Probe {
     let id = "macos.dylibInjection"
     private let env: DesktopEnvironment
+    private let isAllowed: (String) -> Bool
 
     /// dyld variables that force-load attacker-controlled code into the process.
     private static let injectionEnvVars = [
@@ -15,17 +16,23 @@ struct DylibInjectionProbe: Probe {
         "DYLD_LIBRARY_PATH",
     ]
 
-    init(_ env: DesktopEnvironment) {
+    /// - Parameter isAllowed: enterprise allowlist predicate; a path it accepts
+    ///   is a sanctioned plugin/agent and does not raise the signal. The default
+    ///   allows nothing, preserving the strict (pre-policy) behavior.
+    init(_ env: DesktopEnvironment, isAllowed: @escaping (String) -> Bool = { _ in false }) {
         self.env = env
+        self.isAllowed = isAllowed
     }
 
     func evaluate() -> Set<RiskSignal> {
         for name in Self.injectionEnvVars {
-            if let value = env.environmentVariable(name), !value.isEmpty {
+            guard let value = env.environmentVariable(name), !value.isEmpty else { continue }
+            let paths = value.split(separator: ":", omittingEmptySubsequences: true).map(String.init)
+            if paths.isEmpty || paths.contains(where: { !isAllowed($0) }) {
                 return [.hooking]
             }
         }
-        if !env.foreignLoadedImagePaths().isEmpty {
+        if env.foreignLoadedImagePaths().contains(where: { !isAllowed($0) }) {
             return [.hooking]
         }
         return []

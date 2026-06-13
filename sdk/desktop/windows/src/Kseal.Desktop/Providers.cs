@@ -167,6 +167,86 @@ public sealed class DefaultProofKeyProvider : IProofKeyProvider
 }
 
 /// <summary>
+/// Proof-key provider that seals the request-proof HMAC key with an
+/// <see cref="IHardwareKeyStore"/> before persisting it.
+///
+/// With a hardware-backed store (Windows TPM) the at-rest key is bound to the
+/// device's secure element and cannot be lifted from disk and replayed
+/// elsewhere. With the software fallback the persisted bytes are byte-identical
+/// to <see cref="DefaultProofKeyProvider"/>, so existing installs keep their key
+/// — and thus their server-side trust continuity. The request-proof byte layout
+/// is unchanged either way: the core still computes <c>HMAC(proofKey, …)</c>;
+/// only how <c>proofKey</c> is protected at rest changes.
+/// </summary>
+public sealed class HardwareBoundProofKeyProvider : IProofKeyProvider
+{
+    public const int KeyLength = 32;
+
+    private readonly string _path;
+    private readonly IHardwareKeyStore _store;
+
+    public HardwareBoundProofKeyProvider(string directory, IHardwareKeyStore store)
+    {
+        string dir = Path.Combine(directory, "kseal");
+        Directory.CreateDirectory(dir);
+        _path = Path.Combine(dir, "proof.key");
+        _store = store;
+    }
+
+    /// <summary>Whether the persisted key is sealed by a hardware-backed element.</summary>
+    public bool IsHardwareBacked => _store.IsHardwareBacked;
+
+    public byte[] ProofKey()
+    {
+        if (File.Exists(_path))
+        {
+            byte[] stored = File.ReadAllBytes(_path);
+            if (stored.Length > 0)
+            {
+                byte[]? key = TryUnseal(stored);
+                if (key is { Length: KeyLength }) return key;
+
+                // A blob we cannot unseal but that is exactly a legacy raw key:
+                // adopt it (preserving trust continuity) and re-seal it in place.
+                if (stored.Length == KeyLength)
+                {
+                    byte[]? resealed = TrySeal(stored);
+                    if (resealed is not null) AtomicFile.Write(_path, resealed);
+                    return stored;
+                }
+                // Otherwise the blob is unusable — regenerate below.
+            }
+        }
+
+        byte[] fresh = RandomNumberGenerator.GetBytes(KeyLength);
+        byte[]? sealedBytes = TrySeal(fresh);
+        if (sealedBytes is null)
+        {
+            // Hardware seal failed unexpectedly: persist the raw key so the SDK
+            // stays functional (software-equivalent) rather than bricking the host.
+            return AtomicFile.CreateOrReadExisting(_path, fresh);
+        }
+
+        byte[] persisted = AtomicFile.CreateOrReadExisting(_path, sealedBytes);
+        // Re-unseal the race winner's blob so concurrent creators converge.
+        byte[]? unsealed = TryUnseal(persisted);
+        return unsealed is { Length: KeyLength } ? unsealed : fresh;
+    }
+
+    private byte[]? TrySeal(byte[] plaintext)
+    {
+        try { return _store.Seal(plaintext); }
+        catch (HardwareKeyStoreException) { return null; }
+    }
+
+    private byte[]? TryUnseal(byte[] sealedBlob)
+    {
+        try { return _store.Unseal(sealedBlob); }
+        catch (HardwareKeyStoreException) { return null; }
+    }
+}
+
+/// <summary>
 /// Stable, non-PII install identity. Persists a random install id and derives a
 /// tenant-scoped HMAC of it so the server can correlate an instance without ever
 /// seeing the raw id (privacy guard: tenant-scoped hashes only).

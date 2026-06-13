@@ -97,13 +97,67 @@ public protocol ProofKeyProvider {
     func proofKey() -> Data
 }
 
+/// Proof-key provider that seals the request-proof HMAC key with a
+/// `HardwareKeyStore` before persisting it.
+///
+/// With a hardware-backed store (macOS Secure Enclave) the at-rest key is bound
+/// to the device's secure element and cannot be lifted from disk and replayed
+/// elsewhere. With the software fallback the persisted bytes are byte-identical
+/// to `DefaultProofKeyProvider`, so existing installs keep their key — and thus
+/// their server-side trust continuity. The request-proof byte layout is
+/// unchanged either way: the core still computes `HMAC(proofKey, …)`; only how
+/// `proofKey` is protected at rest changes.
+struct HardwareBoundProofKeyProvider: ProofKeyProvider {
+    private let fileURL: URL
+    private let store: HardwareKeyStore
+
+    static let keyLength = 32
+
+    init(directory: URL, store: HardwareKeyStore) {
+        let dir = directory.appendingPathComponent("kseal", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        self.fileURL = dir.appendingPathComponent("proof.key")
+        self.store = store
+    }
+
+    /// Whether the persisted key is sealed by a hardware-backed element.
+    var isHardwareBacked: Bool { store.isHardwareBacked }
+
+    func proofKey() -> Data {
+        if let stored = try? Data(contentsOf: fileURL), !stored.isEmpty {
+            if let key = try? store.unseal(stored), key.count == Self.keyLength {
+                return key
+            }
+            // A blob we cannot unseal but that is exactly a legacy raw key:
+            // adopt it (preserving trust continuity) and re-seal it in place.
+            if stored.count == Self.keyLength {
+                if let resealed = try? store.seal(stored) {
+                    try? resealed.write(to: fileURL, options: .atomic)
+                }
+                return stored
+            }
+            // Otherwise the blob is unusable — regenerate below.
+        }
+
+        var bytes = [UInt8](repeating: 0, count: Self.keyLength)
+        SecureRandom.fill(&bytes)
+        let key = Data(bytes)
+        guard let sealed = try? store.seal(key) else {
+            // Hardware seal failed unexpectedly: persist the raw key so the SDK
+            // stays functional (software-equivalent) rather than bricking the host.
+            return DefaultProofKeyProvider.createOrReadExisting(at: fileURL, candidate: key)
+        }
+        let persisted = DefaultProofKeyProvider.createOrReadExisting(at: fileURL, candidate: sealed)
+        // Re-unseal the race winner's blob so concurrent creators converge.
+        return (try? store.unseal(persisted)) ?? key
+    }
+}
+
 /// Persistent random proof key stored in the app's private storage.
 ///
-/// Production should bind this to the macOS Keychain (Secure Enclave on Apple
-/// silicon via `kSecAttrTokenIDSecureEnclave`, `kSecAttrAccessibleWhenUnlocked`,
-/// non-exportable) and have the core accept a Keychain-computed signature; the
-/// file-backed key here is the portable default and the seam where that binding
-/// plugs in.
+/// This is the **software fallback** used when no hardware element is available;
+/// `HardwareBoundProofKeyProvider` wraps it on macOS Secure Enclave. It also owns
+/// the race-tolerant first-launch create helper the hardware provider reuses.
 struct DefaultProofKeyProvider: ProofKeyProvider {
     private let fileURL: URL
 
