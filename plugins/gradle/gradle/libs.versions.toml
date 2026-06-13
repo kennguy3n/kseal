@@ -1,0 +1,20 @@
+[versions]
+# The kseal Android SDK coordinate the plugin injects into consuming apps.
+# Kept in lock-step with sdk/android/build.gradle.kts (group "io.kseal", version).
+ksealSdk = "0.1.0"
+asm = "9.7.1"
+junit = "5.11.3"
+agp = "8.7.3"
+
+[libraries]
+asm = { module = "org.ow2.asm:asm", version.ref = "asm" }
+asm-commons = { module = "org.ow2.asm:asm-commons", version.ref = "asm" }
+junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit" }
+junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
+# compileOnly: the plugin soft-wires into AGP only when com.android.application
+# is applied; it never hard-depends on it (so it also applies to plain modules).
+agp-api = { module = "com.android.tools.build:gradle-api", version.ref = "agp" }
+
+# Version-catalog accessor consumers can use: libs.plugins.kseal.android.harden
+[plugins]
+kseal-android-harden = { id = "io.kseal.android.harden", version.ref = "ksealSdk" }
