@@ -6,6 +6,7 @@ import {
 } from "@tanstack/react-query";
 import { useClients, useSession } from "../state/useAuth";
 import type { EventType } from "../gen/kseal/v1/common_pb";
+import type { SiemKind, SiemPayloadFormat } from "../gen/kseal/v1/siem_pb";
 
 // Server-side page sizes for the keyset-paginated list RPCs. The console loads
 // one page at a time and exposes a "Load more" control driven by the response's
@@ -25,6 +26,7 @@ export const queryKeys = {
   activePolicy: (tenant: string, appId: string) =>
     ["activePolicy", tenant, appId] as const,
   webhooks: (tenant: string) => ["webhooks", tenant] as const,
+  siemConnectors: (tenant: string) => ["siemConnectors", tenant] as const,
   overview: (tenant: string) => ["overview", tenant] as const,
   trustStats: (tenant: string) => ["trustStats", tenant] as const,
   events: (tenant: string, filter: unknown) =>
@@ -116,6 +118,74 @@ export function useWebhooks() {
     queryFn: async () => {
       const res = await clients.webhook.listWebhooks({ tenantId });
       return res.webhooks;
+    },
+  });
+}
+
+export function useSiemConnectors() {
+  const clients = useClients();
+  const { tenantId } = useSession();
+  return useQuery({
+    queryKey: queryKeys.siemConnectors(tenantId),
+    queryFn: async () => {
+      const res = await clients.siem.listConnectors({ tenantId });
+      return res.connectors;
+    },
+  });
+}
+
+// The auth secret is write-only: it is sent on registration and never read
+// back, so it is intentionally absent from the connector list type.
+export interface RegisterSiemConnectorInput {
+  kind: SiemKind;
+  endpoint: string;
+  authSecret: string;
+  fieldAllowList: string[];
+  format?: SiemPayloadFormat;
+  sentinelDcrImmutableId?: string;
+  sentinelStreamName?: string;
+  elasticIndex?: string;
+  splunkIndex?: string;
+  splunkSourcetype?: string;
+}
+
+export function useRegisterSiemConnector() {
+  const clients = useClients();
+  const { tenantId } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: RegisterSiemConnectorInput) =>
+      clients.siem.registerConnector({
+        tenantId,
+        kind: input.kind,
+        endpoint: input.endpoint,
+        authSecret: input.authSecret,
+        format: input.format,
+        fieldAllowList: input.fieldAllowList,
+        sentinelDcrImmutableId: input.sentinelDcrImmutableId ?? "",
+        sentinelStreamName: input.sentinelStreamName ?? "",
+        elasticIndex: input.elasticIndex ?? "",
+        splunkIndex: input.splunkIndex ?? "",
+        splunkSourcetype: input.splunkSourcetype ?? "",
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({
+        queryKey: queryKeys.siemConnectors(tenantId),
+      });
+    },
+  });
+}
+
+export function useDeleteSiemConnector() {
+  const clients = useClients();
+  const { tenantId } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => clients.siem.deleteConnector({ tenantId, id }),
+    onSuccess: () => {
+      void qc.invalidateQueries({
+        queryKey: queryKeys.siemConnectors(tenantId),
+      });
     },
   });
 }

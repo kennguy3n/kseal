@@ -1,6 +1,6 @@
 // Command kseal-server is the unified kseal control-plane + data-plane server.
 // It loads config, connects to Postgres and Redis, runs migrations, builds every
-// service, and serves the five Connect APIs plus health and metrics endpoints
+// service, and serves the six Connect APIs plus health and metrics endpoints
 // over h2c.
 package main
 
@@ -32,6 +32,7 @@ import (
 	cfgsvc "github.com/kennguy3n/kseal/server/data-plane/config"
 	"github.com/kennguy3n/kseal/server/data-plane/ingest"
 	"github.com/kennguy3n/kseal/server/data-plane/query"
+	"github.com/kennguy3n/kseal/server/data-plane/siem"
 	"github.com/kennguy3n/kseal/server/data-plane/trust"
 	"github.com/kennguy3n/kseal/server/data-plane/webhook"
 )
@@ -101,13 +102,30 @@ func run() error {
 	dispatcher := webhook.NewDispatcher(store, webhook.DispatcherConfig{}, tel.Metrics)
 	defer dispatcher.Stop()
 
+	// SIEM export: per-tenant connector store (RLS-isolated, secrets sealed) and
+	// the async, backpressured exporter fed from the same ingest write path.
+	siemMetrics, err := siem.NewMetrics()
+	if err != nil {
+		return err
+	}
+	siemStore := siem.NewPostgresConnectorStore(database, enc)
+	if err := siemStore.EnsureSchema(rootCtx); err != nil {
+		return err
+	}
+	siemExporter := siem.NewExporter(siemStore, siem.ExporterConfig{}, siemMetrics)
+	defer siemExporter.Stop()
+	siemSvc := siem.NewService(siemStore)
+
 	validator := ingest.NewCachedAppValidator(store, 30*time.Second)
 	quota := ingest.NewQuota(rdb, cfg.IngestQuotaPerMinute)
 	broker := ingest.NewChannelBroker(0)
 	analytics := ingest.NewInMemoryAnalyticsStore()
 	writer := ingest.NewWriter(broker, analytics, 0, 0)
-	// Fan validated telemetry out to registered webhook subscribers.
-	writer.SetEventSink(webhookSink{dispatcher})
+	// Fan validated telemetry out to webhook subscribers AND the SIEM exporter.
+	writer.SetEventSink(fanoutSink{[]ingest.EventSink{
+		webhookSink{dispatcher},
+		siemSink{siemExporter},
+	}})
 	go writer.Run(rootCtx)
 	ingestSvc, err := ingest.NewService(validator, quota, broker)
 	if err != nil {
@@ -135,8 +153,10 @@ func run() error {
 	mux.Handle(ksealv1connect.NewIngestServiceHandler(ingestSvc, opts))
 	mux.Handle(ksealv1connect.NewWebhookServiceHandler(webhookSvc, opts))
 	mux.Handle(ksealv1connect.NewQueryServiceHandler(querySvc, opts))
+	mux.Handle(ksealv1connect.NewSiemServiceHandler(siemSvc, opts))
 
-	mux.Handle("/metrics", tel.Metrics.Handler())
+	// Single /metrics exposition combining the platform and SIEM registries.
+	mux.Handle("/metrics", siem.CombinedMetricsHandler(tel.Metrics.Handler(), siemMetrics.Handler()))
 	mux.Handle("/healthz", telemetry.HealthHandler())
 	mux.Handle("/readyz", telemetry.HealthHandler(
 		telemetry.Check{Name: "postgres", Func: database.Ping},
@@ -207,6 +227,37 @@ func (s webhookSink) Emit(e ingest.StoredEvent) {
 	})
 }
 
+// fanoutSink delivers each event to several sinks. It is synchronous but every
+// downstream sink is itself non-blocking (bounded queue + load-shed), so the
+// ingest write path is never stalled by a slow subscriber.
+type fanoutSink struct{ sinks []ingest.EventSink }
+
+func (f fanoutSink) Emit(e ingest.StoredEvent) {
+	for _, s := range f.sinks {
+		s.Emit(e)
+	}
+}
+
+// siemSink adapts the ingest write path to the SIEM exporter, projecting a
+// StoredEvent onto the minimized, non-PII Event the exporter understands.
+type siemSink struct{ ex *siem.Exporter }
+
+func (s siemSink) Emit(e ingest.StoredEvent) {
+	s.ex.Submit(siem.Event{
+		TenantID:         e.TenantID,
+		AppID:            e.AppID,
+		EventType:        e.EventType,
+		RiskLevel:        e.RiskLevel,
+		RiskBits:         e.RiskBits,
+		Confidence:       e.Confidence,
+		BuildHash:        e.BuildHash,
+		PolicyHash:       e.PolicyHash,
+		InstallKeyHash:   e.InstallKeyHash,
+		CoarseTimeBucket: e.TimeBucket,
+		Country:          e.Country,
+	})
+}
+
 // controlPlaneProcedures lists procedures that require a valid API key. Device
 // -plane procedures (trust, config, ingest) authenticate via request body and
 // signed proofs instead.
@@ -234,5 +285,8 @@ func controlPlaneProcedures() map[string]bool {
 		ksealv1connect.QueryServiceListEventsProcedure:                 true,
 		ksealv1connect.QueryServiceGetTenantOverviewProcedure:          true,
 		ksealv1connect.QueryServiceGetTrustSessionStatsProcedure:       true,
+		ksealv1connect.SiemServiceRegisterConnectorProcedure:           true,
+		ksealv1connect.SiemServiceListConnectorsProcedure:              true,
+		ksealv1connect.SiemServiceDeleteConnectorProcedure:             true,
 	}
 }

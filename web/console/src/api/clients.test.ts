@@ -57,6 +57,7 @@ describe("createClients wiring + auth header injection", () => {
       "ingest",
       "query",
       "registry",
+      "siem",
       "trust",
       "webhook",
     ]);

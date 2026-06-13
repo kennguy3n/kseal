@@ -1,0 +1,41 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2021-09-01-preview/dataCollectionRules.json",
+  "description": "kseal trust/risk export into Microsoft Sentinel / Log Analytics. Streams only the minimized, non-PII contract fields. Replace the placeholder identifiers before deployment.",
+  "location": "<AZURE_REGION>",
+  "properties": {
+    "streamDeclarations": {
+      "Custom-KsealTrust_CL": {
+        "columns": [
+          { "name": "TimeGenerated", "type": "datetime" },
+          { "name": "tenant_id", "type": "string" },
+          { "name": "app_id", "type": "string" },
+          { "name": "event_type", "type": "string" },
+          { "name": "risk_level", "type": "string" },
+          { "name": "risk_bits", "type": "long" },
+          { "name": "confidence", "type": "string" },
+          { "name": "build_hash", "type": "string" },
+          { "name": "policy_hash", "type": "string" },
+          { "name": "install_key_hash", "type": "string" },
+          { "name": "coarse_time_bucket", "type": "long" },
+          { "name": "country_or_region", "type": "string" }
+        ]
+      }
+    },
+    "destinations": {
+      "logAnalytics": [
+        {
+          "workspaceResourceId": "<LOG_ANALYTICS_WORKSPACE_RESOURCE_ID>",
+          "name": "ksealWorkspace"
+        }
+      ]
+    },
+    "dataFlows": [
+      {
+        "streams": ["Custom-KsealTrust_CL"],
+        "destinations": ["ksealWorkspace"],
+        "transformKql": "source",
+        "outputStream": "Custom-KsealTrust_CL"
+      }
+    ]
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "index_patterns": ["kseal-trust-*"],
+  "_meta": {
+    "description": "kseal trust/risk export, Elastic Common Schema (ECS). Minimized, non-PII fields are carried under ECS `labels`; @timestamp + event.* are the ECS envelope.",
+    "managed_by": "kseal"
+  },
+  "template": {
+    "settings": {
+      "index": {
+        "number_of_shards": 1,
+        "number_of_replicas": 1
+      }
+    },
+    "mappings": {
+      "dynamic": "strict",
+      "properties": {
+        "@timestamp": { "type": "date" },
+        "event": {
+          "properties": {
+            "kind": { "type": "keyword" },
+            "dataset": { "type": "keyword" },
+            "module": { "type": "keyword" }
+          }
+        },
+        "labels": {
+          "properties": {
+            "tenant_id": { "type": "keyword" },
+            "app_id": { "type": "keyword" },
+            "event_type": { "type": "keyword" },
+            "risk_level": { "type": "keyword" },
+            "risk_bits": { "type": "long" },
+            "confidence": { "type": "keyword" },
+            "build_hash": { "type": "keyword" },
+            "policy_hash": { "type": "keyword" },
+            "install_key_hash": { "type": "keyword" },
+            "coarse_time_bucket": { "type": "long" },
+            "country_or_region": { "type": "keyword" }
+          }
+        }
+      }
+    }
+  }
+}

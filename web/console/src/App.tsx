@@ -9,6 +9,7 @@ import { AppDetailPage } from "./pages/AppDetail";
 import { PolicyEditorPage } from "./pages/PolicyEditor";
 import { EventsPage } from "./pages/Events";
 import { WebhooksPage } from "./pages/Webhooks";
+import { SiemConnectorsPage } from "./pages/SiemConnectors";
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { session } = useAuth();
@@ -36,6 +37,7 @@ export function App() {
         <Route path="policies" element={<PolicyEditorPage />} />
         <Route path="events" element={<EventsPage />} />
         <Route path="webhooks" element={<WebhooksPage />} />
+        <Route path="siem" element={<SiemConnectorsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

@@ -7,6 +7,7 @@ const navItems = [
   { to: "/policies", label: "Policies", end: false },
   { to: "/events", label: "Events", end: false },
   { to: "/webhooks", label: "Webhooks", end: false },
+  { to: "/siem", label: "SIEM", end: false },
 ];
 
 export function Layout() {
