@@ -70,15 +70,18 @@ func Generate(c *contract.Contract, opts Options) *Manifest {
 		}
 		a := byType[it.IOS.CollectedDataType]
 		if a == nil {
-			a = &agg{purposes: map[string]struct{}{}}
+			// optional starts true so the &&-merge below leaves a type optional
+			// only when every contributing item is optional.
+			a = &agg{purposes: map[string]struct{}{}, optional: true}
 			byType[it.IOS.CollectedDataType] = a
 			order = append(order, it.IOS.CollectedDataType)
 		}
-		// Fail safe: any contributing item that is linked or used for tracking
-		// promotes the whole Apple type, since the declaration is per-type.
+		// linked/tracking promote (any contributing item flips the whole type on,
+		// since the Apple declaration is per-type). optional demotes with the
+		// inverse rule: one mandatory item makes the merged type mandatory.
 		a.linked = a.linked || it.LinkedToIdentity
 		a.tracking = a.tracking || it.UsedForTracking
-		a.optional = a.optional || it.Optional
+		a.optional = a.optional && it.Optional
 		a.source = append(a.source, it.ID)
 		for _, p := range it.IOS.Purposes {
 			a.purposes[p] = struct{}{}

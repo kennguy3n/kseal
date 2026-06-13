@@ -63,6 +63,57 @@ func TestGenerateIncludeOptional(t *testing.T) {
 	}
 }
 
+// TestMergeSameAppleTypeSemantics locks the per-type merge rules when several
+// contract items project onto the same Apple NSPrivacyCollectedDataType:
+// linked/tracking promote (OR), but optional demotes (AND) — one mandatory
+// contributing item makes the whole type mandatory.
+func TestMergeSameAppleTypeSemantics(t *testing.T) {
+	const typ = "NSPrivacyCollectedDataTypeOtherDiagnosticData"
+	mk := func(id string, optional, linked, tracking bool, purpose string) contract.DataItem {
+		return contract.DataItem{
+			ID: id, Name: id, ProtoFields: []string{id}, PersonalData: true,
+			LinkedToIdentity: linked, UsedForTracking: tracking,
+			Optional: optional, DefaultCollected: true,
+			IOS: &contract.IOSMapping{CollectedDataType: typ, Purposes: []string{purpose}},
+		}
+	}
+
+	t.Run("one mandatory item demotes the merged type", func(t *testing.T) {
+		c := &contract.Contract{Collected: []contract.DataItem{
+			mk("opt_item", true, false, false, "P1"),
+			mk("mandatory_item", false, true, false, "P2"),
+		}}
+		m := Generate(c, Options{IncludeOptional: true})
+		if len(m.CollectedTypes) != 1 {
+			t.Fatalf("expected items to merge into 1 type, got %d", len(m.CollectedTypes))
+		}
+		ct := m.CollectedTypes[0]
+		if ct.Optional {
+			t.Error("merged type must be mandatory when any contributing item is mandatory")
+		}
+		if !ct.Linked {
+			t.Error("merged type must be linked when any contributing item is linked")
+		}
+		if len(ct.Purposes) != 2 {
+			t.Errorf("merged type must union purposes, got %v", ct.Purposes)
+		}
+	})
+
+	t.Run("all-optional items keep the merged type optional", func(t *testing.T) {
+		c := &contract.Contract{Collected: []contract.DataItem{
+			mk("opt_a", true, false, false, "P1"),
+			mk("opt_b", true, false, false, "P2"),
+		}}
+		m := Generate(c, Options{IncludeOptional: true})
+		if len(m.CollectedTypes) != 1 {
+			t.Fatalf("expected items to merge into 1 type, got %d", len(m.CollectedTypes))
+		}
+		if !m.CollectedTypes[0].Optional {
+			t.Error("merged type must stay optional when every contributing item is optional")
+		}
+	})
+}
+
 func TestXMLIsWellFormedAndDeterministic(t *testing.T) {
 	m := Generate(canonical(t), Options{})
 	xmlBytes := m.XML()
