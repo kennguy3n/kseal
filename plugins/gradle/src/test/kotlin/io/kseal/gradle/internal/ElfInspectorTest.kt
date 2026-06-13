@@ -57,6 +57,11 @@ class ElfInspectorTest {
         assertEquals(ElfInspector.Status.ABSENT, r.pac)
         assert(!r.fullyHardened)
         assert(r.notes.size == 4) { "each missing feature must surface a finding: ${r.notes}" }
+        // The memtag note exists but its level is none: the diagnostic must say so,
+        // not falsely claim the note is missing.
+        assert(r.notes.any { it.contains("MTE note present but level is none") }) {
+            "level-none MTE must be diagnosed accurately: ${r.notes}"
+        }
     }
 
     @Test

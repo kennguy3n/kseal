@@ -53,10 +53,15 @@ abstract class HardenNativeLibrariesTask : DefaultTask() {
         outDir.mkdirs()
 
         val libraries = mutableListOf<Map<String, Any?>>()
+        // Every feature is tallied across all four verification outcomes so the
+        // aggregate is complete and honest: `unsupported` (cannot apply to the ABI)
+        // is reported, never silently dropped. Downstream consumers (the MASVS
+        // report's evalNativeMemory) read the *_unsupported counts directly.
         val summary = linkedMapOf(
-            "cfi_enabled" to 0, "cfi_absent" to 0,
-            "mte_enabled" to 0, "mte_absent" to 0,
-            "bti_enabled" to 0, "pac_enabled" to 0,
+            "cfi_enabled" to 0, "cfi_absent" to 0, "cfi_unsupported" to 0,
+            "mte_enabled" to 0, "mte_absent" to 0, "mte_unsupported" to 0,
+            "bti_enabled" to 0, "bti_absent" to 0, "bti_unsupported" to 0,
+            "pac_enabled" to 0, "pac_absent" to 0, "pac_unsupported" to 0,
             "indeterminate" to 0,
         )
 
@@ -66,8 +71,8 @@ abstract class HardenNativeLibrariesTask : DefaultTask() {
 
             tally(summary, "cfi", result.cfi)
             tally(summary, "mte", result.mte)
-            if (result.bti == ElfInspector.Status.ENABLED) summary["bti_enabled"] = summary.getValue("bti_enabled") + 1
-            if (result.pac == ElfInspector.Status.ENABLED) summary["pac_enabled"] = summary.getValue("pac_enabled") + 1
+            tally(summary, "bti", result.bti)
+            tally(summary, "pac", result.pac)
             if (result.cfi == ElfInspector.Status.INDETERMINATE) summary["indeterminate"] = summary.getValue("indeterminate") + 1
 
             libraries += linkedMapOf<String, Any?>(
@@ -105,11 +110,13 @@ abstract class HardenNativeLibrariesTask : DefaultTask() {
     }
 
     private fun tally(summary: MutableMap<String, Int>, feature: String, status: ElfInspector.Status) {
-        when (status) {
-            ElfInspector.Status.ENABLED -> summary["${feature}_enabled"] = summary.getValue("${feature}_enabled") + 1
-            ElfInspector.Status.ABSENT -> summary["${feature}_absent"] = summary.getValue("${feature}_absent") + 1
-            else -> Unit
+        val key = when (status) {
+            ElfInspector.Status.ENABLED -> "${feature}_enabled"
+            ElfInspector.Status.ABSENT -> "${feature}_absent"
+            ElfInspector.Status.UNSUPPORTED -> "${feature}_unsupported"
+            ElfInspector.Status.INDETERMINATE -> return
         }
+        summary[key] = summary.getValue(key) + 1
     }
 
     /** Maps each `.so` to a stable logical path (`<abi>/libfoo.so`), de-duplicated by path. */

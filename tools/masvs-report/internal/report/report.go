@@ -137,26 +137,25 @@ func (g *Generator) Generate(m *buildproof.Manifest, cat *catalog.Catalog) *Repo
 
 	for _, c := range cat.Categories {
 		cr := CategoryReport{Name: c.Name, Objective: c.Objective}
-		matched := map[int]bool{} // control index -> evaluated by a rule
+		matched := map[int]Evidence{} // control index -> evidence from its rule
 
-		// Apply rules for this category first so we can detect orphans.
+		// Apply each rule once. A rule whose target control is absent from the
+		// catalog surfaces as an orphan; otherwise its evidence is cached by
+		// control index (eval funcs are pure, so one call is enough).
 		for _, r := range byCategory[c.Name] {
-			idx := indexOfControl(c.Controls, r.objectiveSub)
 			ev := r.eval(m)
+			idx := indexOfControl(c.Controls, r.objectiveSub)
 			if idx < 0 {
 				rep.Orphans = append(rep.Orphans, Orphan{Category: c.Name, Expected: r.objectiveSub, Evidence: ev})
 				continue
 			}
-			matched[idx] = true
+			matched[idx] = ev
 		}
 
 		for i, ctl := range c.Controls {
-			ev := Evidence{Status: StatusInformational, Detail: "owned by another plane (runtime/server/tenant); not evidenced by the build proof"}
-			for _, r := range byCategory[c.Name] {
-				if matched[i] && strings.Contains(ctl.Objective, r.objectiveSub) {
-					ev = r.eval(m)
-					break
-				}
+			ev, ok := matched[i]
+			if !ok {
+				ev = Evidence{Status: StatusInformational, Detail: "owned by another plane (runtime/server/tenant); not evidenced by the build proof"}
 			}
 			cr.Controls = append(cr.Controls, ControlReport{
 				Objective: ctl.Objective,

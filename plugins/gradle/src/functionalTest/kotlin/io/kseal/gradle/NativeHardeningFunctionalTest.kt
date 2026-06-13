@@ -67,6 +67,12 @@ class NativeHardeningFunctionalTest {
         assertTrue(doc.contains("\"aarch64\""))
         assertTrue(doc.contains("\"unsupported\""), "x86_64 MTE/BTI/PAC must be reported as unsupported, not skipped")
         assertTrue(doc.contains("\"cfi_enabled\": 2"), "both libraries should have CFI verified")
+        // The aggregate summary must carry the unsupported counts the MASVS report consumes,
+        // not just the per-library wire values (the x86_64 slice can't support MTE/BTI/PAC).
+        assertTrue(doc.contains("\"mte_unsupported\": 1"), "x86_64 MTE must be tallied as unsupported")
+        assertTrue(doc.contains("\"bti_unsupported\": 1"), "x86_64 BTI must be tallied as unsupported")
+        assertTrue(doc.contains("\"pac_unsupported\": 1"), "x86_64 PAC must be tallied as unsupported")
+        assertTrue(doc.contains("\"cfi_unsupported\": 0"), "both ABIs support CFI, so none are unsupported")
 
         val report = File(projectDir, "build/kseal/reports/native.json").readText()
         assertTrue(report.contains("\"library_count\": 2"))

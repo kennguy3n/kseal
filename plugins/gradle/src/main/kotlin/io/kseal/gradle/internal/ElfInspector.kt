@@ -100,8 +100,8 @@ internal object ElfInspector {
     private const val NT_MEMTAG_STACK = 8
 
     fun inspect(file: File): Result {
-        val sha = Hashing.sha256(file)
         val bytes = file.readBytes()
+        val sha = Crypto.sha256Hex(bytes)
         val parsed = runCatching { parse(bytes) }.getOrNull()
             ?: return Result(
                 arch = Arch.UNKNOWN,
@@ -125,6 +125,7 @@ internal object ElfInspector {
         val mte = when {
             !arch.isAarch64 -> Status.UNSUPPORTED
             parsed.memtag != null && (parsed.memtag and NT_MEMTAG_LEVEL_MASK) != 0 -> Status.ENABLED
+            parsed.memtag != null -> Status.ABSENT.also { notes += "MTE note present but level is none; link with -fsanitize=memtag and set android:memtagMode" }
             else -> Status.ABSENT.also { notes += "no MTE note; link with -fsanitize=memtag and set android:memtagMode" }
         }
         val bti = aarch64Feature(arch, parsed.aarch64Features, GNU_PROPERTY_AARCH64_FEATURE_1_BTI, "BTI", "-mbranch-protection=bti", notes)
