@@ -146,17 +146,15 @@ func (c *CLI) init(gf *globalFlags, cmd *cobra.Command) error {
 
 // annotationLocalOnly marks a command (or command subtree) as purely local:
 // it makes no server calls, so endpoint/API-key resolution is skipped. This
-// keeps offline commands (e.g. "policy validate") usable in CI without
-// credentials.
+// keeps offline commands (e.g. the "config" tree and "policy validate") usable
+// in CI without credentials. It is set on the parent command and inherited by
+// the whole subtree via commandNeedsServer's walk to the root.
 const annotationLocalOnly = "kseal/local-only"
 
-// commandNeedsServer reports whether the command makes server calls. The
-// "config" command tree and any command annotated local-only are purely local.
+// commandNeedsServer reports whether the command makes server calls. A command
+// is local-only if it (or any ancestor) carries annotationLocalOnly.
 func commandNeedsServer(cmd *cobra.Command) bool {
 	for c := cmd; c != nil; c = c.Parent() {
-		if c.Name() == "config" {
-			return false
-		}
 		if c.Annotations[annotationLocalOnly] == "true" {
 			return false
 		}

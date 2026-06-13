@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"connectrpc.com/connect"
@@ -168,13 +169,26 @@ func (c *CLI) tailEvents(ctx context.Context, tenant string, filters *eventFilte
 		return nil
 	}
 
-	// A context cancellation/deadline (e.g. the operator presses Ctrl-C, or the
-	// per-poll deadline elapses as the tail context is torn down) is a normal
-	// way to stop tailing, not an error to surface.
-	if err := poll(); err != nil {
-		if ctx.Err() != nil {
-			return nil
+	// pollOnce classifies a poll's outcome so the long-running tail survives
+	// transient blips. It returns stop=true for a normal end (parent context
+	// cancelled, e.g. Ctrl-C) and a non-nil err only for a fatal error. A
+	// transient server error (Unavailable/DeadlineExceeded/ResourceExhausted,
+	// including a per-poll timeout) is logged and retried on the next tick.
+	pollOnce := func() (stop bool, err error) {
+		if perr := poll(); perr != nil {
+			if ctx.Err() != nil {
+				return true, nil
+			}
+			if isTransientError(perr) {
+				fmt.Fprintf(c.errOut, "tail: transient error, retrying next interval: %v\n", perr)
+				return false, nil
+			}
+			return false, perr
 		}
+		return false, nil
+	}
+
+	if stop, err := pollOnce(); err != nil || stop {
 		return err
 	}
 	for {
@@ -182,13 +196,21 @@ func (c *CLI) tailEvents(ctx context.Context, tenant string, filters *eventFilte
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			if err := poll(); err != nil {
-				if ctx.Err() != nil {
-					return nil
-				}
+			if stop, err := pollOnce(); err != nil || stop {
 				return err
 			}
 		}
+	}
+}
+
+// isTransientError reports whether a poll error is worth retrying rather than
+// aborting the tail. It mirrors the transient classes in ExitCode.
+func isTransientError(err error) bool {
+	switch connect.CodeOf(err) {
+	case connect.CodeUnavailable, connect.CodeDeadlineExceeded, connect.CodeResourceExhausted:
+		return true
+	default:
+		return false
 	}
 }
 

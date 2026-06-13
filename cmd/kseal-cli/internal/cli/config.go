@@ -169,5 +169,5 @@ func (p *Profile) resolveAPIKey() (string, error) {
 			return v, nil
 		}
 	}
-	return "", fmt.Errorf("no API key found: set $%s or configure an api_key_file for this profile", p.apiKeyEnvName())
+	return "", newAuthError("no API key found: set $%s or configure an api_key_file for this profile", p.apiKeyEnvName())
 }

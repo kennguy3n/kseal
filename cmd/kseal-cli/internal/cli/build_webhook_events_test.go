@@ -4,10 +4,27 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
+
+// flakyHTTPClient fails the first n requests with a transport error (which
+// Connect surfaces as CodeUnavailable) before delegating to the real client.
+type flakyHTTPClient struct {
+	base      *http.Client
+	remaining int32
+}
+
+func (f *flakyHTTPClient) Do(req *http.Request) (*http.Response, error) {
+	if atomic.AddInt32(&f.remaining, -1) >= 0 {
+		return nil, fmt.Errorf("simulated transient network error")
+	}
+	return f.base.Do(req)
+}
 
 // createApp is a helper that registers an app and returns its id.
 func createApp(t *testing.T, ts *testServer) string {
@@ -179,6 +196,37 @@ func TestEventsQuery_FilterByRiskLevel(t *testing.T) {
 	}
 	if len(env.Events) != 0 {
 		t.Fatalf("expected 0 CRITICAL events, got %d", len(env.Events))
+	}
+}
+
+// TestEventsTail_RetriesTransientError verifies the tail survives a transient
+// poll failure: the first poll errors at the transport layer, but the tail logs
+// it and keeps polling, eventually emitting the seeded events.
+func TestEventsTail_RetriesTransientError(t *testing.T) {
+	ts := newTestServer(t)
+	ts.seedEvents(t, "", 0b1, 0b0)
+
+	var out, errOut bytes.Buffer
+	c := &CLI{
+		endpoint:   ts.URL,
+		apiKey:     ts.APIKey,
+		output:     outputJSON,
+		out:        &out,
+		errOut:     &errOut,
+		httpClient: &flakyHTTPClient{base: http.DefaultClient, remaining: 1},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	if err := c.tailEvents(ctx, ts.TenantID, &eventFilterFlags{}, 100, 50*time.Millisecond); err != nil {
+		t.Fatalf("tailEvents should survive a transient error, got: %v", err)
+	}
+	if !strings.Contains(errOut.String(), "transient error") {
+		t.Fatalf("expected a transient-error notice on stderr, got %q", errOut.String())
+	}
+	if !strings.Contains(out.String(), "evt-") {
+		t.Fatalf("expected seeded events after retry, got %q", out.String())
 	}
 }
 

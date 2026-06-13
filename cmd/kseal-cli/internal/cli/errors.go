@@ -29,6 +29,19 @@ func newUsageError(format string, args ...any) error {
 	return usageError{err: fmt.Errorf(format, args...)}
 }
 
+// authError marks an error as an authentication problem (maps to ExitAuth). It
+// covers the locally-detected missing-key case so it shares the exit code the
+// server uses when it rejects a key (Unauthenticated), giving CI a single
+// "fix your credentials" signal.
+type authError struct{ err error }
+
+func (e authError) Error() string { return e.err.Error() }
+func (e authError) Unwrap() error { return e.err }
+
+func newAuthError(format string, args ...any) error {
+	return authError{err: fmt.Errorf(format, args...)}
+}
+
 // ExitCode maps an error to a process exit code, translating Connect RPC codes
 // into the CLI's stable exit-code contract.
 func ExitCode(err error) int {
@@ -38,6 +51,10 @@ func ExitCode(err error) int {
 	var ue usageError
 	if errors.As(err, &ue) {
 		return ExitUsage
+	}
+	var ae authError
+	if errors.As(err, &ae) {
+		return ExitAuth
 	}
 	switch connect.CodeOf(err) {
 	case connect.CodeUnauthenticated, connect.CodePermissionDenied:

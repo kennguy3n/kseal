@@ -159,8 +159,12 @@ func (ts *testServer) newCLI(out, errOut *bytes.Buffer, format outputFormat) *CL
 func (ts *testServer) run(t *testing.T, extraEnv map[string]string, args ...string) (string, string, int) {
 	t.Helper()
 	t.Setenv(defaultAPIKeyEnv, ts.APIKey)
-	// Isolate config to a temp path so tests never touch a real config file.
-	t.Setenv(configEnvVar, t.TempDir()+"/config.json")
+	// Isolate config to a temp path so tests never touch a real config file,
+	// unless the caller supplies its own config path via extraEnv (avoids
+	// allocating a temp dir that would be immediately overridden).
+	if _, ok := extraEnv[configEnvVar]; !ok {
+		t.Setenv(configEnvVar, t.TempDir()+"/config.json")
+	}
 	for k, v := range extraEnv {
 		t.Setenv(k, v)
 	}

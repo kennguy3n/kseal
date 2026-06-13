@@ -12,8 +12,9 @@ import (
 // a key is read from.
 func newConfigCmd(c *CLI) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "config",
-		Short: "Manage local connection profiles (endpoint, tenant, API-key source)",
+		Use:         "config",
+		Short:       "Manage local connection profiles (endpoint, tenant, API-key source)",
+		Annotations: map[string]string{annotationLocalOnly: "true"},
 	}
 	cmd.AddCommand(
 		newConfigSetCmd(c),

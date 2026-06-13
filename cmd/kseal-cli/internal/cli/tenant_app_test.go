@@ -104,9 +104,11 @@ func TestAuthFailure_401(t *testing.T) {
 func TestMissingAPIKey_Errors(t *testing.T) {
 	ts := newTestServer(t)
 	// Unset the key entirely; resolution should fail before any network call.
+	// A locally-missing key maps to ExitAuth (3) just like a server-rejected
+	// key, matching the documented "invalid/missing API key" contract.
 	out, _, code := ts.run(t, map[string]string{defaultAPIKeyEnv: ""}, "tenant", "list")
-	if code == ExitOK {
-		t.Fatalf("expected failure with no API key, out=%s", out)
+	if code != ExitAuth {
+		t.Fatalf("expected ExitAuth(%d) with no API key, got %d (out=%s)", ExitAuth, code, out)
 	}
 }
 

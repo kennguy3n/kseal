@@ -259,13 +259,17 @@ func newPolicySimulateCmd(c *CLI) *cobra.Command {
 				return newUsageError("%v", err)
 			}
 
-			ctx, cancel := c.callCtx(cmd.Context())
-			defer cancel()
+			// --timeout is a per-request bound (see flag help), so each RPC below
+			// gets its own deadline rather than sharing one across the whole
+			// simulation (which could starve later event pages on large fleets).
+			parent := cmd.Context()
 
 			// Resolve the current active policy spec; a missing active policy is
 			// treated as an empty (permissive) baseline rather than an error.
 			current := PolicySpec{Thresholds: map[string]uint32{}, Weights: map[uint32]uint32{}}
-			actResp, aerr := c.registry().GetActivePolicy(ctx, connect.NewRequest(&ksealv1.GetActivePolicyRequest{TenantId: tenant, AppId: appID}))
+			actCtx, actCancel := c.callCtx(parent)
+			actResp, aerr := c.registry().GetActivePolicy(actCtx, connect.NewRequest(&ksealv1.GetActivePolicyRequest{TenantId: tenant, AppId: appID}))
+			actCancel()
 			if aerr != nil {
 				if connect.CodeOf(aerr) != connect.CodeNotFound {
 					return aerr
@@ -277,7 +281,7 @@ func newPolicySimulateCmd(c *CLI) *cobra.Command {
 				}
 			}
 
-			bitsets, err := c.collectRiskBits(ctx, tenant, appID, startTime, endTime, maxEvents)
+			bitsets, err := c.collectRiskBits(parent, tenant, appID, startTime, endTime, maxEvents)
 			if err != nil {
 				return err
 			}
@@ -317,10 +321,12 @@ func (c *CLI) collectRiskBits(ctx context.Context, tenant, appID string, start, 
 		if remaining := maxEvents - len(bits); remaining < int(pageSize) {
 			pageSize = int32(remaining)
 		}
-		resp, err := c.query().ListEvents(ctx, connect.NewRequest(&ksealv1.ListEventsRequest{
+		pageCtx, pageCancel := c.callCtx(ctx)
+		resp, err := c.query().ListEvents(pageCtx, connect.NewRequest(&ksealv1.ListEventsRequest{
 			TenantId: tenant, AppId: appID, StartTime: start, EndTime: end,
 			PageSize: pageSize, PageToken: pageToken,
 		}))
+		pageCancel()
 		if err != nil {
 			return nil, err
 		}
