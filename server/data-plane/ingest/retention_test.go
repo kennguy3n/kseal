@@ -205,9 +205,26 @@ func TestPurgeContinuesPastPerTenantError(t *testing.T) {
 	}
 }
 
+// signalStore wraps the in-memory store and signals once a purge pass has
+// actually mutated the store, so tests can synchronize on the real event
+// instead of polling on timing.
+type signalStore struct {
+	*InMemoryAnalyticsStore
+	purged chan struct{}
+}
+
+func (s *signalStore) PurgeRawEventsOlderThan(ctx context.Context, tenantID string, cutoff int64) (int, error) {
+	n, err := s.InMemoryAnalyticsStore.PurgeRawEventsOlderThan(ctx, tenantID, cutoff)
+	select {
+	case s.purged <- struct{}{}:
+	default:
+	}
+	return n, err
+}
+
 func TestRunPurgesImmediatelyOnStart(t *testing.T) {
 	now := time.Date(2026, 6, 13, 0, 0, 0, 0, time.UTC)
-	store := NewInMemoryAnalyticsStore()
+	store := &signalStore{InMemoryAnalyticsStore: NewInMemoryAnalyticsStore(), purged: make(chan struct{}, 1)}
 	_ = store.Write(context.Background(), []StoredEvent{
 		{ID: "stale", TenantID: "tenant-x", TimeBucket: ageBucket(now, 90)},
 		{ID: "fresh", TenantID: "tenant-x", TimeBucket: ageBucket(now, 1)},
@@ -221,17 +238,18 @@ func TestRunPurgesImmediatelyOnStart(t *testing.T) {
 	// immediate startup pass, not a ticker tick.
 	go p.Run(ctx, time.Hour, nil)
 
-	deadline := time.After(2 * time.Second)
-	for {
-		remaining := idsByTenant(t, store)["tenant-x"]
-		if len(remaining) == 1 && remaining[0] == "fresh" {
-			return // immediate purge happened
-		}
-		select {
-		case <-deadline:
-			t.Fatalf("expected immediate startup purge to drop the stale event, got %v", remaining)
-		case <-time.After(10 * time.Millisecond):
-		}
+	// Block on the actual purge call rather than polling: deterministic, no
+	// dependence on goroutine scheduling timing. The timeout only guards
+	// against a regression where the startup purge never happens.
+	select {
+	case <-store.purged:
+	case <-time.After(5 * time.Second):
+		t.Fatal("startup purge did not run")
+	}
+
+	remaining := idsByTenant(t, store.InMemoryAnalyticsStore)["tenant-x"]
+	if len(remaining) != 1 || remaining[0] != "fresh" {
+		t.Fatalf("expected immediate startup purge to drop the stale event, got %v", remaining)
 	}
 }
 
