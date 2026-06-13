@@ -93,15 +93,27 @@ struct KsealTrustClient {
         req.setValue(contentType, forHTTPHeaderField: "Content-Type")
         req.httpBody = body
         let sem = DispatchSemaphore(value: 0)
-        var out: Data?; var status = 0; var err: Error?
+        var out: Data?; var status = 0; var err: Error?; var respCT: String?
         URLSession.shared.dataTask(with: req) { data, resp, e in
-            out = data; status = (resp as? HTTPURLResponse)?.statusCode ?? 0; err = e; sem.signal()
+            out = data
+            let http = resp as? HTTPURLResponse
+            status = http?.statusCode ?? 0
+            respCT = http?.value(forHTTPHeaderField: "Content-Type")
+            err = e; sem.signal()
         }.resume()
         sem.wait()
         if let err { throw TrustError.http("\(method): \(err)") }
         let data = out ?? Data()
         guard (200..<300).contains(status) else {
             throw TrustError.http("\(method) failed (\(status)): \(String(decoding: data, as: UTF8.self))")
+        }
+        // Connect echoes the request codec in the response content-type; if the
+        // server answered in another format (e.g. a JSON error body for a proto
+        // call), fail loudly instead of letting the proto reader silently decode
+        // it to UNSPECIFIED.
+        if let respCT, let base = respCT.split(separator: ";").first,
+           base.trimmingCharacters(in: .whitespaces).lowercased() != contentType.lowercased() {
+            throw TrustError.http("\(method): unexpected content-type \(respCT) (wanted \(contentType))")
         }
         return data
     }

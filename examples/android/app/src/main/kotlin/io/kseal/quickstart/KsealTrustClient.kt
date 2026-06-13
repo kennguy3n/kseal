@@ -86,9 +86,17 @@ class KsealTrustClient(
             .post(body.toRequestBody(mediaType))
         if (auth && apiKey.isNotEmpty()) builder.header("Authorization", "Bearer $apiKey")
         http.newCall(builder.build()).execute().use { response ->
+            val ct = response.body?.contentType()
             val bytes = response.body?.bytes() ?: ByteArray(0)
             if (!response.isSuccessful) {
                 throw RuntimeException("$method failed (${response.code}): ${String(bytes, Charsets.UTF_8)}")
+            }
+            // Connect echoes the request codec in the response content-type. If the
+            // server answered in another format (e.g. a JSON error body for a proto
+            // call), fail loudly instead of letting the proto reader silently decode
+            // it to UNSPECIFIED.
+            if (ct != null && (ct.type != mediaType.type || ct.subtype != mediaType.subtype)) {
+                throw RuntimeException("$method: unexpected content-type $ct (wanted ${mediaType.type}/${mediaType.subtype})")
             }
             return bytes
         }
