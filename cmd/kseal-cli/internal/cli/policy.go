@@ -104,8 +104,9 @@ func newPolicyAuthorCmd(c *CLI) *cobra.Command {
 func newPolicyValidateCmd(c *CLI) *cobra.Command {
 	var file string
 	cmd := &cobra.Command{
-		Use:   "validate",
-		Short: "Validate a policy authoring file locally (no server call)",
+		Use:         "validate",
+		Short:       "Validate a policy authoring file locally (no server call)",
+		Annotations: map[string]string{annotationLocalOnly: "true"},
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if file == "" {
 				return newUsageError("--file is required")
@@ -127,8 +128,10 @@ func newPolicyValidateCmd(c *CLI) *cobra.Command {
 				return err
 			}
 			if len(problems) > 0 {
-				// Non-zero exit for CI without a duplicate "error:" banner.
-				return invalidPolicyError{count: len(problems)}
+				// An invalid policy file is an input error: exit 2 (ExitUsage),
+				// matching "policy author"'s invalid-file path and the documented
+				// exit-code contract. The problem list is already rendered above.
+				return usageError{err: invalidPolicyError{count: len(problems)}}
 			}
 			return nil
 		},

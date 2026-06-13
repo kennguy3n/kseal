@@ -33,6 +33,13 @@ type CLI struct {
 	httpClient connect.HTTPClient
 	out        io.Writer
 	errOut     io.Writer
+
+	// Connect clients are built lazily and cached for the lifetime of the
+	// invocation. A CLI is used by a single goroutine (commands run
+	// sequentially; tail polls from one goroutine), so no locking is needed.
+	registryClient ksealv1connect.RegistryServiceClient
+	webhookClient  ksealv1connect.WebhookServiceClient
+	queryClient    ksealv1connect.QueryServiceClient
 }
 
 // clientOptions returns the Connect client options shared by every service
@@ -65,15 +72,24 @@ func (c *CLI) httpc() connect.HTTPClient {
 }
 
 func (c *CLI) registry() ksealv1connect.RegistryServiceClient {
-	return ksealv1connect.NewRegistryServiceClient(c.httpc(), c.endpoint, c.clientOptions()...)
+	if c.registryClient == nil {
+		c.registryClient = ksealv1connect.NewRegistryServiceClient(c.httpc(), c.endpoint, c.clientOptions()...)
+	}
+	return c.registryClient
 }
 
 func (c *CLI) webhooks() ksealv1connect.WebhookServiceClient {
-	return ksealv1connect.NewWebhookServiceClient(c.httpc(), c.endpoint, c.clientOptions()...)
+	if c.webhookClient == nil {
+		c.webhookClient = ksealv1connect.NewWebhookServiceClient(c.httpc(), c.endpoint, c.clientOptions()...)
+	}
+	return c.webhookClient
 }
 
 func (c *CLI) query() ksealv1connect.QueryServiceClient {
-	return ksealv1connect.NewQueryServiceClient(c.httpc(), c.endpoint, c.clientOptions()...)
+	if c.queryClient == nil {
+		c.queryClient = ksealv1connect.NewQueryServiceClient(c.httpc(), c.endpoint, c.clientOptions()...)
+	}
+	return c.queryClient
 }
 
 // callCtx derives a per-call context honoring the configured timeout.

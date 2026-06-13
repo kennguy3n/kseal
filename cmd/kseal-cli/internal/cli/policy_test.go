@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -60,6 +62,36 @@ func TestPolicyValidate_Invalid_NonZeroExit(t *testing.T) {
 	}
 	if len(res.Problems) < 3 {
 		t.Fatalf("expected multiple problems, got %v", res.Problems)
+	}
+}
+
+// TestPolicyValidate_LocalOnly_NoCredentials verifies "policy validate" runs
+// purely locally: it must succeed with no API key and no endpoint configured,
+// so it is usable in CI lint stages without credentials.
+func TestPolicyValidate_LocalOnly_NoCredentials(t *testing.T) {
+	t.Setenv(defaultAPIKeyEnv, "")
+	t.Setenv(configEnvVar, filepath.Join(t.TempDir(), "config.json"))
+	file := writeFile(t, "policy.json", validPolicyJSON)
+
+	var stdout, stderr bytes.Buffer
+	code := Execute(context.Background(), []string{"-o", "json", "policy", "validate", "--file", file}, &stdout, &stderr)
+	if code != ExitOK {
+		t.Fatalf("validate without credentials exit=%d stderr=%s", code, stderr.String())
+	}
+}
+
+// TestPolicyValidate_Invalid_ExitUsage pins the exit-code contract: an invalid
+// policy file is an input error and must map to ExitUsage (2), matching the
+// documented contract and "policy author"'s invalid-file path.
+func TestPolicyValidate_Invalid_ExitUsage(t *testing.T) {
+	t.Setenv(defaultAPIKeyEnv, "")
+	t.Setenv(configEnvVar, filepath.Join(t.TempDir(), "config.json"))
+	file := writeFile(t, "bad.json", invalidPolicyJSON)
+
+	var stdout, stderr bytes.Buffer
+	code := Execute(context.Background(), []string{"-o", "json", "policy", "validate", "--file", file}, &stdout, &stderr)
+	if code != ExitUsage {
+		t.Fatalf("invalid policy exit=%d, want ExitUsage(%d) stderr=%s", code, ExitUsage, stderr.String())
 	}
 }
 
