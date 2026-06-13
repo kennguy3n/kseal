@@ -266,7 +266,15 @@ func newPolicySimulateCmd(c *CLI) *cobra.Command {
 
 			// Resolve the current active policy spec; a missing active policy is
 			// treated as an empty (permissive) baseline rather than an error.
-			current := PolicySpec{Thresholds: map[string]uint32{}, Weights: map[uint32]uint32{}}
+			// OBSERVE is the only truly permissive mode: risk.Decision returns
+			// ALLOW for every level in observe mode, whereas the zero-value
+			// (UNSPECIFIED) mode would DENY criticals and STEP_UP high/medium
+			// risk, skewing the simulated diff for a tenant that has no policy.
+			current := PolicySpec{
+				Thresholds: map[string]uint32{},
+				Weights:    map[uint32]uint32{},
+				Mode:       ksealv1.EnforcementMode_ENFORCEMENT_MODE_OBSERVE,
+			}
 			actCtx, actCancel := c.callCtx(parent)
 			actResp, aerr := c.registry().GetActivePolicy(actCtx, connect.NewRequest(&ksealv1.GetActivePolicyRequest{TenantId: tenant, AppId: appID}))
 			actCancel()

@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"connectrpc.com/connect"
@@ -129,8 +130,10 @@ func (c *CLI) tailEvents(ctx context.Context, tenant string, filters *eventFilte
 	defer ticker.Stop()
 
 	if c.output != outputJSON {
-		// Print the table header once; subsequent events stream as rows.
-		_ = (table{Headers: []string{"TIMESTAMP", "ID", "APP_ID", "TYPE", "RISK_LEVEL", "CONFIDENCE"}}).render(c.out)
+		// Print the fixed-width header once; events stream as aligned rows.
+		if _, err := fmt.Fprintln(c.out, formatTailRow(eventColumnHeaders())); err != nil {
+			return err
+		}
 	}
 
 	poll := func() error {
@@ -214,14 +217,36 @@ func isTransientError(err error) bool {
 	}
 }
 
-// emitOneEvent renders a single event in the active format (one JSON object per
-// line for json, one header-less table row for table) so tail streams cleanly.
+// emitOneEvent renders a single event in the active format so the tail streams
+// cleanly: one compact NDJSON object per line for json, or one fixed-width row
+// (column-aligned with the header) for table.
 func (c *CLI) emitOneEvent(e *ksealv1.EventRecord) error {
 	if c.output == outputJSON {
-		return renderJSON(c.out, newEventView(e))
+		return renderJSONCompact(c.out, newEventView(e))
 	}
-	row := table{Rows: eventTable([]*ksealv1.EventRecord{e}).Rows}
-	return row.render(c.out)
+	_, err := fmt.Fprintln(c.out, formatTailRow(eventRow(e)))
+	return err
+}
+
+// formatTailRow renders cells in the fixed-width tail layout defined by
+// eventColumns. A streaming tail flushes each row before later rows are known,
+// so a tabwriter (which back-computes widths per flush) cannot align columns
+// across events; fixed widths give stable alignment instead. The trailing
+// column is left unpadded so lines have no dangling whitespace.
+func formatTailRow(cells []string) string {
+	var b strings.Builder
+	for i, col := range eventColumns {
+		var val string
+		if i < len(cells) {
+			val = cells[i]
+		}
+		if i == len(eventColumns)-1 || col.width == 0 {
+			b.WriteString(val)
+			continue
+		}
+		fmt.Fprintf(&b, "%-*s  ", col.width, val)
+	}
+	return b.String()
 }
 
 // pruneSeen keeps the seen-set bounded: if it grows large, retain only the IDs

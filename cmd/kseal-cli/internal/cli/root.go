@@ -154,6 +154,12 @@ const annotationLocalOnly = "kseal/local-only"
 // commandNeedsServer reports whether the command makes server calls. A command
 // is local-only if it (or any ancestor) carries annotationLocalOnly.
 func commandNeedsServer(cmd *cobra.Command) bool {
+	// A non-runnable command (no Run/RunE — e.g. a bare group such as
+	// "kseal policy" or the root itself) only prints help and never reaches
+	// the server, so it must not demand an endpoint or API key.
+	if !cmd.Runnable() {
+		return false
+	}
 	for c := cmd; c != nil; c = c.Parent() {
 		if c.Annotations[annotationLocalOnly] == "true" {
 			return false

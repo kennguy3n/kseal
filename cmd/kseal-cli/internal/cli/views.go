@@ -222,13 +222,50 @@ func newEventView(e *ksealv1.EventRecord) eventView {
 	}
 }
 
+// eventColumn is the single source of truth for the columns rendered by both
+// `events query` (a buffered, dynamically-aligned tabwriter table) and
+// `events tail` (a fixed-width streaming layout). width is the minimum field
+// width used only by the streaming tail; the buffered table sizes columns
+// dynamically and ignores it.
+type eventColumn struct {
+	header string
+	width  int
+	value  func(*ksealv1.EventRecord) string
+}
+
+// eventColumns sizes its widths to the widest realistic value per column
+// (unix-millis timestamps and the longest proto enum names) so that streamed
+// `tail` rows stay aligned; an over-long value degrades gracefully (it pushes
+// that one row's later columns right) rather than corrupting data.
+var eventColumns = []eventColumn{
+	{"TIMESTAMP", 13, func(e *ksealv1.EventRecord) string { return strconv.FormatInt(e.GetTimestamp(), 10) }},
+	{"ID", 22, func(e *ksealv1.EventRecord) string { return e.GetId() }},
+	{"APP_ID", 22, func(e *ksealv1.EventRecord) string { return e.GetAppId() }},
+	{"TYPE", 29, func(e *ksealv1.EventRecord) string { return e.GetEventType().String() }},
+	{"RISK_LEVEL", 23, func(e *ksealv1.EventRecord) string { return e.GetRiskLevel().String() }},
+	{"CONFIDENCE", 0, func(e *ksealv1.EventRecord) string { return e.GetConfidence().String() }},
+}
+
+func eventColumnHeaders() []string {
+	h := make([]string, len(eventColumns))
+	for i, c := range eventColumns {
+		h[i] = c.header
+	}
+	return h
+}
+
+func eventRow(e *ksealv1.EventRecord) []string {
+	r := make([]string, len(eventColumns))
+	for i, c := range eventColumns {
+		r[i] = c.value(e)
+	}
+	return r
+}
+
 func eventTable(es []*ksealv1.EventRecord) table {
-	tbl := table{Headers: []string{"TIMESTAMP", "ID", "APP_ID", "TYPE", "RISK_LEVEL", "CONFIDENCE"}}
+	tbl := table{Headers: eventColumnHeaders()}
 	for _, e := range es {
-		tbl.Rows = append(tbl.Rows, []string{
-			strconv.FormatInt(e.GetTimestamp(), 10), e.GetId(), e.GetAppId(),
-			e.GetEventType().String(), e.GetRiskLevel().String(), e.GetConfidence().String(),
-		})
+		tbl.Rows = append(tbl.Rows, eventRow(e))
 	}
 	return tbl
 }

@@ -75,9 +75,15 @@ func parsePolicyDoc(rules []byte) (policyDoc, error) {
 	if len(rules) == 0 {
 		return doc, nil
 	}
-	if err := json.Unmarshal(rules, &doc); err == nil && (doc.Rules != nil || doc.SignalWeights != nil) {
+	// Object form: {"rules":[...],"signal_weights":{...}}. A JSON array or
+	// scalar cannot unmarshal into the struct, so a nil error here reliably
+	// means the input was a JSON object (or null) — including an empty "{}",
+	// which is a valid rule-less document (e.g. a policy authored by the
+	// dashboard or another client). It must not be rejected as malformed.
+	if err := json.Unmarshal(rules, &doc); err == nil {
 		return doc, nil
 	}
+	// Bare-array form: [{rule}, ...].
 	var arr []ruleDoc
 	if err := json.Unmarshal(rules, &arr); err != nil {
 		return doc, fmt.Errorf("rules must be a rules object or an array of rules: %w", err)
@@ -207,7 +213,14 @@ type PolicySpec struct {
 // server would) instead of being rejected.
 func specFromPolicy(p *ksealv1.Policy) (PolicySpec, error) {
 	if p == nil {
-		return PolicySpec{Thresholds: map[string]uint32{}, Weights: map[uint32]uint32{}}, nil
+		// No active policy: a permissive OBSERVE baseline (ALLOW for every
+		// level), consistent with the simulate fallback. The zero-value mode
+		// (UNSPECIFIED) would instead DENY/STEP_UP and is not permissive.
+		return PolicySpec{
+			Thresholds: map[string]uint32{},
+			Weights:    map[uint32]uint32{},
+			Mode:       ksealv1.EnforcementMode_ENFORCEMENT_MODE_OBSERVE,
+		}, nil
 	}
 	pf := &PolicyFile{
 		Rules:          json.RawMessage(p.GetRules()),

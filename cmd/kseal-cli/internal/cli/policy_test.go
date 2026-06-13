@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
 )
 
 func writeFile(t *testing.T, name, content string) string {
@@ -92,6 +94,21 @@ func TestPolicyValidate_Invalid_ExitUsage(t *testing.T) {
 	code := Execute(context.Background(), []string{"-o", "json", "policy", "validate", "--file", file}, &stdout, &stderr)
 	if code != ExitUsage {
 		t.Fatalf("invalid policy exit=%d, want ExitUsage(%d) stderr=%s", code, ExitUsage, stderr.String())
+	}
+}
+
+// TestGroupCommand_NoCredentialsRequired verifies that a bare group command
+// (no Run/RunE, e.g. "kseal policy") only prints help and therefore must not
+// demand an endpoint or API key — so `kseal policy` works in a credential-less
+// shell exactly like `--help` does.
+func TestGroupCommand_NoCredentialsRequired(t *testing.T) {
+	t.Setenv(defaultAPIKeyEnv, "")
+	t.Setenv(configEnvVar, filepath.Join(t.TempDir(), "config.json"))
+
+	var stdout, stderr bytes.Buffer
+	code := Execute(context.Background(), []string{"policy"}, &stdout, &stderr)
+	if code != ExitOK {
+		t.Fatalf("bare group command should print help without credentials, exit=%d stderr=%s", code, stderr.String())
 	}
 }
 
@@ -190,4 +207,94 @@ func TestPolicySimulate_Golden(t *testing.T) {
 		t.Fatalf("simulate exit=%d out=%s", code, simOut)
 	}
 	assertGoldenJSON(t, "policy_simulate.json", simOut)
+}
+
+// TestParsePolicyDoc_AcceptsForms pins the accepted rules-document shapes,
+// including an empty object "{}" (a valid rule-less policy authored by the
+// dashboard or another client) which must not be rejected as malformed.
+func TestParsePolicyDoc_AcceptsForms(t *testing.T) {
+	cases := []struct {
+		name      string
+		in        string
+		wantRules int
+		wantErr   bool
+	}{
+		{"empty bytes", "", 0, false},
+		{"empty object", "{}", 0, false},
+		{"object with rules", `{"rules":[{"id":"r1"}],"signal_weights":{"0":10}}`, 1, false},
+		{"object signal_weights only", `{"signal_weights":{"0":10}}`, 0, false},
+		{"bare array", `[{"id":"r1"},{"id":"r2"}]`, 2, false},
+		{"null", "null", 0, false},
+		{"scalar string", `"nope"`, 0, true},
+		{"truncated", `{`, 0, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			doc, err := parsePolicyDoc([]byte(tc.in))
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("parsePolicyDoc(%q): want error, got none", tc.in)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parsePolicyDoc(%q): unexpected error: %v", tc.in, err)
+			}
+			if len(doc.Rules) != tc.wantRules {
+				t.Fatalf("parsePolicyDoc(%q): rules=%d want %d", tc.in, len(doc.Rules), tc.wantRules)
+			}
+		})
+	}
+}
+
+// TestSpecFromPolicy_NilIsPermissiveObserve verifies that the simulate baseline
+// for a tenant with no active policy is permissive: OBSERVE mode (ALLOW for
+// every level) with empty scoring tables. The zero-value (UNSPECIFIED) mode
+// would instead DENY criticals and STEP_UP high/medium risk, skewing the diff
+// for a tenant that has never authored a policy. This pins the root-cause fix
+// at its pure-function source, independent of any RPC.
+func TestSpecFromPolicy_NilIsPermissiveObserve(t *testing.T) {
+	spec, err := specFromPolicy(nil)
+	if err != nil {
+		t.Fatalf("specFromPolicy(nil): %v", err)
+	}
+	if spec.Mode != ksealv1.EnforcementMode_ENFORCEMENT_MODE_OBSERVE {
+		t.Fatalf("baseline mode=%v, want OBSERVE", spec.Mode)
+	}
+	// Under OBSERVE every level resolves to ALLOW, so even a worst-case bitset
+	// (every risk signal set) must be ALLOW.
+	if got := spec.decide(^uint64(0)); got != ksealv1.RequestProofResult_DECISION_ALLOW {
+		t.Fatalf("observe baseline must ALLOW worst-case bits, got %v", got)
+	}
+}
+
+// TestSimulate_NoPolicyBaselineAllAllow exercises the diff over the OBSERVE
+// fallback baseline used when a tenant has no active policy: every "current"
+// decision must be ALLOW, and a stricter block-mode candidate must newly block
+// the high-scoring events. With the pre-fix UNSPECIFIED baseline the
+// MEDIUM/CRITICAL event would already be STEP_UP/DENY, so current_counts would
+// not be all-ALLOW and the diff would understate the candidate's impact.
+func TestSimulate_NoPolicyBaselineAllAllow(t *testing.T) {
+	current, err := specFromPolicy(nil) // permissive OBSERVE baseline
+	if err != nil {
+		t.Fatalf("specFromPolicy(nil): %v", err)
+	}
+	// Candidate: block mode, weighting bit 5 to 130 => CRITICAL => DENY.
+	cf := &PolicyFile{EnforcementMode: "block", Rules: json.RawMessage(`{"rules":[],"signal_weights":{"5":130}}`)}
+	candidate, err := cf.spec()
+	if err != nil {
+		t.Fatalf("candidate spec: %v", err)
+	}
+
+	// One clean event (no bits) and one with bit 5 set.
+	rep := simulate([]uint64{0, 1 << 5}, current, candidate)
+	if rep.Total != 2 {
+		t.Fatalf("total=%d want 2", rep.Total)
+	}
+	if rep.CurrentCounts["ALLOW"] != 2 || len(rep.CurrentCounts) != 1 {
+		t.Fatalf("no-policy baseline must be all-ALLOW, got %v", rep.CurrentCounts)
+	}
+	if rep.NewlyBlocked != 1 || rep.CandidateCounts["DENY"] != 1 {
+		t.Fatalf("candidate must newly block the bit-5 event: newly_blocked=%d candidate=%v", rep.NewlyBlocked, rep.CandidateCounts)
+	}
 }

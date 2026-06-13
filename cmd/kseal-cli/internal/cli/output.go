@@ -58,6 +58,17 @@ func renderJSON(w io.Writer, v any) error {
 	return enc.Encode(v)
 }
 
+// renderJSONCompact writes v as a single line of JSON followed by a newline
+// (newline-delimited JSON / NDJSON). It is used for streaming output
+// (`events tail`) so each event is one self-contained line that `jq -c`,
+// `while read`, and log shippers can consume incrementally without buffering a
+// whole document.
+func renderJSONCompact(w io.Writer, v any) error {
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	return enc.Encode(v)
+}
+
 // listEnvelope is the JSON shape for list responses: a named item slice plus an
 // optional pagination token. The items key varies per resource so scripts can
 // `jq '.tenants[]'` etc.

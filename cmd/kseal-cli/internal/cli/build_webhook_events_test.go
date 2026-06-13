@@ -250,3 +250,51 @@ func TestEventsTail_EmitsSeededThenStops(t *testing.T) {
 		t.Fatalf("expected seeded events in tail output, got %q", out.String())
 	}
 }
+
+// TestEventsTail_JSONIsNDJSON verifies tail emits newline-delimited JSON (one
+// compact object per line) rather than a pretty-printed multi-line document, so
+// the stream is consumable incrementally by `jq -c` / `while read`.
+func TestEventsTail_JSONIsNDJSON(t *testing.T) {
+	ts := newTestServer(t)
+	ts.seedEvents(t, "", 0b1)
+
+	var out, errOut bytes.Buffer
+	c := ts.newCLI(&out, &errOut, outputJSON)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := c.tailEvents(ctx, ts.TenantID, &eventFilterFlags{}, 100, 50*time.Millisecond); err != nil {
+		t.Fatalf("tailEvents: %v", err)
+	}
+	line := strings.TrimRight(out.String(), "\n")
+	if strings.Contains(line, "\n") {
+		t.Fatalf("tail json must be one object per line (NDJSON), got multi-line:\n%s", out.String())
+	}
+	if !strings.HasPrefix(line, "{") || !strings.Contains(line, `"id":"evt-a"`) {
+		t.Fatalf("expected a compact json object carrying the event id, got %q", line)
+	}
+}
+
+// TestEventsTail_TableColumnsAlign verifies the streamed table row aligns to the
+// fixed-width header: a tabwriter cannot align across independently-flushed
+// rows, so the ID value must start at the same column offset as the ID header.
+func TestEventsTail_TableColumnsAlign(t *testing.T) {
+	ts := newTestServer(t)
+	ts.seedEvents(t, "", 0b1)
+
+	var out, errOut bytes.Buffer
+	c := ts.newCLI(&out, &errOut, outputTable)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := c.tailEvents(ctx, ts.TenantID, &eventFilterFlags{}, 100, 50*time.Millisecond); err != nil {
+		t.Fatalf("tailEvents: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(out.String(), "\n"), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("expected header + at least one row, got %q", out.String())
+	}
+	if got, want := strings.Index(lines[1], "evt-a"), strings.Index(lines[0], "ID"); got != want {
+		t.Fatalf("tail columns misaligned: ID header at %d, id value at %d\nheader=%q\nrow=   %q", want, got, lines[0], lines[1])
+	}
+}

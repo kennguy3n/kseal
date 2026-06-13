@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -135,7 +136,10 @@ func (ts *testServer) seedEvents(t *testing.T, appID string, riskBits ...uint64)
 }
 
 func idForIndex(i int) string {
-	return "evt-" + string(rune('a'+i))
+	if i < 26 {
+		return "evt-" + string(rune('a'+i))
+	}
+	return fmt.Sprintf("evt-%d", i)
 }
 
 // anyPage returns a zero-value page for direct store assertions in tests.
