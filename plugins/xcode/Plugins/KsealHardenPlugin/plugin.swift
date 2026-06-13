@@ -60,13 +60,17 @@ struct KsealHardenPlugin: BuildToolPlugin {
             inputFiles.append(secureStrings)
         }
 
+        // Only the generated Swift is a declared output (it must be compiled into
+        // the target). The manifest is written alongside it in the plugin work
+        // directory but is intentionally NOT declared, so SwiftPM does not bundle
+        // it as an app resource; KsealRegisterPlugin / CI read it from there.
         return [
             .buildCommand(
                 displayName: "kseal: harden strings + emit build proof for \(targetName)",
                 executable: toolPath,
                 arguments: arguments,
                 inputFiles: inputFiles,
-                outputFiles: [generated, manifest]
+                outputFiles: [generated]
             )
         ]
     }
@@ -78,7 +82,10 @@ import XcodeProjectPlugin
 extension KsealHardenPlugin: XcodeBuildToolPlugin {
     func createBuildCommands(context: XcodePluginContext, target: XcodeTarget) throws -> [Command] {
         let tool = try context.tool(named: "kseal-harden")
-        let sourceDir = context.xcodeProject.directory.appending(target.displayName)
+        // Locate the secure-strings file among the target's actual inputs rather
+        // than guessing a directory layout; fall back to the project directory.
+        let configured = target.inputFiles.first { $0.path.lastComponent == "kseal-secure-strings.json" }
+        let sourceDir = configured?.path.removingLastComponent() ?? context.xcodeProject.directory
         return commands(
             toolPath: tool.path,
             targetName: target.displayName,
