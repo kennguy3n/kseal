@@ -106,8 +106,10 @@ type Exporter struct {
 func NewExporter(store ConnectorStore, cfg ExporterConfig, metrics *Metrics) *Exporter {
 	cfg.withDefaults()
 	return &Exporter{
-		store:   store,
-		client:  &http.Client{Timeout: cfg.Timeout},
+		store: store,
+		// No client-level timeout: each attempt is bounded by a per-request
+		// context deadline (cfg.Timeout) in send(), keeping one source of truth.
+		client:  &http.Client{},
 		cfg:     cfg,
 		metrics: metrics,
 		now:     time.Now,
@@ -334,7 +336,8 @@ func (p *tenantPipe) drainInto(batch *[]timedEvent) {
 
 // connectors returns the tenant's active connectors, using a short-lived cache.
 func (p *tenantPipe) connectors(ctx context.Context) []ConnectorWithSecret {
-	if time.Since(p.cachedAt) < p.ex.cfg.ConnectorCacheTTL && p.cached != nil {
+	now := p.ex.now()
+	if p.cached != nil && now.Sub(p.cachedAt) < p.ex.cfg.ConnectorCacheTTL {
 		return p.cached
 	}
 	got, err := p.ex.store.ListActiveWithSecrets(ctx, p.tenant)
@@ -344,7 +347,7 @@ func (p *tenantPipe) connectors(ctx context.Context) []ConnectorWithSecret {
 		return p.cached
 	}
 	p.cached = got
-	p.cachedAt = time.Now()
+	p.cachedAt = p.ex.now()
 	return got
 }
 

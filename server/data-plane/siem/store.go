@@ -3,6 +3,7 @@ package siem
 import (
 	"context"
 	"errors"
+	"net/url"
 	"sort"
 	"sync"
 
@@ -72,6 +73,9 @@ func validateInput(in CreateConnectorInput) error {
 	if in.Endpoint == "" {
 		return wrapInvalid("endpoint required")
 	}
+	if err := validateEndpoint(in.Endpoint); err != nil {
+		return err
+	}
 	if len(in.Secret) == 0 {
 		return wrapInvalid("auth secret required")
 	}
@@ -90,6 +94,24 @@ func validateInput(in CreateConnectorInput) error {
 		if in.ElasticIndex == "" {
 			return wrapInvalid("elastic connector requires elastic_index")
 		}
+	}
+	return nil
+}
+
+// validateEndpoint rejects endpoints that aren't absolute http/https URLs, so a
+// typo surfaces at registration time rather than later as repeated delivery
+// failures and dead-letters. API callers therefore get the same guarantee the
+// console's client-side check provides.
+func validateEndpoint(endpoint string) error {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return wrapInvalid("endpoint must be a valid URL")
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return wrapInvalid("endpoint must use http or https scheme")
+	}
+	if u.Host == "" {
+		return wrapInvalid("endpoint must include a host")
 	}
 	return nil
 }

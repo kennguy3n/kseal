@@ -116,6 +116,22 @@ func TestMemStoreRequiresSecretAndEndpoint(t *testing.T) {
 	}
 }
 
+func TestMemStoreRejectsInvalidEndpoint(t *testing.T) {
+	st := NewMemConnectorStore(testEncryptor(t))
+	for _, ep := range []string{
+		"not-a-url",                 // no scheme/host
+		"ftp://splunk.example:8088", // wrong scheme
+		"https://",                  // missing host
+		"//splunk.example",          // scheme-relative, no scheme
+	} {
+		in := splunkInput("t-1")
+		in.Endpoint = ep
+		if _, err := st.CreateConnector(context.Background(), in); err == nil {
+			t.Fatalf("expected rejection of invalid endpoint %q", ep)
+		}
+	}
+}
+
 func contains(haystack, needle string) bool {
 	return len(needle) > 0 && len(haystack) >= len(needle) && indexOf(haystack, needle) >= 0
 }
