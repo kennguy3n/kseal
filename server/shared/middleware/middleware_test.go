@@ -91,6 +91,30 @@ func TestObservabilityErrorPathNoPanic(t *testing.T) {
 	}
 }
 
+// TestObservabilityStampsRequestIDOnSuccess pins the success-path counterpart to
+// TestObservabilityErrorPathNoPanic: on a successful call the interceptor must
+// stamp X-Request-Id onto the (usable) response that isNilResponse lets through.
+func TestObservabilityStampsRequestIDOnSuccess(t *testing.T) {
+	tel, err := telemetry.Setup("test", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ic := &Interceptors{Logger: zerolog.Nop(), Tracer: *tel}
+
+	next := func(ctx context.Context, _ connect.AnyRequest) (connect.AnyResponse, error) {
+		return connect.NewResponse(&emptypb.Empty{}), nil
+	}
+	wrapped := ic.observability()(next)
+
+	resp, err := wrapped(context.Background(), connect.NewRequest(&emptypb.Empty{}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Header().Get("X-Request-Id") == "" {
+		t.Fatal("expected X-Request-Id to be stamped on the success response")
+	}
+}
+
 func TestRequestIDInjected(t *testing.T) {
 	var seen string
 	h := RequestID(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
