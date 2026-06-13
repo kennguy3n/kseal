@@ -49,15 +49,6 @@ func localOnly(cmd *cobra.Command) *cobra.Command {
 	return cmd
 }
 
-// loadContract returns the embedded canonical contract, or one loaded from path
-// when the operator overrides it with --contract.
-func loadContract(path string) (*dscontract.Contract, error) {
-	if path == "" {
-		return dscontract.Canonical()
-	}
-	return dscontract.Load(path)
-}
-
 func writeArtifact(c *CLI, out string, data []byte) error {
 	if out == "" {
 		_, err := c.out.Write(data)
@@ -91,7 +82,7 @@ func newPrivacyManifestCmd(c *CLI) *cobra.Command {
 			if format != "plist" && format != "json" {
 				return newUsageError("invalid --format %q (want plist|json)", format)
 			}
-			ct, err := loadContract(contractPath)
+			ct, err := dscontract.Load(contractPath)
 			if err != nil {
 				return err
 			}
@@ -130,7 +121,7 @@ func newDataSafetyCmd(c *CLI) *cobra.Command {
 			if format != "md" && format != "json" {
 				return newUsageError("invalid --format %q (want md|json)", format)
 			}
-			ct, err := loadContract(contractPath)
+			ct, err := dscontract.Load(contractPath)
 			if err != nil {
 				return err
 			}

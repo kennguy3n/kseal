@@ -87,13 +87,15 @@ func writeIndent(b *strings.Builder, n int) {
 	}
 }
 
+// xmlEscaper is stateless and safe for concurrent use, so it is built once.
+var xmlEscaper = strings.NewReplacer(
+	"&", "&amp;",
+	"<", "&lt;",
+	">", "&gt;",
+)
+
 func escapeXML(s string) string {
-	r := strings.NewReplacer(
-		"&", "&amp;",
-		"<", "&lt;",
-		">", "&gt;",
-	)
-	return r.Replace(s)
+	return xmlEscaper.Replace(s)
 }
 
 // renderPlist wraps a root value in the standard plist document header.
