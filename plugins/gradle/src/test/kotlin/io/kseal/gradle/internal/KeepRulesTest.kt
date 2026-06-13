@@ -37,6 +37,18 @@ class KeepRulesTest {
     }
 
     @Test
+    fun `comma-separated directive modifiers are honoured`() {
+        val rules = KeepRules.parse(
+            """
+            -keep,allowobfuscation class com.example.Reflected
+            -keepclassmembers,includedescriptorclasses class com.example.Native { native <methods>; }
+            """.trimIndent(),
+        )
+        assertTrue(rules.keepsClass("com.example.Reflected"))
+        assertTrue(rules.keepsClass("com.example.Native"))
+    }
+
+    @Test
     fun `extra name globs are honoured`() {
         val rules = KeepRules.parse("", extraNameGlobs = listOf("app_name", "url_*"))
         assertTrue(rules.keepsName("app_name"))

@@ -72,7 +72,12 @@ internal object ResourceHardener {
         }
 
         val sealedJson = Json.write(sealedValues, indent = false).toByteArray()
-        val sealedBlob = Crypto.seal(key, sealedJson, nonceContext = SEAL_LABEL)
+        // Bind the deterministic nonce to the sealed content (not just the label):
+        // with a pinned explicit seed the key is constant across builds, so a
+        // content-independent context could reuse a (key, nonce) pair on changed
+        // resources. Hashing the plaintext keeps output reproducible for identical
+        // content while guaranteeing distinct nonces for distinct content.
+        val sealedBlob = Crypto.seal(key, sealedJson, nonceContext = "$SEAL_LABEL:${Crypto.sha256Hex(sealedJson)}")
 
         return Result(
             transformedFiles = transformed,

@@ -69,7 +69,7 @@ abstract class GeneratePolymorphismSeedTask : DefaultTask() {
         val derivation = when {
             explicit != null -> "explicit"
             randomized -> "random"
-            master != null -> "master"
+            master != null -> "master-key"
             else -> "content"
         }
 

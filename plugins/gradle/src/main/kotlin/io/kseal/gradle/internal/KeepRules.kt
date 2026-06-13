@@ -85,7 +85,9 @@ internal class KeepRules(
                 val end = nextDirectiveStart(cleaned, dashAt + 1)
                 val directive = cleaned.substring(dashAt, end)
                 idx = end
-                val keyword = directive.takeWhile { !it.isWhitespace() }
+                // ProGuard allows comma-separated modifiers on the directive itself
+                // (e.g. `-keep,allowobfuscation`); match on the bare keyword.
+                val keyword = directive.takeWhile { !it.isWhitespace() }.substringBefore(',')
                 if (keyword !in KEEP_DIRECTIVES) continue
                 classNameOf(directive)?.let { classMatchers.add(NameMatcher.of(it)) }
             }

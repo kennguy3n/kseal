@@ -123,6 +123,7 @@ class KsealAndroidHardenPlugin : Plugin<Project> {
             sdkVersion.set(ext.sdkVersion)
             pluginVersion.set(PLUGIN_VERSION)
             gradleVersion.set(project.gradle.gradleVersion)
+            javaVersion.set(System.getProperty("java.version"))
             r8MappingPresent.set(ext.mappingFile.map { it.asFile.isFile }.orElse(false))
             seedDigestFile.set(seed.flatMap { it.seedDigestFile })
             seedMetaFile.set(seed.flatMap { it.seedMetaFile })

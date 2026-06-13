@@ -62,6 +62,9 @@ abstract class BuildProofManifestTask : DefaultTask() {
     abstract val gradleVersion: Property<String>
 
     @get:Input
+    abstract val javaVersion: Property<String>
+
+    @get:Input
     abstract val r8MappingPresent: Property<Boolean>
 
     @get:InputFile
@@ -124,7 +127,7 @@ abstract class BuildProofManifestTask : DefaultTask() {
             tooling = linkedMapOf(
                 "plugin" to "io.kseal.android.harden:${pluginVersion.get()}",
                 "gradle" to gradleVersion.get(),
-                "java" to System.getProperty("java.version"),
+                "java" to javaVersion.get(),
                 "asm" to org.objectweb.asm.Opcodes::class.java.`package`.implementationVersion.orEmpty(),
                 "r8_mapping" to r8MappingPresent.get(),
             ),
