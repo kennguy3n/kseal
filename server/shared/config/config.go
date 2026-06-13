@@ -48,6 +48,36 @@ type Config struct {
 	// FeatureFlags holds per-tenant feature toggles parsed from
 	// KSEAL_FEATURE_FLAGS (format: tenant:flag=bool,...).
 	FeatureFlags FeatureFlags
+
+	// CMKKMSURI is the customer-managed-key (BYOK/CMK) KMS endpoint base URL.
+	// Empty disables CMK entirely: every tenant uses the platform KEK
+	// (unchanged behavior). When set, tenants whose cmk_kms_uri column is
+	// populated have their DEKs wrapped by their own KMS key; the rest still
+	// fall back to the platform KEK.
+	CMKKMSURI string
+	// CMKKMSAuthToken is an optional bearer token presented to the KMS endpoint.
+	CMKKMSAuthToken string
+
+	// RedisTLS enables TLS to Redis (default false, plaintext).
+	RedisTLS bool
+	// RedisCAFile optionally pins the Redis server CA (PEM). Empty uses system
+	// roots.
+	RedisCAFile string
+	// RedisPassword is the Redis AUTH credential (default empty, no AUTH).
+	RedisPassword string
+
+	// OTLPEndpoint is the OTLP/gRPC trace collector address (host:port). Empty
+	// attaches no exporter (current behavior).
+	OTLPEndpoint string
+	// OTLPSampleRatio is the head-sampling ratio in [0,1] (default 1.0).
+	OTLPSampleRatio float64
+	// OTLPInsecure disables transport security to the collector (default true).
+	OTLPInsecure bool
+
+	// RawRetentionDays is the platform-default raw-telemetry retention window in
+	// days, applied to tenants without a per-tenant override. <= 0 retains raw
+	// events indefinitely (fail-safe).
+	RawRetentionDays int
 }
 
 // IsProd reports whether the server runs in a production-like environment.
@@ -75,10 +105,27 @@ func Load() (*Config, error) {
 		RateLimitBurst:       200,
 		IngestQuotaPerMinute: 60000,
 		CORSAllowedOrigins:   splitNonEmpty(getenv("KSEAL_CORS_ORIGINS", "http://localhost:5173")),
+		CMKKMSURI:            strings.TrimSpace(os.Getenv("KSEAL_CMK_KMS_URI")),
+		CMKKMSAuthToken:      os.Getenv("KSEAL_CMK_KMS_AUTH_TOKEN"),
+		RedisCAFile:          os.Getenv("KSEAL_REDIS_CA_FILE"),
+		RedisPassword:        os.Getenv("KSEAL_REDIS_PASSWORD"),
+		OTLPEndpoint:         strings.TrimSpace(os.Getenv("KSEAL_OTLP_ENDPOINT")),
 	}
 
 	var err error
 	if c.RedisDB, err = atoiDefault("KSEAL_REDIS_DB", 0); err != nil {
+		return nil, err
+	}
+	if c.RedisTLS, err = boolDefault("KSEAL_REDIS_TLS", false); err != nil {
+		return nil, err
+	}
+	if c.OTLPSampleRatio, err = floatDefault("KSEAL_OTLP_SAMPLE_RATIO", 1.0); err != nil {
+		return nil, err
+	}
+	if c.OTLPInsecure, err = boolDefault("KSEAL_OTLP_INSECURE", true); err != nil {
+		return nil, err
+	}
+	if c.RawRetentionDays, err = atoiDefault("KSEAL_RAW_RETENTION_DAYS", 30); err != nil {
 		return nil, err
 	}
 	if v := os.Getenv("KSEAL_NONCE_TTL"); v != "" {
@@ -179,6 +226,18 @@ func atoiDefault(key string, def int) (int, error) {
 		return 0, fmt.Errorf("%s: %w", key, err)
 	}
 	return n, nil
+}
+
+func boolDefault(key string, def bool) (bool, error) {
+	v := os.Getenv(key)
+	if v == "" {
+		return def, nil
+	}
+	b, err := strconv.ParseBool(strings.TrimSpace(v))
+	if err != nil {
+		return false, fmt.Errorf("%s: %w", key, err)
+	}
+	return b, nil
 }
 
 func floatDefault(key string, def float64) (float64, error) {

@@ -149,6 +149,46 @@ func (s *InMemoryAnalyticsStore) Query(_ context.Context, q Query) ([]StoredEven
 	return out, nil
 }
 
+// TenantIDs returns the distinct tenants that currently hold raw events,
+// satisfying RawEventStore for the retention purger.
+func (s *InMemoryAnalyticsStore) TenantIDs(_ context.Context) ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	seen := make(map[string]struct{})
+	var out []string
+	for _, e := range s.events {
+		if _, ok := seen[e.TenantID]; ok {
+			continue
+		}
+		seen[e.TenantID] = struct{}{}
+		out = append(out, e.TenantID)
+	}
+	return out, nil
+}
+
+// PurgeRawEventsOlderThan deletes the tenant's raw events strictly older than
+// cutoffBucket and returns the number removed. It only ever touches the named
+// tenant's events, preserving cross-tenant isolation.
+func (s *InMemoryAnalyticsStore) PurgeRawEventsOlderThan(_ context.Context, tenantID string, cutoffBucket int64) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	kept := s.events[:0]
+	purged := 0
+	for _, e := range s.events {
+		if e.TenantID == tenantID && e.TimeBucket < cutoffBucket {
+			purged++
+			continue
+		}
+		kept = append(kept, e)
+	}
+	// Release references to purged events from the tail of the backing array.
+	for i := len(kept); i < len(s.events); i++ {
+		s.events[i] = StoredEvent{}
+	}
+	s.events = kept
+	return purged, nil
+}
+
 // Count returns the number of matching events.
 func (s *InMemoryAnalyticsStore) Count(_ context.Context, q Query) (int, error) {
 	s.mu.RLock()

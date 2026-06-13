@@ -69,7 +69,7 @@ func TestCORSPreflight(t *testing.T) {
 // (e.g. NotFound) as Internal. The interceptor must instead pass the original
 // error through untouched and not panic.
 func TestObservabilityErrorPathNoPanic(t *testing.T) {
-	tel, err := telemetry.Setup("test", "test")
+	tel, err := telemetry.Setup("test", "test", telemetry.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestObservabilityErrorPathNoPanic(t *testing.T) {
 // TestObservabilityErrorPathNoPanic: on a successful call the interceptor must
 // stamp X-Request-Id onto the (usable) response that isNilResponse lets through.
 func TestObservabilityStampsRequestIDOnSuccess(t *testing.T) {
-	tel, err := telemetry.Setup("test", "test")
+	tel, err := telemetry.Setup("test", "test", telemetry.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
