@@ -271,7 +271,7 @@ func (c *CLI) bulkApplyOne(ctx context.Context, tenant, appID, policyName string
 	diff, err := c.packDiff(ctx, tenant, appID, pack)
 	if err != nil {
 		res.Status = "error"
-		res.Error = err.Error()
+		res.Error = connectErrMessage(err)
 		return res
 	}
 	res.Changes = len(diff.Changes)
@@ -286,7 +286,7 @@ func (c *CLI) bulkApplyOne(ctx context.Context, tenant, appID, policyName string
 	req, err := pack.createRequest(tenant, policyName, appID)
 	if err != nil {
 		res.Status = "error"
-		res.Error = err.Error()
+		res.Error = connectErrMessage(err)
 		return res
 	}
 	callCtx, cancel := c.callCtx(ctx)
