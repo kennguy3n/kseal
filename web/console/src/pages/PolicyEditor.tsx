@@ -77,8 +77,8 @@ export function PolicyEditorPage() {
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="text-xl font-semibold text-slate-50">Policies</h1>
-        <p className="text-sm text-slate-400">
+        <h1 className="text-xl font-semibold text-fg-strong">Policies</h1>
+        <p className="text-sm text-fg-muted">
           Author and activate enforcement policies. Empty app selection targets
           the tenant-wide default.
         </p>
@@ -116,19 +116,19 @@ export function PolicyEditorPage() {
               {policies.data.map((p) => (
                 <li
                   key={p.id}
-                  className="flex items-center justify-between rounded-lg border border-slate-800 p-3"
+                  className="flex items-center justify-between rounded-lg border border-line p-3"
                 >
                   <div>
-                    <div className="flex items-center gap-2 text-sm text-slate-100">
+                    <div className="flex items-center gap-2 text-sm text-fg-strong">
                       {p.name}
-                      <span className="text-xs text-slate-500">v{p.version}</span>
+                      <span className="text-xs text-fg-subtle">v{p.version}</span>
                       {p.isActive && (
-                        <Badge tone="bg-emerald-500/15 text-emerald-300 border-emerald-500/30">
+                        <Badge tone="bg-emerald-500/10 text-emerald-700 border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-300">
                           active
                         </Badge>
                       )}
                     </div>
-                    <div className="mt-1 text-xs text-slate-400">
+                    <div className="mt-1 text-xs text-fg-muted">
                       {enforcementModeLabels[p.enforcementMode]}
                     </div>
                   </div>
@@ -165,7 +165,7 @@ export function PolicyEditorPage() {
                 onChange={(e) => update("name", e.target.value)}
               />
               {errors.name && (
-                <p className="mt-1 text-xs text-rose-300">{errors.name}</p>
+                <p className="mt-1 text-xs text-rose-600 dark:text-rose-300">{errors.name}</p>
               )}
             </div>
 
@@ -188,7 +188,7 @@ export function PolicyEditorPage() {
                 ))}
               </select>
               {errors.enforcementMode && (
-                <p className="mt-1 text-xs text-rose-300">
+                <p className="mt-1 text-xs text-rose-600 dark:text-rose-300">
                   {errors.enforcementMode}
                 </p>
               )}
@@ -219,7 +219,7 @@ export function PolicyEditorPage() {
                 onChange={(e) => update("riskThresholdsJson", e.target.value)}
               />
               {errors.riskThresholdsJson && (
-                <p className="mt-1 text-xs text-rose-300">
+                <p className="mt-1 text-xs text-rose-600 dark:text-rose-300">
                   {errors.riskThresholdsJson}
                 </p>
               )}
@@ -237,7 +237,7 @@ export function PolicyEditorPage() {
                 onChange={(e) => update("rulesJson", e.target.value)}
               />
               {errors.rulesJson && (
-                <p className="mt-1 text-xs text-rose-300">{errors.rulesJson}</p>
+                <p className="mt-1 text-xs text-rose-600 dark:text-rose-300">{errors.rulesJson}</p>
               )}
             </div>
 

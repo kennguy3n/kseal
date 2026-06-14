@@ -39,8 +39,8 @@ export function LoginPage() {
     <div className="flex min-h-full items-center justify-center p-6">
       <form onSubmit={onSubmit} className="card w-full max-w-md space-y-4">
         <div>
-          <h1 className="text-xl font-semibold text-slate-50">kseal console</h1>
-          <p className="mt-1 text-sm text-slate-400">
+          <h1 className="text-xl font-semibold text-fg-strong">kseal console</h1>
+          <p className="mt-1 text-sm text-fg-muted">
             Sign in with a tenant API key to manage apps, policies and events.
           </p>
         </div>
@@ -89,7 +89,7 @@ export function LoginPage() {
         </div>
 
         {error && (
-          <div role="alert" className="text-sm text-rose-300">
+          <div role="alert" className="text-sm text-rose-600 dark:text-rose-300">
             {error}
           </div>
         )}

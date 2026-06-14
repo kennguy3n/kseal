@@ -12,6 +12,24 @@
       VITE_KSEAL_API_BASE_URL. Loaded before the bundle so window config exists.
     -->
     <script src="/env.js"></script>
+    <!--
+      Apply the persisted (or OS-preferred) color theme before first paint to
+      avoid a light/dark flash. Mirrors the precedence in src/lib/theme.ts.
+    -->
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem("kseal.console.theme");
+          var prefersDark =
+            window.matchMedia &&
+            window.matchMedia("(prefers-color-scheme: dark)").matches;
+          var dark = stored ? stored === "dark" : prefersDark;
+          document.documentElement.classList.toggle("dark", dark);
+        } catch (e) {
+          /* localStorage may be unavailable; default to light. */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

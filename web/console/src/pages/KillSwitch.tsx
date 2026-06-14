@@ -57,8 +57,8 @@ export function KillSwitchPage() {
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="text-xl font-semibold text-slate-50">Kill switch</h1>
-        <p className="text-sm text-slate-400">
+        <h1 className="text-xl font-semibold text-fg-strong">Kill switch</h1>
+        <p className="text-sm text-fg-muted">
           View and issue a signed enable/disable of protection enforcement.
           Signing and authority are server-side; the console only requests the
           change.
@@ -91,7 +91,7 @@ export function KillSwitchPage() {
               <Badge tone={killSwitchCommandTone(effective)}>
                 {killSwitchCommandLabels[effective]}
               </Badge>
-              <span className="text-sm text-slate-400">
+              <span className="text-sm text-fg-muted">
                 {isArmed
                   ? "Protection is enforcing normally."
                   : "Protection enforcement is disabled (observe-only)."}
@@ -101,29 +101,29 @@ export function KillSwitchPage() {
               <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
                 <div>
                   <dt className="label">Issued</dt>
-                  <dd className="font-mono text-xs text-slate-400">
+                  <dd className="font-mono text-xs text-fg-muted">
                     {formatTimestamp(active.issuedAt)}
                   </dd>
                 </div>
                 <div>
                   <dt className="label">Version</dt>
-                  <dd className="font-mono text-xs text-slate-400">
+                  <dd className="font-mono text-xs text-fg-muted">
                     {active.version.toString()}
                   </dd>
                 </div>
                 <div>
                   <dt className="label">Signing key</dt>
-                  <dd className="font-mono text-xs text-slate-400">
+                  <dd className="font-mono text-xs text-fg-muted">
                     {active.keyId || "—"}
                   </dd>
                 </div>
                 <div>
                   <dt className="label">Reason</dt>
-                  <dd className="text-slate-300">{active.reason || "—"}</dd>
+                  <dd className="text-fg">{active.reason || "—"}</dd>
                 </div>
               </dl>
             ) : (
-              <p className="text-sm text-slate-400">
+              <p className="text-sm text-fg-muted">
                 No signed command in effect for this scope (armed by default).
               </p>
             )}
@@ -146,7 +146,7 @@ export function KillSwitchPage() {
           )}
           {pending === null ? (
             <div className="space-y-3">
-              <p className="text-sm text-slate-400">
+              <p className="text-sm text-fg-muted">
                 {target === KillSwitchCommand.DISABLE
                   ? "Issues a signed kill switch that disables enforcement for this scope. Use only for incident response."
                   : "Issues a signed command that re-arms enforcement for this scope."}

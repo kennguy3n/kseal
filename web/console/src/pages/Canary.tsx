@@ -23,14 +23,14 @@ function RolloutBar({ percentage }: { percentage: number }) {
   const pct = Math.max(0, Math.min(100, percentage));
   return (
     <div
-      className="h-2 w-full overflow-hidden rounded-full bg-slate-800"
+      className="h-2 w-full overflow-hidden rounded-full bg-elevated"
       role="progressbar"
       aria-valuenow={pct}
       aria-valuemin={0}
       aria-valuemax={100}
     >
       <div
-        className="h-full rounded-full bg-indigo-500"
+        className="h-full rounded-full bg-accent-strong"
         style={{ width: `${pct}%` }}
       />
     </div>
@@ -52,8 +52,8 @@ export function CanaryPage() {
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="text-xl font-semibold text-slate-50">Canary monitor</h1>
-        <p className="text-sm text-slate-400">
+        <h1 className="text-xl font-semibold text-fg-strong">Canary monitor</h1>
+        <p className="text-sm text-fg-muted">
           Staged policy/config rollout for an app: rollout percentage, candidate
           health and auto-rollback status.
         </p>
@@ -73,22 +73,22 @@ export function CanaryPage() {
         ) : status === null ? (
           <EmptyState>No staged rollout for this scope.</EmptyState>
         ) : (
-          <div className="rounded-lg border border-slate-800 p-4">
+          <div className="rounded-lg border border-line p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-slate-100">
+                <span className="text-sm font-medium text-fg-strong">
                   {status.candidatePolicyId || "candidate"}
                 </span>
                 <Badge tone={canaryStateTone(status.state)}>
                   {canaryStateLabels[status.state]}
                 </Badge>
                 {status.state === CanaryState.ACTIVE && (
-                  <Badge tone="bg-sky-500/15 text-sky-300 border-sky-500/30">
+                  <Badge tone="bg-sky-500/10 text-sky-700 border-sky-500/30 dark:bg-sky-500/15 dark:text-sky-300">
                     Auto-rollback armed
                   </Badge>
                 )}
               </div>
-              <span className="text-sm font-semibold text-slate-200">
+              <span className="text-sm font-semibold text-fg">
                 {status.percent}%
               </span>
             </div>
@@ -100,25 +100,25 @@ export function CanaryPage() {
             <dl className="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
               <div>
                 <dt className="label">Candidate block rate</dt>
-                <dd className={regressed ? "text-amber-300" : "text-slate-300"}>
+                <dd className={regressed ? "text-amber-600 dark:text-amber-300" : "text-fg"}>
                   {formatRate(status.blockRate)}
                 </dd>
               </div>
               <div>
                 <dt className="label">Rollback threshold</dt>
-                <dd className="text-slate-300">
+                <dd className="text-fg">
                   {formatRate(status.rollbackThreshold)}
                 </dd>
               </div>
               <div>
                 <dt className="label">Sample</dt>
-                <dd className="text-slate-300">
+                <dd className="text-fg">
                   {status.sampleCount.toString()} decisions
                 </dd>
               </div>
               <div>
                 <dt className="label">Updated</dt>
-                <dd className="font-mono text-xs text-slate-400">
+                <dd className="font-mono text-xs text-fg-muted">
                   {formatTimestamp(status.updatedAt)}
                 </dd>
               </div>
@@ -127,7 +127,7 @@ export function CanaryPage() {
             <dl className="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
               <div>
                 <dt className="label">Stable (last-known-good)</dt>
-                <dd className="font-mono text-xs text-slate-400">
+                <dd className="font-mono text-xs text-fg-muted">
                   {status.stablePolicyId || "—"}
                 </dd>
               </div>
@@ -137,8 +137,8 @@ export function CanaryPage() {
               <p
                 className={
                   status.state === CanaryState.ROLLED_BACK
-                    ? "mt-3 text-xs text-rose-300/80"
-                    : "mt-3 text-xs text-slate-400"
+                    ? "mt-3 text-xs text-rose-600/90 dark:text-rose-300/80"
+                    : "mt-3 text-xs text-fg-muted"
                 }
               >
                 {status.lastEvent}

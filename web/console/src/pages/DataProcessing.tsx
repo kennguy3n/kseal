@@ -36,10 +36,10 @@ export function DataProcessingPage() {
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="text-xl font-semibold text-slate-50">
+        <h1 className="text-xl font-semibold text-fg-strong">
           Data-processing registry
         </h1>
-        <p className="text-sm text-slate-400">
+        <p className="text-sm text-fg-muted">
           What data each app / SDK processes — categories, purpose, retention
           and lawful basis — for your processing register and privacy reviews.
         </p>
@@ -58,7 +58,7 @@ export function DataProcessingPage() {
         title={
           <span>
             Records{" "}
-            <span className="text-slate-500">({records.length})</span>
+            <span className="text-fg-subtle">({records.length})</span>
           </span>
         }
       >
@@ -77,43 +77,43 @@ export function DataProcessingPage() {
             {records.map((r, i) => (
               <li
                 key={`${r.appId}|${i}`}
-                className="rounded-lg border border-slate-800 p-4"
+                className="rounded-lg border border-line p-4"
               >
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-medium text-slate-100">
+                  <span className="text-sm font-medium text-fg-strong">
                     {r.dataCategories.join(", ") || "Data processing"}
                   </span>
                   {r.thirdPartySharing ? (
-                    <Badge tone="bg-amber-500/15 text-amber-300 border-amber-500/30">
+                    <Badge tone="bg-amber-500/10 text-amber-700 border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-300">
                       Shared with third party
                     </Badge>
                   ) : (
-                    <Badge tone="bg-emerald-500/15 text-emerald-300 border-emerald-500/30">
+                    <Badge tone="bg-emerald-500/10 text-emerald-700 border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-300">
                       Not shared
                     </Badge>
                   )}
-                  <span className="text-xs text-slate-500">
+                  <span className="text-xs text-fg-subtle">
                     {r.appId ? `app ${r.appId}` : "tenant-wide"}
                   </span>
                 </div>
                 <dl className="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
                   <div>
                     <dt className="label">Purpose</dt>
-                    <dd className="text-slate-300">{r.purpose || "—"}</dd>
+                    <dd className="text-fg">{r.purpose || "—"}</dd>
                   </div>
                   <div>
                     <dt className="label">Retention</dt>
-                    <dd className="text-slate-300">
+                    <dd className="text-fg">
                       {formatRetention(r.retentionDays)}
                     </dd>
                   </div>
                   <div>
                     <dt className="label">Lawful basis</dt>
-                    <dd className="text-slate-300">{r.legalBasis || "—"}</dd>
+                    <dd className="text-fg">{r.legalBasis || "—"}</dd>
                   </div>
                   <div>
                     <dt className="label">Updated</dt>
-                    <dd className="font-mono text-xs text-slate-400">
+                    <dd className="font-mono text-xs text-fg-muted">
                       {formatTimestamp(r.updatedAt)}
                     </dd>
                   </div>
@@ -125,7 +125,7 @@ export function DataProcessingPage() {
                       {r.dataCategories.map((f) => (
                         <span
                           key={f}
-                          className="rounded-md border border-slate-700 px-2 py-0.5 font-mono text-xs text-slate-400"
+                          className="rounded-md border border-line-strong px-2 py-0.5 font-mono text-xs text-fg-muted"
                         >
                           {f}
                         </span>

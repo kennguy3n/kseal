@@ -4,7 +4,17 @@ import {
   useTenantOverview,
   useTrustSessionStats,
 } from "../hooks/queries";
-import { Card, ErrorNotice, Spinner, Stat, Badge, EmptyState } from "../components/ui";
+import {
+  Card,
+  ErrorNotice,
+  Stat,
+  Badge,
+  EmptyState,
+  PageHeader,
+  SkeletonRows,
+  SkeletonStat,
+} from "../components/ui";
+import { Onboarding } from "../components/Onboarding";
 import {
   eventTypeLabels,
   formatTimestamp,
@@ -25,67 +35,69 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-xl font-semibold text-slate-50">Overview</h1>
-        <p className="text-sm text-slate-400">
-          Tenant trust posture at a glance.
-        </p>
-      </header>
+      <PageHeader
+        title="Overview"
+        description="Tenant trust posture at a glance."
+      />
+
+      <Onboarding />
 
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-        <Stat
-          label="Apps"
-          value={
-            overview.isLoading ? "…" : overview.data ? overview.data.appCount : "—"
-          }
-        />
-        <Stat
-          label="Webhooks"
-          value={
-            overview.isLoading
-              ? "…"
-              : overview.data
-                ? overview.data.webhookCount
-                : "—"
-          }
-        />
-        <Stat
-          label="Events (24h)"
-          value={
-            overview.isLoading
-              ? "…"
-              : overview.data
-                ? Number(overview.data.eventsLast24h)
-                : "—"
-          }
-        />
-        <Stat
-          label="Trust sessions"
-          value={
-            stats.isLoading
-              ? "…"
-              : stats.data
-                ? Number(stats.data.totalSessions)
-                : "—"
-          }
-        />
+        {overview.isLoading ? (
+          <>
+            <SkeletonStat />
+            <SkeletonStat />
+            <SkeletonStat />
+            <SkeletonStat />
+          </>
+        ) : (
+          <>
+            <Stat
+              label="Apps"
+              value={overview.data ? overview.data.appCount : "—"}
+              hint="Mobile or desktop apps registered to this tenant."
+            />
+            <Stat
+              label="Webhooks"
+              value={overview.data ? overview.data.webhookCount : "—"}
+              hint="Endpoints receiving signed event deliveries."
+            />
+            <Stat
+              label="Events (24h)"
+              value={
+                overview.data ? Number(overview.data.eventsLast24h) : "—"
+              }
+              hint="Risk and policy-decision events in the last 24 hours."
+            />
+            <Stat
+              label="Trust sessions"
+              value={
+                stats.data ? Number(stats.data.totalSessions) : "—"
+              }
+              hint="Devices that completed attestation and were issued a trust token."
+            />
+          </>
+        )}
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card title="Recent events">
           {overview.isLoading ? (
-            <Spinner />
+            <SkeletonRows rows={4} />
           ) : overview.isError ? (
-            <ErrorNotice error={overview.error} />
+            <ErrorNotice
+              error={overview.error}
+              onRetry={() => void overview.refetch()}
+            />
           ) : recent.length === 0 ? (
             <EmptyState>
               No recent events.{" "}
-              <Link className="text-indigo-300 hover:underline" to="/events">
+              <Link className="text-accent hover:underline" to="/events">
                 Open events
               </Link>
             </EmptyState>
           ) : (
-            <ul className="divide-y divide-slate-800">
+            <ul className="divide-y divide-line">
               {recent.slice(0, 8).map((e) => (
                 <li
                   key={e.id}
@@ -95,11 +107,11 @@ export function DashboardPage() {
                     <Badge tone={riskLevelTone(e.riskLevel)}>
                       {trustLevelLabels[e.riskLevel]}
                     </Badge>
-                    <span className="text-slate-200">
+                    <span className="text-fg">
                       {eventTypeLabels[e.eventType]}
                     </span>
                   </div>
-                  <span className="font-mono text-xs text-slate-500">
+                  <span className="font-mono text-xs text-fg-subtle">
                     {formatTimestamp(e.timestamp)}
                   </span>
                 </li>
@@ -110,20 +122,23 @@ export function DashboardPage() {
 
         <Card title="Trust-session stats">
           {stats.isLoading ? (
-            <Spinner />
+            <SkeletonRows rows={4} />
           ) : stats.isError ? (
-            <ErrorNotice error={stats.error} />
+            <ErrorNotice
+              error={stats.error}
+              onRetry={() => void stats.refetch()}
+            />
           ) : stats.data ? (
             <div className="space-y-3 text-sm">
               <div className="flex justify-between">
-                <span className="text-slate-400">Tokens issued</span>
-                <span className="text-slate-100">
+                <span className="text-fg-muted">Tokens issued</span>
+                <span className="text-fg-strong">
                   {Number(stats.data.tokensIssued)}
                 </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-400">Attestations failed</span>
-                <span className="text-slate-100">
+                <span className="text-fg-muted">Attestations failed</span>
+                <span className="text-fg-strong">
                   {Number(stats.data.attestationsFailed)}
                 </span>
               </div>
@@ -133,8 +148,8 @@ export function DashboardPage() {
                   {Object.entries(stats.data.sessionsByTrustLevel).map(
                     ([level, count]) => (
                       <li key={level} className="flex justify-between">
-                        <span className="text-slate-300">{level}</span>
-                        <span className="text-slate-100">{Number(count)}</span>
+                        <span className="text-fg">{level}</span>
+                        <span className="text-fg-strong">{Number(count)}</span>
                       </li>
                     ),
                   )}

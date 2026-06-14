@@ -34,14 +34,14 @@ export function AppDetailPage() {
     <div className="space-y-6">
       <header className="flex items-center justify-between">
         <div>
-          <Link to="/apps" className="text-xs text-slate-400 hover:underline">
+          <Link to="/apps" className="text-xs text-fg-muted hover:underline">
             ← Apps
           </Link>
-          <h1 className="text-xl font-semibold text-slate-50">
+          <h1 className="text-xl font-semibold text-fg-strong">
             {app.data?.name ?? (app.isLoading ? "…" : appId)}
           </h1>
           {app.data && (
-            <p className="text-sm text-slate-400">
+            <p className="text-sm text-fg-muted">
               {platformLabels[app.data.platform]} ·{" "}
               <span className="font-mono">{app.data.packageId}</span>
             </p>
@@ -63,15 +63,15 @@ export function AppDetailPage() {
           ) : activePolicy.data ? (
             <dl className="space-y-2 text-sm">
               <div className="flex justify-between">
-                <dt className="text-slate-400">Name</dt>
-                <dd className="text-slate-100">{activePolicy.data.name}</dd>
+                <dt className="text-fg-muted">Name</dt>
+                <dd className="text-fg-strong">{activePolicy.data.name}</dd>
               </div>
               <div className="flex justify-between">
-                <dt className="text-slate-400">Version</dt>
-                <dd className="text-slate-100">v{activePolicy.data.version}</dd>
+                <dt className="text-fg-muted">Version</dt>
+                <dd className="text-fg-strong">v{activePolicy.data.version}</dd>
               </div>
               <div className="flex justify-between">
-                <dt className="text-slate-400">Enforcement</dt>
+                <dt className="text-fg-muted">Enforcement</dt>
                 <dd>
                   <Badge>
                     {enforcementModeLabels[activePolicy.data.enforcementMode]}
@@ -79,10 +79,10 @@ export function AppDetailPage() {
                 </dd>
               </div>
               <div>
-                <dt className="text-slate-400">Modules</dt>
+                <dt className="text-fg-muted">Modules</dt>
                 <dd className="mt-1 flex flex-wrap gap-1">
                   {activePolicy.data.modulesEnabled.length === 0 ? (
-                    <span className="text-slate-500">none</span>
+                    <span className="text-fg-subtle">none</span>
                   ) : (
                     activePolicy.data.modulesEnabled.map((m) => (
                       <Badge key={m}>{m}</Badge>
@@ -94,7 +94,7 @@ export function AppDetailPage() {
           ) : (
             <EmptyState>
               No active policy.{" "}
-              <Link className="text-indigo-300 hover:underline" to="/policies">
+              <Link className="text-accent hover:underline" to="/policies">
                 Create one
               </Link>
             </EmptyState>
@@ -112,7 +112,7 @@ export function AppDetailPage() {
             <>
               <table className="w-full">
               <thead>
-                <tr className="border-b border-slate-800">
+                <tr className="border-b border-line">
                   <th className="th">Version</th>
                   <th className="th">Build hash</th>
                   <th className="th">Created</th>
@@ -120,14 +120,14 @@ export function AppDetailPage() {
               </thead>
               <tbody>
                 {builds.data.map((b) => (
-                  <tr key={b.id} className="border-b border-slate-800/60">
+                  <tr key={b.id} className="border-b border-line/60">
                     <td className="td">
                       {b.versionName} ({Number(b.versionCode)})
                     </td>
-                    <td className="td font-mono text-xs text-slate-400">
+                    <td className="td font-mono text-xs text-fg-muted">
                       {b.buildHash.slice(0, 16)}…
                     </td>
-                    <td className="td font-mono text-xs text-slate-500">
+                    <td className="td font-mono text-xs text-fg-subtle">
                       {formatTimestamp(b.createdAt)}
                     </td>
                   </tr>
@@ -152,7 +152,7 @@ export function AppDetailPage() {
         ) : !events.data || events.data.length === 0 ? (
           <EmptyState>No events for this app.</EmptyState>
         ) : (
-          <ul className="divide-y divide-slate-800">
+          <ul className="divide-y divide-line">
             {sortEventsByTimeDesc(events.data)
               .slice(0, 12)
               .map((e) => (
@@ -164,11 +164,11 @@ export function AppDetailPage() {
                     <Badge tone={riskLevelTone(e.riskLevel)}>
                       {trustLevelLabels[e.riskLevel]}
                     </Badge>
-                    <span className="text-slate-200">
+                    <span className="text-fg">
                       {eventTypeLabels[e.eventType]}
                     </span>
                   </div>
-                  <span className="font-mono text-xs text-slate-500">
+                  <span className="font-mono text-xs text-fg-subtle">
                     {formatTimestamp(e.timestamp)}
                   </span>
                 </li>

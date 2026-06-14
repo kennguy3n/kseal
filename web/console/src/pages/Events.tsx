@@ -75,8 +75,8 @@ export function EventsPage() {
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="text-xl font-semibold text-slate-50">Events</h1>
-        <p className="text-sm text-slate-400">
+        <h1 className="text-xl font-semibold text-fg-strong">Events</h1>
+        <p className="text-sm text-fg-muted">
           Risk events across the tenant. Filter by type, risk level and time.
         </p>
       </header>
@@ -96,8 +96,8 @@ export function EventsPage() {
                     onClick={() => setEventTypes((s) => toggle(s, t))}
                     className={`badge ${
                       active
-                        ? "border-indigo-500/40 bg-indigo-500/20 text-indigo-200"
-                        : "border-slate-700 text-slate-300"
+                        ? "border-accent-strong/40 bg-accent-strong/15 text-accent"
+                        : "border-line-strong text-fg"
                     }`}
                   >
                     {eventTypeLabels[t]}
@@ -119,7 +119,7 @@ export function EventsPage() {
                     aria-pressed={active}
                     onClick={() => setRiskLevels((s) => toggle(s, r))}
                     className={`badge ${
-                      active ? riskLevelTone(r) : "border-slate-700 text-slate-300"
+                      active ? riskLevelTone(r) : "border-line-strong text-fg"
                     }`}
                   >
                     {trustLevelLabels[r]}
@@ -180,7 +180,7 @@ export function EventsPage() {
         title={
           <span>
             Events{" "}
-            <span className="text-slate-500">({visible.length})</span>
+            <span className="text-fg-subtle">({visible.length})</span>
           </span>
         }
       >
@@ -201,7 +201,7 @@ export function EventsPage() {
           <>
             <table className="w-full">
             <thead>
-              <tr className="border-b border-slate-800">
+              <tr className="border-b border-line">
                 <th className="th">Time</th>
                 <th className="th">Type</th>
                 <th className="th">Risk</th>
@@ -211,8 +211,8 @@ export function EventsPage() {
             </thead>
             <tbody>
               {visible.map((e) => (
-                <tr key={e.id} className="border-b border-slate-800/60">
-                  <td className="td font-mono text-xs text-slate-400">
+                <tr key={e.id} className="border-b border-line/60">
+                  <td className="td font-mono text-xs text-fg-muted">
                     {formatTimestamp(e.timestamp)}
                   </td>
                   <td className="td">{eventTypeLabels[e.eventType]}</td>
@@ -221,10 +221,10 @@ export function EventsPage() {
                       {trustLevelLabels[e.riskLevel]}
                     </Badge>
                   </td>
-                  <td className="td font-mono text-xs text-slate-500">
+                  <td className="td font-mono text-xs text-fg-subtle">
                     {e.appBuildHash ? `${e.appBuildHash.slice(0, 12)}…` : "—"}
                   </td>
-                  <td className="td text-slate-400">
+                  <td className="td text-fg-muted">
                     {e.countryOrRegion ?? "—"}
                   </td>
                 </tr>
