@@ -96,6 +96,31 @@ describe("AuditTrailPage", () => {
     );
   });
 
+  it("shows a neutral 'verification unavailable' state when only VerifyAuditChain is unimplemented", async () => {
+    // listAuditEvents is implemented and returns entries, but verifyAuditChain
+    // is not registered -> UNIMPLEMENTED. The audit list must still render and
+    // the chain banner must show the neutral unavailable state (not an alert).
+    const transport = createRouterTransport((router) => {
+      router.service(ComplianceService, {
+        listAuditEvents: () =>
+          create(ListAuditEventsResponseSchema, {
+            events: [event(1, "policy.activate")],
+          }),
+      });
+    });
+
+    renderWithProviders(<AuditTrailPage />, { transport, route: "/audit" });
+
+    await waitFor(() =>
+      expect(screen.getByText("policy.activate")).toBeInTheDocument(),
+    );
+    expect(
+      screen.getByText(/not available on this deployment/i),
+    ).toBeInTheDocument();
+    // Neutral state, never a tamper alert.
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("filters by action and reissues the query", async () => {
     const user = userEvent.setup();
     const seen: string[] = [];
