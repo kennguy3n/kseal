@@ -37,6 +37,11 @@ export function systemTheme(): Theme {
 
 // Resolve the initial theme: an explicit stored choice wins, otherwise fall
 // back to the OS preference (and finally light).
+//
+// NOTE: the no-flash inline <script> in index.html intentionally duplicates
+// this precedence (explicit "light"/"dark" → OS preference) so the .dark class
+// is set before first paint. Any change to the resolution order here MUST be
+// mirrored there, and vice versa.
 export function resolveInitialTheme(): Theme {
   try {
     const stored = localStorage.getItem(THEME_STORAGE_KEY);
