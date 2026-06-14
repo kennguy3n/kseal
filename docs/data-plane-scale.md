@@ -140,6 +140,15 @@ TTL time_bucket + INTERVAL <retention> DAY;
   cheap.
 - **Pagination:** keyset pagination orders recent-first by `(time_bucket, id)`
   for stable cursors at scale.
+- **Schema creation vs. evolution:** the store runs `CREATE TABLE IF NOT EXISTS`
+  on startup so a fresh cluster or a rolling deploy converges idempotently with
+  no separate bootstrap step. It deliberately does **not** auto-`ALTER` an
+  existing table. Adding a column to `StoredEvent` is therefore a deliberate,
+  ops-controlled migration: run `ALTER TABLE telemetry_events ADD COLUMN ...`
+  (with `ON CLUSTER` for a replicated deployment) before rolling out the server
+  build that writes it. Online schema mutation of a large `ReplacingMergeTree`
+  rewrites parts and touches the `ORDER BY` key, so it is not something to do
+  silently on every boot.
 
 ---
 
