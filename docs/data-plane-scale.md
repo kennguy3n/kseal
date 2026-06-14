@@ -226,6 +226,15 @@ externalSecrets:
 The default-deny NetworkPolicy only opens the Kafka/ClickHouse egress when those
 toggles are enabled.
 
+> **Align the egress ports with your backend.** The Helm egress defaults
+> (`kafka.port: 9092`, `clickhouse.port: 9000`) match a **plaintext, self-hosted**
+> deployment (e.g. the docker-compose Redpanda/ClickHouse). The Terraform modules
+> target **managed/TLS** endpoints and use different ports — MSK IAM SASL on
+> `9098` and ClickHouse native-TLS on `9440`. If you provision via Terraform (or
+> otherwise terminate TLS), set `networkPolicy.egress.kafka.port` /
+> `clickhouse.port` to match (`9098` / `9440`), or the default-deny policy will
+> block the connection.
+
 ### Terraform (default-off)
 
 `deploy/terraform/modules/kafka` provisions an **MSK Serverless** cluster (IAM

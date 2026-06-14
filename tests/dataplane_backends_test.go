@@ -174,9 +174,13 @@ func TestClickHouseStoreRoundTrip(t *testing.T) {
 
 	const tenantA, tenantB = "tenant-A", "tenant-B"
 	base := time.Now().Add(-time.Hour).Unix()
+	// Deliberately collide time buckets (three events share `base`) so keyset
+	// pagination must fall back to the (time_bucket = ? AND id < ?) tiebreaker —
+	// the path whose DateTime bind must be a time.Time, not a raw int64.
+	buckets := []int64{base, base, base, base + 60, base + 120}
 	var aEvents []ingest.StoredEvent
-	for i := 0; i < 5; i++ {
-		aEvents = append(aEvents, storedEvent(tenantA, "app-1", fmt.Sprintf("a-%d", i), base+int64(i*60)))
+	for i, tb := range buckets {
+		aEvents = append(aEvents, storedEvent(tenantA, "app-1", fmt.Sprintf("a-%d", i), tb))
 	}
 	bEvents := []ingest.StoredEvent{storedEvent(tenantB, "app-2", "b-0", base)}
 

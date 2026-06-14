@@ -59,6 +59,11 @@ func (c *ClickHouseConfig) withDefaults() {
 	if c.Database == "" {
 		c.Database = "kseal"
 	}
+	if c.Username == "" {
+		// Match the ClickHouse protocol default explicitly so the documented
+		// contract holds even when the server runs without the env var set.
+		c.Username = "default"
+	}
 	if c.DialTimeout <= 0 {
 		c.DialTimeout = 10 * time.Second
 	}
@@ -285,8 +290,11 @@ func (s *ClickHouseAnalyticsStore) ListEvents(ctx context.Context, q Query, limi
 	}
 	where, args := q.clickhouseWhere()
 	if hasCur {
-		// Keyset predicate for descending (time_bucket, id) order.
-		args = append(args, time.Unix(curTB, 0).UTC(), curTB, curID)
+		// Keyset predicate for descending (time_bucket, id) order. Both
+		// time_bucket bind params must be time.Time — the column is a ClickHouse
+		// DateTime and the native driver rejects a raw int64 for it.
+		curTime := time.Unix(curTB, 0).UTC()
+		args = append(args, curTime, curTime, curID)
 		clause := "(time_bucket < ? OR (time_bucket = ? AND id < ?))"
 		if where == "" {
 			where = "WHERE " + clause
