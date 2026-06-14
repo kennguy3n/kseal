@@ -6,4 +6,11 @@ Provides the public SDK surface and the native [RASP probes](../../ARCHITECTURE.
 
 Integrates with [App Attest + DeviceCheck](../../ARCHITECTURE.md#ios--app-attest--devicecheck) for server-side attestation. Uses **no private/undocumented APIs** to stay App Review safe, and ships an [iOS privacy manifest generator](../../ARCHITECTURE.md#store-compliance).
 
-**Performance budget:** binary slice < 800 KB, startup overhead < 40 ms p95. **Status:** scaffold — see [PROGRESS.md](../../PROGRESS.md) (Phase 1+).
+**Minimum platform:** iOS 13 (also builds for macOS 11+ for host testing). **Performance budget:** binary slice < 800 KB, startup overhead < 40 ms p95.
+
+## Get secure fast
+
+New here? Follow [QUICKSTART.md](QUICKSTART.md) to integrate in ~5 minutes, and
+clone the runnable sample in [`examples/ios`](../../examples/ios). See
+[CHANGELOG.md](CHANGELOG.md) for versions and the typed error taxonomy
+([`KsealErrorKind`](Sources/KsealSDK/TrustCore.swift)).
