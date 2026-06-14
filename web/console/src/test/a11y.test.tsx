@@ -8,14 +8,11 @@ import {
 } from "../gen/kseal/v1/query_pb";
 import { QueryService } from "../gen/kseal/v1/query_service_pb";
 import {
-  GetActivePolicyResponseSchema,
+  ListPoliciesResponseSchema,
   PolicySchema,
 } from "../gen/kseal/v1/registry_pb";
 import { RegistryService } from "../gen/kseal/v1/registry_service_pb";
-import {
-  ListAuditEventsResponseSchema,
-  VerifyAuditChainResponseSchema,
-} from "../gen/kseal/v1/compliance_pb";
+import { ListAuditEventsResponseSchema } from "../gen/kseal/v1/compliance_pb";
 import { ComplianceService } from "../gen/kseal/v1/compliance_service_pb";
 import { renderWithProviders } from "./render";
 import { Onboarding } from "../components/Onboarding";
@@ -51,14 +48,20 @@ describe("accessibility", () => {
           }),
       });
       router.service(RegistryService, {
-        getActivePolicy: () =>
-          create(GetActivePolicyResponseSchema, {
-            policy: create(PolicySchema, { id: "pol-1", name: "Default" }),
+        listPolicies: () =>
+          create(ListPoliciesResponseSchema, {
+            policies: [
+              create(PolicySchema, {
+                id: "pol-1",
+                name: "Default",
+                isActive: true,
+              }),
+            ],
           }),
       });
       router.service(ComplianceService, {
-        verifyAuditChain: () =>
-          create(VerifyAuditChainResponseSchema, { intact: true }),
+        listAuditEvents: () =>
+          create(ListAuditEventsResponseSchema, { events: [] }),
       });
     });
 

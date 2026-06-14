@@ -99,6 +99,7 @@ export function Onboarding() {
     total,
     allDone,
     loading,
+    error,
     dismissed,
     dismiss,
     resume,
@@ -113,7 +114,7 @@ export function Onboarding() {
   // all-queries-failed state can't surface a misleading "0 of N done" nudge to
   // someone who may actually have progress.
   if (dismissed) {
-    if (loading || allDone || completedCount === 0) return null;
+    if (loading || error || allDone || completedCount === 0) return null;
     return (
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-surface px-4 py-3">
         <div className="flex items-center gap-2 text-sm text-fg">
@@ -134,8 +135,11 @@ export function Onboarding() {
   }
 
   // Non-dismissed first load (no data yet): show a lightweight placeholder so
-  // the checklist doesn't pop in after the dashboard renders.
-  if (loading && completedCount === 0) {
+  // the checklist doesn't pop in after the dashboard renders. We also hold the
+  // placeholder when every signal failed with no progress detected, so a
+  // transient outage never renders a misleading "0 of N" to a user who may
+  // actually have progress; React Query refetches and resolves it on recovery.
+  if ((loading || error) && completedCount === 0) {
     return (
       <section className="card" aria-busy="true">
         <Skeleton className="h-4 w-40" />

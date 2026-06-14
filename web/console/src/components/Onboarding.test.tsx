@@ -13,7 +13,10 @@ import {
   PolicySchema,
 } from "../gen/kseal/v1/registry_pb";
 import { RegistryService } from "../gen/kseal/v1/registry_service_pb";
-import { VerifyAuditChainResponseSchema } from "../gen/kseal/v1/compliance_pb";
+import {
+  AuditEventSchema,
+  ListAuditEventsResponseSchema,
+} from "../gen/kseal/v1/compliance_pb";
 import { ComplianceService } from "../gen/kseal/v1/compliance_service_pb";
 import { Onboarding } from "./Onboarding";
 import { renderWithProviders, TEST_SESSION } from "../test/render";
@@ -56,10 +59,14 @@ function buildTransport(opts: {
         }),
     });
     router.service(ComplianceService, {
-      verifyAuditChain: () =>
-        create(VerifyAuditChainResponseSchema, {
-          intact: true,
-          verifiedCount: opts.auditEntries ?? 0n,
+      // Onboarding derives "has audit activity" from a single-row probe, so the
+      // step is done whenever at least one event exists.
+      listAuditEvents: () =>
+        create(ListAuditEventsResponseSchema, {
+          events:
+            (opts.auditEntries ?? 0n) > 0n
+              ? [create(AuditEventSchema, { seq: 1n })]
+              : [],
         }),
     });
   });

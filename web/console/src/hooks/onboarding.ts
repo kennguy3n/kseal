@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSession } from "../state/useAuth";
 import {
   usePolicies,
   useTenantOverview,
   useTrustSessionStats,
 } from "./queries";
-import { useVerifyAuditChain } from "./compliance";
+import { useHasAuditActivity } from "./compliance";
 import { docs } from "../lib/links";
 
 export interface OnboardingStep {
@@ -27,6 +27,10 @@ export interface OnboardingState {
   total: number;
   allDone: boolean;
   loading: boolean;
+  // True when the derived state can't be trusted because every underlying query
+  // failed (vs. legitimately returning "nothing done yet"). Lets the view avoid
+  // showing a misleading "0 of N" to someone who may actually have progress.
+  error: boolean;
   dismissed: boolean;
   dismiss: () => void;
   resume: () => void;
@@ -67,7 +71,10 @@ export function useOnboarding(): OnboardingState {
   // app-scoped. GetActivePolicy("") would only match tenant-wide rows and miss
   // a developer who only activated an app-scoped policy.
   const policies = usePolicies("");
-  const chain = useVerifyAuditChain();
+  // "Has audit activity" is derived from a cheap single-row probe, not the
+  // expensive hash-chain verification, so rendering onboarding on the dashboard
+  // never triggers a full chain recompute.
+  const audit = useHasAuditActivity();
 
   const persist = useCallback(
     (value: boolean) => {
@@ -88,61 +95,72 @@ export function useOnboarding(): OnboardingState {
   const tokensIssued = trust.data?.tokensIssued ?? 0n;
   const totalSessions = trust.data?.totalSessions ?? 0n;
   const hasPolicy = (policies.data ?? []).some((p) => p.isActive);
-  const auditEntries = chain.data?.verifiedCount ?? 0n;
+  const hasAuditActivity = audit.data ?? false;
 
-  const steps: OnboardingStep[] = [
-    {
-      id: "register-app",
-      title: "Register your first app",
-      why: "Apps are the unit kseal protects. Registering one gives you the app ID and signing keys the SDK and CLI bind to.",
-      to: "/apps",
-      actionLabel: "Go to Apps",
-      docHref: docs.quickstart(),
-      done: appCount > 0,
-    },
-    {
-      id: "integrate-sdk",
-      title: "Integrate the kseal SDK",
-      why: "The SDK adds runtime protection (RASP) and attests each device, so your backend can trust the app it is talking to.",
-      to: "/apps",
-      actionLabel: "Open quickstart",
-      docHref: docs.sdkAndroid(),
-      done: tokensIssued > 0n,
-    },
-    {
-      id: "trust-session",
-      title: "Confirm your first trust session",
-      why: "A trust session proves a real device passed attestation. Seeing one means your integration is live end-to-end.",
-      to: "/",
-      actionLabel: "View trust sessions",
-      done: totalSessions > 0n,
-    },
-    {
-      id: "turn-on-policy",
-      title: "Turn on a protection policy",
-      why: "Policies decide how risk is enforced (observe, step-up or block). Activating one moves you from monitoring to protection.",
-      to: "/policies",
-      actionLabel: "Author a policy",
-      docHref: docs.policyPacks(),
-      done: hasPolicy,
-    },
-    {
-      id: "explore-operations",
-      title: "Review audit, kill switch & canary",
-      why: "Tamper-evident audit, a signed kill switch and staged canary rollouts are how you operate and prove compliance day to day.",
-      to: "/audit",
-      actionLabel: "Open audit trail",
-      docHref: docs.auditTrail(),
-      done: auditEntries > 0n,
-    },
-  ];
+  const steps: OnboardingStep[] = useMemo(
+    () => [
+      {
+        id: "register-app",
+        title: "Register your first app",
+        why: "Apps are the unit kseal protects. Registering one gives you the app ID and signing keys the SDK and CLI bind to.",
+        to: "/apps",
+        actionLabel: "Go to Apps",
+        docHref: docs.quickstart(),
+        done: appCount > 0,
+      },
+      {
+        id: "integrate-sdk",
+        title: "Integrate the kseal SDK",
+        why: "The SDK adds runtime protection (RASP) and attests each device, so your backend can trust the app it is talking to.",
+        to: "/apps",
+        actionLabel: "Open quickstart",
+        docHref: docs.sdkAndroid(),
+        done: tokensIssued > 0n,
+      },
+      {
+        id: "trust-session",
+        title: "Confirm your first trust session",
+        why: "A trust session proves a real device passed attestation. Seeing one means your integration is live end-to-end.",
+        to: "/",
+        actionLabel: "View trust sessions",
+        done: totalSessions > 0n,
+      },
+      {
+        id: "turn-on-policy",
+        title: "Turn on a protection policy",
+        why: "Policies decide how risk is enforced (observe, step-up or block). Activating one moves you from monitoring to protection.",
+        to: "/policies",
+        actionLabel: "Author a policy",
+        docHref: docs.policyPacks(),
+        done: hasPolicy,
+      },
+      {
+        id: "explore-operations",
+        title: "Review audit, kill switch & canary",
+        why: "Tamper-evident audit, a signed kill switch and staged canary rollouts are how you operate and prove compliance day to day.",
+        to: "/audit",
+        actionLabel: "Open audit trail",
+        docHref: docs.auditTrail(),
+        done: hasAuditActivity,
+      },
+    ],
+    [appCount, tokensIssued, totalSessions, hasPolicy, hasAuditActivity],
+  );
 
   const completedCount = steps.filter((s) => s.done).length;
   const loading =
     overview.isLoading ||
     trust.isLoading ||
     policies.isLoading ||
-    chain.isLoading;
+    audit.isLoading;
+  // Only treat it as an "untrustworthy" error when every signal failed; a
+  // partial failure still yields a meaningful (if conservative) completion
+  // count, so we let that render normally.
+  const error =
+    overview.isError &&
+    trust.isError &&
+    policies.isError &&
+    audit.isError;
 
   return {
     steps,
@@ -150,6 +168,7 @@ export function useOnboarding(): OnboardingState {
     total: steps.length,
     allDone: completedCount === steps.length,
     loading,
+    error,
     dismissed,
     dismiss: () => persist(true),
     resume: () => persist(false),

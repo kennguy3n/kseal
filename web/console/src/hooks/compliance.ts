@@ -24,6 +24,7 @@ const AUDIT_PAGE_SIZE = 50;
 export const complianceKeys = {
   audit: (tenant: string, filter: unknown) =>
     ["audit", tenant, filter] as const,
+  auditActivity: (tenant: string) => ["auditActivity", tenant] as const,
   auditChain: (tenant: string) => ["auditChain", tenant] as const,
   dataProcessing: (tenant: string) => ["dataProcessing", tenant] as const,
   killSwitch: (tenant: string, appId: string) =>
@@ -62,6 +63,36 @@ export function useAuditEvents(args: AuditQueryArgs) {
   });
 }
 
+// Cheap "does this tenant have any audit activity yet?" probe for the onboarding
+// checklist. It fetches a single audit row rather than recomputing the whole
+// hash chain (useVerifyAuditChain), which is all the "review audit / kill-switch
+// / canary" step needs to mark itself done. Keeping this off the expensive RPC
+// means the dashboard never pays a chain recompute just to render onboarding.
+// A short staleTime de-duplicates the probe across dashboard re-mounts.
+const AUDIT_PROBE_STALE_MS = 5 * 60_000;
+
+export function useHasAuditActivity() {
+  const clients = useClients();
+  const { tenantId } = useSession();
+  return useQuery({
+    queryKey: complianceKeys.auditActivity(tenantId),
+    queryFn: async () => {
+      const res = await clients.compliance.listAuditEvents({
+        tenantId,
+        action: "",
+        resourceType: "",
+        startTime: 0n,
+        endTime: 0n,
+        pageSize: 1,
+        pageToken: "",
+      });
+      return res.events.length > 0;
+    },
+    retry: retryUnlessUnavailable,
+    staleTime: AUDIT_PROBE_STALE_MS,
+  });
+}
+
 // The canonical service verifies the chain through a dedicated RPC (rather than
 // returning a per-page flag), so the audit view recomputes integrity once per
 // tenant alongside the event list. A broken chain surfaces a warning banner.
@@ -69,10 +100,10 @@ export function useAuditEvents(args: AuditQueryArgs) {
 // Verification recomputes the entire tenant hash chain server-side, so it can
 // be costly for large audit trails. The result changes only when a new audited
 // mutation lands (which we already invalidate on, e.g. kill-switch issuance), so
-// a long staleTime de-duplicates the recompute across navigations and repeated
-// dashboard visits instead of paying it on every mount. We keep the query
-// always enabled so consumers like the onboarding checklist can still evaluate
-// chain-derived state (e.g. "has audit activity") accurately.
+// a long staleTime de-duplicates the recompute across navigations within the
+// audit view rather than refetching on every mount. This RPC is mounted only by
+// the audit trail (its integrity banner); the onboarding checklist uses the
+// lighter useHasAuditActivity probe above instead.
 const AUDIT_CHAIN_STALE_MS = 5 * 60_000;
 
 export function useVerifyAuditChain() {
