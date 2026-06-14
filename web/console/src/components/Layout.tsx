@@ -118,6 +118,7 @@ export function Layout() {
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const drawerRef = useRef<HTMLDivElement>(null);
 
   function onLogout() {
     logout();
@@ -129,16 +130,48 @@ export function Layout() {
     setMobileOpen(false);
   }, [location.pathname]);
 
-  // While the drawer is open, lock background scroll, move focus into it, and
-  // wire Escape to close — basic dialog focus management.
+  // While the drawer is open: lock background scroll, move focus into it, wire
+  // Escape to close, and trap Tab focus so keyboard users can't move behind the
+  // modal backdrop (WCAG 2.4.3 / 2.1.2).
   useEffect(() => {
     if (!mobileOpen) return;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     closeButtonRef.current?.focus();
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setMobileOpen(false);
+
+    function focusableItems(): HTMLElement[] {
+      const root = drawerRef.current;
+      if (!root) return [];
+      return Array.from(
+        root.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      );
     }
+
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        setMobileOpen(false);
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const items = focusableItems();
+      if (items.length === 0) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      const inDrawer = !!active && drawerRef.current?.contains(active);
+      if (e.shiftKey) {
+        if (!inDrawer || active === first) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else if (!inDrawer || active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+
     document.addEventListener("keydown", onKey);
     return () => {
       document.body.style.overflow = previousOverflow;
@@ -210,6 +243,7 @@ export function Layout() {
               aria-hidden="true"
             />
             <div
+              ref={drawerRef}
               id="mobile-nav"
               role="dialog"
               aria-modal="true"

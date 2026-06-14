@@ -105,23 +105,12 @@ export function Onboarding() {
   } = useOnboarding();
   const headingId = useId();
 
-  // First load (no data yet): show a lightweight placeholder so the checklist
-  // doesn't pop in after the dashboard renders.
-  if (loading && completedCount === 0) {
-    return (
-      <section className="card" aria-busy="true">
-        <Skeleton className="h-4 w-40" />
-        <Skeleton className="mt-3 h-1.5 w-full" />
-        <div className="mt-4 space-y-3">
-          <Skeleton className="h-3 w-2/3" />
-          <Skeleton className="h-3 w-1/2" />
-        </div>
-      </section>
-    );
-  }
-
-  // Dismissed mid-way: collapse to a slim, resumable banner.
-  if (dismissed && !allDone) {
+  // Dismissed users never see the loading skeleton for a section they
+  // explicitly closed. Wait for live data before choosing between the slim
+  // resumable banner (mid-way) and hiding entirely (complete); render nothing
+  // until then so a stale "0 of N" count never flashes.
+  if (dismissed) {
+    if (loading || allDone) return null;
     return (
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-surface px-4 py-3">
         <div className="flex items-center gap-2 text-sm text-fg">
@@ -141,8 +130,20 @@ export function Onboarding() {
     );
   }
 
-  // Fully complete and dismissed: stay out of the way entirely.
-  if (dismissed && allDone) return null;
+  // Non-dismissed first load (no data yet): show a lightweight placeholder so
+  // the checklist doesn't pop in after the dashboard renders.
+  if (loading && completedCount === 0) {
+    return (
+      <section className="card" aria-busy="true">
+        <Skeleton className="h-4 w-40" />
+        <Skeleton className="mt-3 h-1.5 w-full" />
+        <div className="mt-4 space-y-3">
+          <Skeleton className="h-3 w-2/3" />
+          <Skeleton className="h-3 w-1/2" />
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section
@@ -188,7 +189,7 @@ export function Onboarding() {
       {allDone ? (
         <div className="mt-4 flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-300">
           <CheckIcon className="h-4 w-4" />
-          All five steps complete — protection is live.
+          All {total} steps complete — protection is live.
         </div>
       ) : (
         <ol className="mt-2 divide-y divide-line">

@@ -15,25 +15,31 @@
     <!--
       Apply the persisted (or OS-preferred) color theme before first paint to
       avoid a light/dark flash. Mirrors resolveInitialTheme() in
-      src/lib/theme.tsx: an explicit "light"/"dark" choice wins, any other
-      value falls through to the OS preference.
+      src/lib/theme.ts: an explicit "light"/"dark" choice wins, any other
+      value (or a localStorage error) falls through to the OS preference.
     -->
     <script>
       (function () {
+        function systemPrefersDark() {
+          return (
+            window.matchMedia &&
+            window.matchMedia("(prefers-color-scheme: dark)").matches
+          );
+        }
+        var dark;
         try {
           var stored = localStorage.getItem("kseal.console.theme");
-          var dark;
           if (stored === "light" || stored === "dark") {
             dark = stored === "dark";
           } else {
-            dark =
-              window.matchMedia &&
-              window.matchMedia("(prefers-color-scheme: dark)").matches;
+            dark = systemPrefersDark();
           }
-          document.documentElement.classList.toggle("dark", dark);
         } catch (e) {
-          /* localStorage may be unavailable; default to light. */
+          /* localStorage unavailable — fall back to OS preference, matching
+             resolveInitialTheme() so there's no light->dark flash. */
+          dark = systemPrefersDark();
         }
+        document.documentElement.classList.toggle("dark", dark);
       })();
     </script>
   </head>
