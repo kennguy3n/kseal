@@ -85,7 +85,50 @@ type Config struct {
 	// days, applied to tenants without a per-tenant override. <= 0 retains raw
 	// events indefinitely (fail-safe).
 	RawRetentionDays int
+
+	// DataPlane holds the default-off production data-plane backend selection
+	// (broker + analytics store). The zero value keeps the in-memory MVP.
+	DataPlane DataPlaneConfig
 }
+
+// DataPlaneConfig selects and configures the data-plane backends. Both backends
+// default to the in-memory MVP; selecting "kafka"/"clickhouse" requires the
+// matching connection envs and fails closed (clear error) if they are missing.
+type DataPlaneConfig struct {
+	// Broker is "memory" (default) or "kafka".
+	Broker string
+	// Analytics is "memory" (default) or "clickhouse".
+	Analytics string
+
+	// Kafka/Redpanda broker connection (used when Broker == "kafka").
+	KafkaBrokers            []string
+	KafkaTopic              string
+	KafkaConsumerGroup      string
+	KafkaTLS                bool
+	KafkaCAFile             string
+	KafkaInsecureSkipVerify bool
+	KafkaSASLMechanism      string
+	KafkaSASLUsername       string
+	KafkaSASLPassword       string
+
+	// ClickHouse analytics connection (used when Analytics == "clickhouse").
+	ClickHouseAddr               []string
+	ClickHouseDatabase           string
+	ClickHouseUsername           string
+	ClickHousePassword           string
+	ClickHouseTable              string
+	ClickHouseCluster            string
+	ClickHouseRetentionTTLDays   int
+	ClickHouseTLS                bool
+	ClickHouseCAFile             string
+	ClickHouseInsecureSkipVerify bool
+}
+
+// UsesKafka reports whether the Kafka broker backend is selected.
+func (d DataPlaneConfig) UsesKafka() bool { return strings.EqualFold(d.Broker, "kafka") }
+
+// UsesClickHouse reports whether the ClickHouse analytics backend is selected.
+func (d DataPlaneConfig) UsesClickHouse() bool { return strings.EqualFold(d.Analytics, "clickhouse") }
 
 // IsProd reports whether the server runs in a production-like environment.
 func (c *Config) IsProd() bool {
@@ -168,6 +211,10 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
+	if err := c.loadDataPlane(); err != nil {
+		return nil, err
+	}
+
 	if c.KEK, err = loadKEK(c.IsProd()); err != nil {
 		return nil, err
 	}
@@ -217,6 +264,72 @@ func loadKEK(isProd bool) ([]byte, error) {
 	// Deterministic development KEK. Never used when KSEAL_ENV is prod-like.
 	dev := []byte("kseal-dev-insecure-kek-32bytes!!")
 	return dev[:32], nil
+}
+
+// loadDataPlane parses the default-off data-plane backend selection. Unknown
+// selectors and selected-but-unconfigured backends fail closed with a clear
+// error, so a misconfigured production server refuses to start rather than
+// silently degrading to in-memory (which would lose telemetry on restart).
+func (c *Config) loadDataPlane() error {
+	d := DataPlaneConfig{
+		Broker:             strings.ToLower(getenv("KSEAL_BROKER", "memory")),
+		Analytics:          strings.ToLower(getenv("KSEAL_ANALYTICS", "memory")),
+		KafkaBrokers:       splitNonEmpty(os.Getenv("KSEAL_KAFKA_BROKERS")),
+		KafkaTopic:         strings.TrimSpace(os.Getenv("KSEAL_KAFKA_TOPIC")),
+		KafkaConsumerGroup: strings.TrimSpace(os.Getenv("KSEAL_KAFKA_CONSUMER_GROUP")),
+		KafkaCAFile:        strings.TrimSpace(os.Getenv("KSEAL_KAFKA_CA_FILE")),
+		KafkaSASLMechanism: strings.ToLower(strings.TrimSpace(os.Getenv("KSEAL_KAFKA_SASL_MECHANISM"))),
+		KafkaSASLUsername:  os.Getenv("KSEAL_KAFKA_SASL_USERNAME"),
+		KafkaSASLPassword:  os.Getenv("KSEAL_KAFKA_SASL_PASSWORD"),
+		ClickHouseAddr:     splitNonEmpty(os.Getenv("KSEAL_CLICKHOUSE_ADDR")),
+		ClickHouseDatabase: strings.TrimSpace(os.Getenv("KSEAL_CLICKHOUSE_DATABASE")),
+		ClickHouseUsername: os.Getenv("KSEAL_CLICKHOUSE_USERNAME"),
+		ClickHousePassword: os.Getenv("KSEAL_CLICKHOUSE_PASSWORD"),
+		ClickHouseTable:    strings.TrimSpace(os.Getenv("KSEAL_CLICKHOUSE_TABLE")),
+		ClickHouseCluster:  strings.TrimSpace(os.Getenv("KSEAL_CLICKHOUSE_CLUSTER")),
+	}
+
+	var err error
+	if d.KafkaTLS, err = boolDefault("KSEAL_KAFKA_TLS", false); err != nil {
+		return err
+	}
+	if d.KafkaInsecureSkipVerify, err = boolDefault("KSEAL_KAFKA_INSECURE_SKIP_VERIFY", false); err != nil {
+		return err
+	}
+	if d.ClickHouseTLS, err = boolDefault("KSEAL_CLICKHOUSE_TLS", false); err != nil {
+		return err
+	}
+	if d.ClickHouseInsecureSkipVerify, err = boolDefault("KSEAL_CLICKHOUSE_INSECURE_SKIP_VERIFY", false); err != nil {
+		return err
+	}
+	// Default the ClickHouse TTL backstop to the platform raw-retention window so
+	// the coarse table TTL and the precise per-tenant purge stay aligned.
+	if d.ClickHouseRetentionTTLDays, err = atoiDefault("KSEAL_CLICKHOUSE_RETENTION_TTL_DAYS", c.RawRetentionDays); err != nil {
+		return err
+	}
+
+	switch d.Broker {
+	case "memory":
+	case "kafka":
+		if len(d.KafkaBrokers) == 0 {
+			return errors.New("KSEAL_BROKER=kafka requires KSEAL_KAFKA_BROKERS")
+		}
+	default:
+		return fmt.Errorf("KSEAL_BROKER must be 'memory' or 'kafka', got %q", d.Broker)
+	}
+
+	switch d.Analytics {
+	case "memory":
+	case "clickhouse":
+		if len(d.ClickHouseAddr) == 0 {
+			return errors.New("KSEAL_ANALYTICS=clickhouse requires KSEAL_CLICKHOUSE_ADDR")
+		}
+	default:
+		return fmt.Errorf("KSEAL_ANALYTICS must be 'memory' or 'clickhouse', got %q", d.Analytics)
+	}
+
+	c.DataPlane = d
+	return nil
 }
 
 func getenv(key, def string) string {

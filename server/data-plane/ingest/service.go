@@ -9,6 +9,10 @@ import (
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
 	"github.com/klauspost/compress/zstd"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/kennguy3n/kseal/server/control-plane/registry"
@@ -120,6 +124,11 @@ type Service struct {
 	quota     *Quota
 	broker    Broker
 	decoder   *zstd.Decoder
+
+	tracer     trace.Tracer
+	acceptedC  metric.Int64Counter
+	rejectedC  metric.Int64Counter
+	batchSizeH metric.Int64Histogram
 }
 
 // NewService builds an IngestService. The zstd decoder is shared and safe for
@@ -132,8 +141,23 @@ func NewService(validator AppValidator, quota *Quota, broker Broker) (*Service, 
 	if err != nil {
 		return nil, err
 	}
-	return &Service{validator: validator, quota: quota, broker: broker, decoder: dec}, nil
+	s := &Service{validator: validator, quota: quota, broker: broker, decoder: dec}
+	s.tracer = otel.Tracer(instrumentationScope)
+	meter := otel.Meter(instrumentationScope)
+	// Instrument construction errors are non-fatal: a nil counter is simply not
+	// recorded, so a metrics misconfiguration never breaks the ingest path.
+	s.acceptedC, _ = meter.Int64Counter("kseal.ingest.events.accepted",
+		metric.WithDescription("Telemetry events accepted into the broker"))
+	s.rejectedC, _ = meter.Int64Counter("kseal.ingest.events.rejected",
+		metric.WithDescription("Telemetry events rejected (invalid, quota, or broker shed)"))
+	s.batchSizeH, _ = meter.Int64Histogram("kseal.ingest.batch.events",
+		metric.WithDescription("Number of events per accepted SubmitTelemetry batch"))
+	return s, nil
 }
+
+// instrumentationScope is the OpenTelemetry instrumentation scope shared by the
+// ingest service and the data-plane backends.
+const instrumentationScope = "github.com/kennguy3n/kseal/server/data-plane/ingest"
 
 // SubmitTelemetry decompresses and validates a batch, enforces the tenant quota
 // at the edge, and enqueues accepted events for asynchronous write.
@@ -143,11 +167,22 @@ func (s *Service) SubmitTelemetry(ctx context.Context, req *connect.Request[ksea
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("tenant_id and app_id required"))
 	}
 
+	ctx, span := s.tracer.Start(ctx, "ingest.SubmitTelemetry", trace.WithAttributes(
+		attribute.String("tenant", m.TenantId),
+		attribute.String("app", m.AppId),
+	))
+	defer span.End()
+	// tenantAttr scopes per-tenant metric series; reused across the call.
+	tenantAttr := metric.WithAttributes(attribute.String("tenant", m.TenantId))
+
 	valid, err := s.validator.Valid(ctx, m.TenantId, m.AppId)
 	if err != nil {
+		span.RecordError(err)
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	if !valid {
+		s.reject(ctx, tenantAttr, 1)
+		span.SetAttributes(attribute.String("outcome", "unknown_app"))
 		return connect.NewResponse(&ksealv1.SubmitTelemetryResponse{
 			Rejected: 1, RejectionReason: "unknown tenant or app",
 		}), nil
@@ -155,12 +190,16 @@ func (s *Service) SubmitTelemetry(ctx context.Context, req *connect.Request[ksea
 
 	raw, err := s.decompress(m.Compression, m.CompressedBatch)
 	if err != nil {
+		s.reject(ctx, tenantAttr, 1)
+		span.SetAttributes(attribute.String("outcome", "decompression_failed"))
 		return connect.NewResponse(&ksealv1.SubmitTelemetryResponse{
 			Rejected: 1, RejectionReason: "decompression failed",
 		}), nil
 	}
 	var batch ksealv1.TelemetryBatch
 	if err := proto.Unmarshal(raw, &batch); err != nil {
+		s.reject(ctx, tenantAttr, 1)
+		span.SetAttributes(attribute.String("outcome", "malformed_batch"))
 		return connect.NewResponse(&ksealv1.SubmitTelemetryResponse{
 			Rejected: 1, RejectionReason: "malformed batch",
 		}), nil
@@ -168,9 +207,15 @@ func (s *Service) SubmitTelemetry(ctx context.Context, req *connect.Request[ksea
 	if len(batch.Events) == 0 {
 		return connect.NewResponse(&ksealv1.SubmitTelemetryResponse{}), nil
 	}
+	span.SetAttributes(attribute.Int("events", len(batch.Events)))
+	if s.batchSizeH != nil {
+		s.batchSizeH.Record(ctx, int64(len(batch.Events)), tenantAttr)
+	}
 
 	allowed, _, err := s.quota.Allow(ctx, m.TenantId, len(batch.Events))
 	if err == nil && !allowed {
+		s.reject(ctx, tenantAttr, int64(len(batch.Events)))
+		span.SetAttributes(attribute.String("outcome", "quota_exceeded"))
 		return connect.NewResponse(&ksealv1.SubmitTelemetryResponse{
 			Rejected:        int32(len(batch.Events)),
 			QuotaExceeded:   true,
@@ -208,7 +253,27 @@ func (s *Service) SubmitTelemetry(ctx context.Context, req *connect.Request[ksea
 		accepted++
 	}
 
+	s.accept(ctx, tenantAttr, int64(accepted))
+	s.reject(ctx, tenantAttr, int64(rejected))
+	span.SetAttributes(
+		attribute.Int("accepted", int(accepted)),
+		attribute.Int("rejected", int(rejected)),
+	)
 	return connect.NewResponse(&ksealv1.SubmitTelemetryResponse{Accepted: accepted, Rejected: rejected}), nil
+}
+
+// accept records n accepted events (no-op for n<=0 or unconfigured metrics).
+func (s *Service) accept(ctx context.Context, attrs metric.MeasurementOption, n int64) {
+	if n > 0 && s.acceptedC != nil {
+		s.acceptedC.Add(ctx, n, attrs)
+	}
+}
+
+// reject records n rejected events (no-op for n<=0 or unconfigured metrics).
+func (s *Service) reject(ctx context.Context, attrs metric.MeasurementOption, n int64) {
+	if n > 0 && s.rejectedC != nil {
+		s.rejectedC.Add(ctx, n, attrs)
+	}
 }
 
 func (s *Service) decompress(c ksealv1.Compression, data []byte) ([]byte, error) {

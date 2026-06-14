@@ -290,13 +290,20 @@ type EventSink interface {
 	Emit(e StoredEvent)
 }
 
+// defaultWriteTimeout bounds a single store flush. Flushes run on a detached
+// context (not the consume context) so an in-flight batch still persists during
+// graceful shutdown instead of being cancelled and lost.
+const defaultWriteTimeout = 30 * time.Second
+
 // Writer drains the broker and flushes events to the analytics store in batches.
 type Writer struct {
-	broker    Broker
-	store     AnalyticsStore
-	batchSize int
-	interval  time.Duration
-	sink      EventSink
+	broker       Broker
+	store        AnalyticsStore
+	batchSize    int
+	interval     time.Duration
+	writeTimeout time.Duration
+	sink         EventSink
+	onWriteError func(error)
 }
 
 // NewWriter builds a writer with batching parameters.
@@ -307,14 +314,21 @@ func NewWriter(broker Broker, store AnalyticsStore, batchSize int, interval time
 	if interval <= 0 {
 		interval = time.Second
 	}
-	return &Writer{broker: broker, store: store, batchSize: batchSize, interval: interval}
+	return &Writer{broker: broker, store: store, batchSize: batchSize, interval: interval, writeTimeout: defaultWriteTimeout}
 }
 
 // SetEventSink registers a non-blocking sink notified of every drained event.
 func (w *Writer) SetEventSink(s EventSink) { w.sink = s }
 
-// Run consumes until the context is cancelled, flushing on batch-size or tick.
-// Remaining buffered events are flushed on shutdown.
+// SetWriteErrorHandler registers a callback invoked when a store flush fails. It
+// lets the caller surface durability problems (e.g. ClickHouse unavailable)
+// without coupling the writer to a logger. Optional.
+func (w *Writer) SetWriteErrorHandler(fn func(error)) { w.onWriteError = fn }
+
+// Run consumes until the context is cancelled or the broker channel closes,
+// flushing on batch-size or tick. On shutdown it drains whatever is already
+// buffered before returning, so a graceful stop persists in-flight telemetry
+// rather than dropping it.
 func (w *Writer) Run(ctx context.Context) {
 	ticker := time.NewTicker(w.interval)
 	defer ticker.Stop()
@@ -323,32 +337,60 @@ func (w *Writer) Run(ctx context.Context) {
 		if len(batch) == 0 {
 			return
 		}
-		_ = w.store.Write(ctx, batch)
+		// Detached, bounded context: a flush must complete even while the
+		// process is shutting down (the consume ctx may already be cancelled).
+		writeCtx, cancel := context.WithTimeout(context.Background(), w.writeTimeout)
+		if err := w.store.Write(writeCtx, batch); err != nil && w.onWriteError != nil {
+			w.onWriteError(err)
+		}
+		cancel()
 		// Allocate a fresh buffer rather than reusing the backing array: the
 		// AnalyticsStore interface does not promise to copy its input, so a
 		// future async-batching backend could otherwise read corrupted data.
 		batch = make([]StoredEvent, 0, w.batchSize)
 	}
+	add := func(e StoredEvent) {
+		if w.sink != nil {
+			w.sink.Emit(e)
+		}
+		batch = append(batch, e)
+		if len(batch) >= w.batchSize {
+			flush()
+		}
+	}
 	ch := w.broker.Consume()
 	for {
 		select {
 		case <-ctx.Done():
+			w.drain(ch, add)
 			flush()
 			return
 		case <-ticker.C:
 			flush()
 		case e, ok := <-ch:
 			if !ok {
+				w.drain(ch, add)
 				flush()
 				return
 			}
-			if w.sink != nil {
-				w.sink.Emit(e)
+			add(e)
+		}
+	}
+}
+
+// drain pulls every event currently buffered in the broker channel without
+// blocking, so a shutdown flushes the in-flight backlog. It stops at the first
+// empty read (or a closed channel), leaving the final flush to the caller.
+func (w *Writer) drain(ch <-chan StoredEvent, add func(StoredEvent)) {
+	for {
+		select {
+		case e, ok := <-ch:
+			if !ok {
+				return
 			}
-			batch = append(batch, e)
-			if len(batch) >= w.batchSize {
-				flush()
-			}
+			add(e)
+		default:
+			return
 		}
 	}
 }

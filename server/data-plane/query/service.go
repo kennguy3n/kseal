@@ -12,6 +12,9 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/kennguy3n/kseal/server/control-plane/registry"
 	"github.com/kennguy3n/kseal/server/data-plane/ingest"
@@ -31,12 +34,18 @@ type Service struct {
 	store     registry.Store
 	analytics ingest.AnalyticsStore
 	recentN   int
+	tracer    trace.Tracer
 }
 
 // NewService builds a QueryService handler reading from the registry store and
 // the analytics store behind ingest.
 func NewService(store registry.Store, analytics ingest.AnalyticsStore) *Service {
-	return &Service{store: store, analytics: analytics, recentN: defaultRecentEvents}
+	return &Service{
+		store:     store,
+		analytics: analytics,
+		recentN:   defaultRecentEvents,
+		tracer:    otel.Tracer("github.com/kennguy3n/kseal/server/data-plane/query"),
+	}
 }
 
 // requireTenant authenticates the caller and enforces that the request tenant
@@ -60,6 +69,8 @@ func (s *Service) ListEvents(ctx context.Context, req *connect.Request[ksealv1.L
 	if err != nil {
 		return nil, err
 	}
+	ctx, span := s.tracer.Start(ctx, "query.ListEvents", trace.WithAttributes(attribute.String("tenant", tenant)))
+	defer span.End()
 	q := ingest.Query{
 		TenantID:   tenant, // always scope to the authenticated tenant
 		AppID:      m.AppId,
@@ -89,6 +100,8 @@ func (s *Service) GetTenantOverview(ctx context.Context, req *connect.Request[ks
 	if err != nil {
 		return nil, err
 	}
+	ctx, span := s.tracer.Start(ctx, "query.GetTenantOverview", trace.WithAttributes(attribute.String("tenant", tenant)))
+	defer span.End()
 	counts, err := s.store.GetTenantCounts(ctx, tenant)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)

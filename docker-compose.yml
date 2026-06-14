@@ -108,6 +108,21 @@ services:
       KSEAL_OTLP_SAMPLE_RATIO: "${KSEAL_OTLP_SAMPLE_RATIO:-0}"
       KSEAL_CMK_KMS_URI: "${KSEAL_CMK_KMS_URI:-}"
       KSEAL_RAW_RETENTION_DAYS: "${KSEAL_RAW_RETENTION_DAYS:-30}"
+      # WS-Q production data-plane selection (fail-safe, default-off). Defaults
+      # keep the in-memory broker + analytics store, so the stack is unchanged.
+      # Flip KSEAL_BROKER=kafka / KSEAL_ANALYTICS=clickhouse (and run
+      # `docker compose --profile dataplane up`) to route telemetry through the
+      # Redpanda + ClickHouse services defined below. Connection defaults point
+      # at those in-network services so no extra wiring is needed locally.
+      KSEAL_BROKER: "${KSEAL_BROKER:-memory}"
+      KSEAL_ANALYTICS: "${KSEAL_ANALYTICS:-memory}"
+      KSEAL_KAFKA_BROKERS: "${KSEAL_KAFKA_BROKERS:-redpanda:9092}"
+      KSEAL_KAFKA_TOPIC: "${KSEAL_KAFKA_TOPIC:-kseal.telemetry.events}"
+      KSEAL_KAFKA_CONSUMER_GROUP: "${KSEAL_KAFKA_CONSUMER_GROUP:-kseal-analytics-writer}"
+      KSEAL_CLICKHOUSE_ADDR: "${KSEAL_CLICKHOUSE_ADDR:-clickhouse:9000}"
+      KSEAL_CLICKHOUSE_DATABASE: "${KSEAL_CLICKHOUSE_DATABASE:-kseal}"
+      KSEAL_CLICKHOUSE_USERNAME: "${KSEAL_CLICKHOUSE_USERNAME:-kseal}"
+      KSEAL_CLICKHOUSE_PASSWORD: "${KSEAL_CLICKHOUSE_PASSWORD:-kseal}"
     ports:
       - "8080:8080"
     networks: [kseal]
@@ -177,9 +192,103 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # --- Production data-plane backends (default-off) --------------------------
+  # These run ONLY under the `dataplane` profile, so the standard `make up` /
+  # `docker compose up` is unaffected:
+  #
+  #   KSEAL_BROKER=kafka KSEAL_ANALYTICS=clickhouse \
+  #     docker compose --profile dataplane up --build
+  #
+  # The kseal-server above already defaults its connection envs to these
+  # in-network services, so enabling the profile + flipping the two selectors is
+  # all that's required locally.
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.2.7
+    profiles: ["dataplane"]
+    restart: unless-stopped
+    command:
+      - redpanda
+      - start
+      - --kafka-addr=PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr=PLAINTEXT://redpanda:9092
+      - --smp=1
+      - --memory=1G
+      - --reserve-memory=0M
+      - --overprovisioned
+      - --node-id=0
+      - --check=false
+      # Auto-create the telemetry topic on first produce for local dev; in
+      # production the topic is provisioned out-of-band (Terraform) with an
+      # explicit partition count and retention.
+      - --set
+      - redpanda.auto_create_topics_enabled=true
+    ports:
+      - "9092:9092"
+    networks: [kseal]
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    volumes:
+      - redpandadata:/var/lib/redpanda/data
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1500m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3-alpine
+    profiles: ["dataplane"]
+    restart: unless-stopped
+    environment:
+      # Bootstrap the kseal database + user the analytics store expects. The
+      # store creates the events table itself but not the database/user.
+      CLICKHOUSE_DB: "${KSEAL_CLICKHOUSE_DATABASE:-kseal}"
+      CLICKHOUSE_USER: "${KSEAL_CLICKHOUSE_USERNAME:-kseal}"
+      CLICKHOUSE_PASSWORD: "${KSEAL_CLICKHOUSE_PASSWORD:-kseal}"
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    networks: [kseal]
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8123/ping | grep -q Ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    volumes:
+      - chdata:/var/lib/clickhouse
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2g
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 networks:
   kseal:
     driver: bridge
 
 volumes:
   pgdata:
+  redpandadata:
+  chdata:

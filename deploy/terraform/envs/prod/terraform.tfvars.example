@@ -12,3 +12,11 @@ oidc_provider_arn          = "arn:aws:iam::111122223333:oidc-provider/oidc.eks.u
 oidc_provider_url          = "oidc.eks.us-east-1.amazonaws.com/id/EXAMPLED539D4633E53DE1B71EXAMPLE"
 artifacts_bucket_name      = "kseal-prod-artifacts-111122223333"
 # kek = "..."   # prefer TF_VAR_kek env var over putting this in a file
+
+# --- WS-Q production data plane (default-off) --------------------------------
+# Flip these on to provision the Kafka broker / ClickHouse access boundary, then
+# point the server at the module outputs (KSEAL_BROKER=kafka, KSEAL_ANALYTICS=
+# clickhouse). See docs/data-plane-scale.md.
+# data_plane_kafka_enabled      = true
+# data_plane_clickhouse_enabled = true
+# clickhouse_endpoint_host      = "kseal.clickhouse.internal"

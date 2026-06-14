@@ -22,3 +22,13 @@ output "secret_arns" {
   description = "Secrets Manager ARNs backing the kseal server secrets."
   value       = module.external_secrets.secret_arns
 }
+
+output "kafka_bootstrap_brokers" {
+  description = "KSEAL_KAFKA_BROKERS value (empty unless data_plane_kafka_enabled)."
+  value       = var.data_plane_kafka_enabled ? module.kafka[0].bootstrap_brokers : ""
+}
+
+output "clickhouse_addr" {
+  description = "KSEAL_CLICKHOUSE_ADDR value (empty unless data_plane_clickhouse_enabled)."
+  value       = var.data_plane_clickhouse_enabled ? module.clickhouse[0].addr : ""
+}

@@ -108,6 +108,11 @@ spec:
               mountPath: {{ .Values.server.config.redisCaSecret.mountPath | quote }}
               readOnly: true
             {{- end }}
+            {{- if .Values.server.config.dataPlane.kafka.caSecret.name }}
+            - name: kafka-ca
+              mountPath: {{ .Values.server.config.dataPlane.kafka.caSecret.mountPath | quote }}
+              readOnly: true
+            {{- end }}
       volumes:
         # readOnlyRootFilesystem is on; give the process a writable scratch dir.
         - name: tmp
@@ -121,4 +126,13 @@ spec:
             items:
               - key: {{ .Values.server.config.redisCaSecret.key | quote }}
                 path: {{ .Values.server.config.redisCaSecret.key | quote }}
+        {{- end }}
+        {{- if .Values.server.config.dataPlane.kafka.caSecret.name }}
+        # Custom CA bundle for Kafka TLS (KSEAL_KAFKA_CA_FILE points here).
+        - name: kafka-ca
+          secret:
+            secretName: {{ .Values.server.config.dataPlane.kafka.caSecret.name | quote }}
+            items:
+              - key: {{ .Values.server.config.dataPlane.kafka.caSecret.key | quote }}
+                path: {{ .Values.server.config.dataPlane.kafka.caSecret.key | quote }}
         {{- end }}

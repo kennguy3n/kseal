@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
@@ -33,9 +34,10 @@ type Options struct {
 
 // Telemetry holds the configured providers and exposes a Shutdown hook.
 type Telemetry struct {
-	Tracer   trace.Tracer
-	Metrics  *Metrics
-	provider *sdktrace.TracerProvider
+	Tracer    trace.Tracer
+	Metrics   *Metrics
+	provider  *sdktrace.TracerProvider
+	meterProv *sdkmetric.MeterProvider
 }
 
 // Setup configures a global tracer provider and the Prometheus metrics. When
@@ -69,23 +71,48 @@ func Setup(serviceName, env string, opts Options) (*Telemetry, error) {
 	tp := sdktrace.NewTracerProvider(tpOpts...)
 	otel.SetTracerProvider(tp)
 
+	// Meter provider: install a global provider so otel.Meter(...) instruments
+	// in the hot paths (ingest/query/attestation/data-plane backends) record.
+	// When an OTLP endpoint is configured a periodic reader pushes them to the
+	// collector; without one the provider is still installed so instruments are
+	// live (and free) — no collector dependency for local/dev.
+	mpOpts := []sdkmetric.Option{sdkmetric.WithResource(res)}
+	if opts.OTLPEndpoint != "" {
+		mexp, err := newOTLPMetricExporter(context.Background(), opts.OTLPEndpoint, opts.OTLPInsecure)
+		if err != nil {
+			return nil, fmt.Errorf("otlp metric exporter: %w", err)
+		}
+		mpOpts = append(mpOpts, sdkmetric.WithReader(sdkmetric.NewPeriodicReader(mexp)))
+	}
+	mp := sdkmetric.NewMeterProvider(mpOpts...)
+	otel.SetMeterProvider(mp)
+
 	metrics, err := NewMetrics()
 	if err != nil {
 		return nil, err
 	}
 	return &Telemetry{
-		Tracer:   tp.Tracer(serviceName),
-		Metrics:  metrics,
-		provider: tp,
+		Tracer:    tp.Tracer(serviceName),
+		Metrics:   metrics,
+		provider:  tp,
+		meterProv: mp,
 	}, nil
 }
 
-// Shutdown flushes and stops the tracer provider.
+// Shutdown flushes and stops the tracer and meter providers.
 func (t *Telemetry) Shutdown(ctx context.Context) error {
-	if t.provider == nil {
-		return nil
+	var err error
+	if t.meterProv != nil {
+		if mErr := t.meterProv.Shutdown(ctx); mErr != nil {
+			err = mErr
+		}
 	}
-	return t.provider.Shutdown(ctx)
+	if t.provider != nil {
+		if tErr := t.provider.Shutdown(ctx); tErr != nil && err == nil {
+			err = tErr
+		}
+	}
+	return err
 }
 
 // Check is a named readiness probe.

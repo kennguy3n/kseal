@@ -73,3 +73,33 @@ module "external_secrets" {
   oidc_provider_arn = var.oidc_provider_arn
   oidc_provider_url = var.oidc_provider_url
 }
+
+# --- WS-Q production data plane (default-off) --------------------------------
+# Kafka (MSK Serverless) broker for the telemetry pipeline. Created only when
+# data_plane_kafka_enabled = true; uses IAM auth (no SASL password to store).
+module "kafka" {
+  source = "../../modules/kafka"
+  count  = var.data_plane_kafka_enabled ? 1 : 0
+
+  name = var.name
+  tags = local.tags
+
+  vpc_id                     = var.vpc_id
+  subnet_ids                 = var.private_subnet_ids
+  allowed_security_group_ids = [var.workload_security_group_id]
+}
+
+# ClickHouse analytics-store access boundary. Created only when
+# data_plane_clickhouse_enabled = true; the cluster itself is ClickHouse Cloud
+# (PrivateLink) or self-managed in-VPC, addressed by clickhouse_endpoint_host.
+module "clickhouse" {
+  source = "../../modules/clickhouse"
+  count  = var.data_plane_clickhouse_enabled ? 1 : 0
+
+  name = var.name
+  tags = local.tags
+
+  vpc_id                     = var.vpc_id
+  allowed_security_group_ids = [var.workload_security_group_id]
+  endpoint_host              = var.clickhouse_endpoint_host
+}

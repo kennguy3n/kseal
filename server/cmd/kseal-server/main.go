@@ -152,15 +152,49 @@ func run() error {
 
 	validator := ingest.NewCachedAppValidator(store, 30*time.Second)
 	quota := ingest.NewQuota(rdb, cfg.IngestQuotaPerMinute)
-	broker := ingest.NewChannelBroker(0)
-	analytics := ingest.NewInMemoryAnalyticsStore()
+	// Data-plane backends: default in-memory (unchanged), or the production
+	// Kafka broker + ClickHouse store when explicitly selected. A selected
+	// backend that cannot be reached fails closed here (server refuses to start).
+	broker, err := buildBroker(rootCtx, cfg, logger)
+	if err != nil {
+		return err
+	}
+	analytics, rawStore, analyticsCleanup, err := buildAnalytics(rootCtx, cfg)
+	if err != nil {
+		broker.Close()
+		return err
+	}
+	logger.Info().Str("broker", cfg.DataPlane.Broker).Str("analytics", cfg.DataPlane.Analytics).Msg("data-plane backends ready")
+
 	writer := ingest.NewWriter(broker, analytics, 0, 0)
+	writer.SetWriteErrorHandler(func(werr error) {
+		logger.Error().Err(werr).Msg("analytics store flush failed")
+	})
 	// Fan validated telemetry out to webhook subscribers AND the SIEM exporter.
 	writer.SetEventSink(fanoutSink{[]ingest.EventSink{
 		webhookSink{dispatcher},
 		siemSink{siemExporter},
 	}})
-	go writer.Run(rootCtx)
+	// The writer's lifecycle is bound to the broker, not rootCtx: it runs until
+	// the broker closes its hand-off channel. On shutdown we close the broker
+	// (which stops the consumer and closes the channel), so the writer drains
+	// every buffered event to the store before exiting — no telemetry is lost.
+	writerDone := make(chan struct{})
+	go func() {
+		writer.Run(context.Background())
+		close(writerDone)
+	}()
+	// Cleanup order matters: drain the pipeline before closing the store.
+	// Deferred functions run LIFO, so analyticsCleanup is registered first
+	// (runs last) and the broker-close/writer-drain is registered second (runs
+	// first): broker.Close stops the consumer and closes the hand-off channel,
+	// the writer drains the remaining backlog to the store, then the store closes.
+	defer analyticsCleanup()
+	defer func() {
+		broker.Close()
+		<-writerDone
+	}()
+
 	ingestSvc, err := ingest.NewService(validator, quota, broker)
 	if err != nil {
 		return err
@@ -172,7 +206,7 @@ func run() error {
 	// (platform default KSEAL_RAW_RETENTION_DAYS), retaining aggregates. Tracked
 	// in bg so it drains before the DB pool closes on shutdown.
 	var bg sync.WaitGroup
-	purger := ingest.NewPurger(analytics, registry.NewRetentionResolver(database), cfg.RawRetentionDays)
+	purger := ingest.NewPurger(rawStore, registry.NewRetentionResolver(database), cfg.RawRetentionDays)
 	bg.Add(1)
 	go func() {
 		defer bg.Done()
