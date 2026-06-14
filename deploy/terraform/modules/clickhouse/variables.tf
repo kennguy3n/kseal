@@ -39,4 +39,11 @@ variable "native_port" {
 variable "endpoint_host" {
   description = "ClickHouse endpoint host (ClickHouse Cloud PrivateLink DNS or in-VPC service address)."
   type        = string
+  validation {
+    # This module is only instantiated when data_plane_clickhouse_enabled is
+    # true, so a blank host is always a misconfiguration. Fail at plan time
+    # rather than emitting a ":port" address the server can't dial.
+    condition     = trimspace(var.endpoint_host) != ""
+    error_message = "endpoint_host must be set when the ClickHouse module is enabled (set clickhouse_endpoint_host)."
+  }
 }
