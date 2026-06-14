@@ -30,11 +30,6 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   // whether we keep tracking the OS preference.
   const [explicit, setExplicit] = useState<boolean>(hasStoredThemeChoice);
 
-  const choose = useCallback((next: Theme) => {
-    setExplicit(true);
-    setTheme(next);
-  }, []);
-
   // Reflect the active theme on <html>. Persist only once the user has chosen.
   useEffect(() => {
     applyTheme(theme);
@@ -74,9 +69,12 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("storage", onStorage);
   }, []);
 
+  // Functional update so rapid double-toggles can't read a stale `theme` from
+  // the closure; marking the choice explicit is what starts persisting it.
   const toggleTheme = useCallback(() => {
-    choose(theme === "dark" ? "light" : "dark");
-  }, [choose, theme]);
+    setExplicit(true);
+    setTheme((prev) => (prev === "dark" ? "light" : "dark"));
+  }, []);
 
   const value = useMemo<ThemeContextValue>(
     () => ({ theme, toggleTheme }),

@@ -65,13 +65,19 @@ export function useAuditEvents(args: AuditQueryArgs) {
 // The canonical service verifies the chain through a dedicated RPC (rather than
 // returning a per-page flag), so the audit view recomputes integrity once per
 // tenant alongside the event list. A broken chain surfaces a warning banner.
-export function useVerifyAuditChain() {
+//
+// Verification recomputes the entire tenant hash chain server-side, so it can
+// be costly for large audit trails. `enabled` lets callers that only need the
+// result conditionally (e.g. the onboarding checklist) skip the work when the
+// result isn't on screen, rather than paying it on every render.
+export function useVerifyAuditChain(options?: { enabled?: boolean }) {
   const clients = useClients();
   const { tenantId } = useSession();
   return useQuery({
     queryKey: complianceKeys.auditChain(tenantId),
     queryFn: () => clients.compliance.verifyAuditChain({ tenantId }),
     retry: retryUnlessUnavailable,
+    enabled: options?.enabled ?? true,
   });
 }
 

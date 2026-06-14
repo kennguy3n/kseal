@@ -52,10 +52,6 @@ function readDismissed(tenantId: string): boolean {
 // dismissed/expanded preference is the only thing persisted locally.
 export function useOnboarding(): OnboardingState {
   const { tenantId } = useSession();
-  const overview = useTenantOverview();
-  const trust = useTrustSessionStats();
-  const tenantPolicy = useActivePolicy("");
-  const chain = useVerifyAuditChain();
 
   const [dismissed, setDismissed] = useState(() => readDismissed(tenantId));
 
@@ -63,6 +59,16 @@ export function useOnboarding(): OnboardingState {
   useEffect(() => {
     setDismissed(readDismissed(tenantId));
   }, [tenantId]);
+
+  const overview = useTenantOverview();
+  const trust = useTrustSessionStats();
+  const tenantPolicy = useActivePolicy("");
+  // Chain verification recomputes the whole tenant hash chain server-side, so
+  // it only runs while the onboarding card is actually on screen. Dismissed /
+  // steady-state users don't pay that cost on every dashboard load; the last
+  // step resolves from cache when present and self-heals the moment the user
+  // resumes (which re-enables the query).
+  const chain = useVerifyAuditChain({ enabled: !dismissed });
 
   const persist = useCallback(
     (value: boolean) => {
