@@ -374,7 +374,7 @@ kseal ships in six phases, starting from the highest-value, lowest-compatibility
 | **Phase 1** | API Trust Product | 3–4 months | Protect APIs from fake clients and repackaged apps (SDKs + verifiers + trust sessions). | DONE |
 | **Phase 2** | Runtime Protection | 4–6 months | RASP modules with `observe → step-up → block` rollout, policy simulator, SIEM. | DONE |
 | **Phase 3** | Build-Time Hardening | 6–9 months | Gradle/Xcode plugins, obfuscation, polymorphism, build proof, CI gate, native hardening, MASVS report. | DONE |
-| **Phase 4** | Enterprise Scale | 9–12 months | Multi-region, dedicated tiers, CMK/BYOK, private link, on-prem verifier, policy packs, MSSP console, audit trail + data-processing registry, signed kill switch, canary rollout + auto-rollback, compliance tooling/console. | IN PROGRESS (~95%) |
+| **Phase 4** | Enterprise Scale | 9–12 months | Multi-region, dedicated tiers, CMK/BYOK, private link, on-prem verifier, policy packs, MSSP console, audit trail + data-processing registry, signed kill switch, canary rollout + auto-rollback, compliance tooling/console. | DONE |
 | **Phase 5** | Desktop | 6+ months post-mobile | macOS/Windows SDKs, desktop API attestation, code integrity, secure update, enterprise controls, hardware-bound proofs. | DONE |
 
 Detailed deliverables and live status are tracked in [PROGRESS.md](PROGRESS.md).
