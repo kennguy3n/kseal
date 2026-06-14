@@ -165,6 +165,58 @@ server:
     # are kept regardless; raw events are off/short by default.
     rawRetentionDays: 30
 
+    # --- WS-Q production data plane (fail-safe, default-off) ----------------
+    # Swap the in-memory broker + analytics store for Kafka/Redpanda +
+    # ClickHouse. Defaults keep the in-memory backends, so existing releases are
+    # unaffected. See docs/data-plane-scale.md for the rollout runbook.
+    dataPlane:
+      # broker: "memory" (default) | "kafka". When "kafka", kafka.brokers is
+      # required or the server fails closed at startup.
+      broker: memory
+      # analytics: "memory" (default) | "clickhouse". When "clickhouse",
+      # clickhouse.addr is required or the server fails closed.
+      analytics: memory
+      kafka:
+        # Comma-joined seed brokers (KSEAL_KAFKA_BROKERS), e.g.
+        # ["b1.kafka:9092","b2.kafka:9092"].
+        brokers: []
+        topic: kseal.telemetry.events       # KSEAL_KAFKA_TOPIC (provisioned out-of-band)
+        consumerGroup: kseal-analytics-writer  # KSEAL_KAFKA_CONSUMER_GROUP
+        tls: false                          # KSEAL_KAFKA_TLS
+        # Custom CA for broker TLS (KSEAL_KAFKA_CA_FILE). Mounted from caSecret
+        # when caSecret.name is set; empty uses the system trust store.
+        caSecret:
+          name: ""
+          key: ca.crt
+          mountPath: /etc/kseal/kafka-tls
+        # SASL auth (KSEAL_KAFKA_SASL_MECHANISM): "" | plain | scram-sha-256 |
+        # scram-sha-512. Username is non-secret; the password is a SECRET and is
+        # delivered via externalSecrets.remoteKeys.kafkaSaslPassword.
+        saslMechanism: ""
+        saslUsername: ""
+      clickhouse:
+        # Native-protocol endpoints (KSEAL_CLICKHOUSE_ADDR), host:port each.
+        addr: []
+        database: kseal                     # KSEAL_CLICKHOUSE_DATABASE
+        username: kseal                     # KSEAL_CLICKHOUSE_USERNAME (non-secret)
+        table: telemetry_events             # KSEAL_CLICKHOUSE_TABLE
+        # Replicated/sharded cluster name for ON CLUSTER DDL (KSEAL_CLICKHOUSE_CLUSTER).
+        # Empty = single-node DDL.
+        cluster: ""
+        tls: false                          # KSEAL_CLICKHOUSE_TLS
+        # Custom CA for ClickHouse TLS (KSEAL_CLICKHOUSE_CA_FILE). Mounted from
+        # caSecret when caSecret.name is set; empty uses the system trust store.
+        caSecret:
+          name: ""
+          key: ca.crt
+          mountPath: /etc/kseal/clickhouse-tls
+        # Table-level TTL backstop in days (KSEAL_CLICKHOUSE_RETENTION_TTL_DAYS).
+        # Empty inherits rawRetentionDays. The per-tenant Purger enforces precise
+        # retention; this is only a coarse safety net.
+        retentionTtlDays: ""
+        # The ClickHouse password is a SECRET — never set it here. Provide it via
+        # externalSecrets.remoteKeys.clickHousePassword.
+
   # Horizontal autoscaling. Scales on CPU and a custom requests-per-second
   # metric published by prometheus-adapter from kseal_rpc_requests_total.
   autoscaling:
@@ -381,6 +433,24 @@ networkPolicy:
     siemSinks:
       - cidr: 0.0.0.0/0
         port: 443
+    # WS-Q data-plane backends (default-off). Enable each when routing telemetry
+    # through Kafka/Redpanda and/or ClickHouse so the default-deny egress policy
+    # permits the server to reach them.
+    #
+    # The 0.0.0.0/0 defaults follow the postgres/redis convention above and keep
+    # local/dev usable, but they let the server egress anywhere on that port. For
+    # production, narrow each cidr to the managed backend's actual address range
+    # (e.g. the MSK/ClickHouse-Cloud VPC-endpoint or PrivateLink subnet /32–/28)
+    # so a compromised pod cannot exfiltrate over the broker/store port. See the
+    # NetworkPolicy section of docs/data-plane-scale.md.
+    kafka:
+      enabled: false
+      cidr: 0.0.0.0/0
+      port: 9092
+    clickhouse:
+      enabled: false
+      cidr: 0.0.0.0/0
+      port: 9000
     # Allow DNS resolution (kube-dns) — required for any name resolution.
     dns:
       enabled: true
@@ -405,6 +475,13 @@ externalSecrets:
     # Optional: Redis AUTH password (KSEAL_REDIS_PASSWORD). Empty = no AUTH
     # (default). Set to the external-store key holding the password to enable it.
     redisPassword: ""
+    # Optional: Kafka SASL password (KSEAL_KAFKA_SASL_PASSWORD). Empty = no SASL
+    # auth. Set to the external-store key when server.config.dataPlane.broker is
+    # "kafka" with a SASL mechanism.
+    kafkaSaslPassword: ""
+    # Optional: ClickHouse password (KSEAL_CLICKHOUSE_PASSWORD). Empty = no
+    # password. Set to the external-store key when analytics is "clickhouse".
+    clickHousePassword: ""
   # When externalSecrets.enabled is false, the chart expects a pre-existing
   # Secret named like the release with these keys (used by dev/local only).
   existingSecret: ""

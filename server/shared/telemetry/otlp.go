@@ -3,8 +3,10 @@ package telemetry
 import (
 	"context"
 
+	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
@@ -29,4 +31,15 @@ func newOTLPExporter(ctx context.Context, endpoint string, insecure bool) (*otlp
 		opts = append(opts, otlptracegrpc.WithInsecure())
 	}
 	return otlptracegrpc.New(ctx, opts...)
+}
+
+// newOTLPMetricExporter constructs an OTLP/gRPC metric exporter. Like the span
+// exporter it connects lazily, so construction needs no live collector; the
+// periodic reader retries pushes on its own cadence.
+func newOTLPMetricExporter(ctx context.Context, endpoint string, insecure bool) (sdkmetric.Exporter, error) {
+	opts := []otlpmetricgrpc.Option{otlpmetricgrpc.WithEndpoint(endpoint)}
+	if insecure {
+		opts = append(opts, otlpmetricgrpc.WithInsecure())
+	}
+	return otlpmetricgrpc.New(ctx, opts...)
 }

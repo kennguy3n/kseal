@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -67,7 +68,33 @@ func runMain(m *testing.M) int {
 	if cleanup != nil {
 		defer cleanup()
 	}
+	// Tear down any lazily-started backend containers (Redpanda/ClickHouse)
+	// before the shared Postgres/Redis cleanup runs.
+	defer runExtraCleanups()
 	return m.Run()
+}
+
+// extraCleanups holds teardown callbacks for backend containers started lazily
+// during the run (e.g. Redpanda, ClickHouse). They are registered once per
+// backend and run from runMain after the suite finishes.
+var (
+	extraCleanupMu sync.Mutex
+	extraCleanups  []func()
+)
+
+func registerCleanup(fn func()) {
+	extraCleanupMu.Lock()
+	defer extraCleanupMu.Unlock()
+	extraCleanups = append(extraCleanups, fn)
+}
+
+func runExtraCleanups() {
+	extraCleanupMu.Lock()
+	defer extraCleanupMu.Unlock()
+	for i := len(extraCleanups) - 1; i >= 0; i-- {
+		extraCleanups[i]()
+	}
+	extraCleanups = nil
 }
 
 // setupHarness wires Postgres + Redis, preferring explicit env endpoints and

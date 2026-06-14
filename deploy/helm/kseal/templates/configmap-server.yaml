@@ -31,3 +31,52 @@ data:
   KSEAL_OTLP_SAMPLE_RATIO: {{ .Values.server.config.otlpSampleRatio | quote }}
   KSEAL_CMK_KMS_URI: {{ .Values.server.config.cmkKmsUri | quote }}
   KSEAL_RAW_RETENTION_DAYS: {{ .Values.server.config.rawRetentionDays | quote }}
+  # WS-Q production data plane (fail-safe, default-off). Selectors are always
+  # emitted (default "memory"); connection details are emitted only when set, so
+  # default releases render a minimal, in-memory config. Passwords are SECRETS
+  # delivered via the Secret/ExternalSecret, never this ConfigMap.
+  {{- with .Values.server.config.dataPlane }}
+  KSEAL_BROKER: {{ .broker | quote }}
+  KSEAL_ANALYTICS: {{ .analytics | quote }}
+  {{- if .kafka.brokers }}
+  KSEAL_KAFKA_BROKERS: {{ join "," .kafka.brokers | quote }}
+  {{- end }}
+  {{- if .kafka.topic }}
+  KSEAL_KAFKA_TOPIC: {{ .kafka.topic | quote }}
+  {{- end }}
+  {{- if .kafka.consumerGroup }}
+  KSEAL_KAFKA_CONSUMER_GROUP: {{ .kafka.consumerGroup | quote }}
+  {{- end }}
+  KSEAL_KAFKA_TLS: {{ .kafka.tls | quote }}
+  {{- if .kafka.caSecret.name }}
+  KSEAL_KAFKA_CA_FILE: {{ printf "%s/%s" (trimSuffix "/" .kafka.caSecret.mountPath) .kafka.caSecret.key | quote }}
+  {{- end }}
+  {{- if .kafka.saslMechanism }}
+  KSEAL_KAFKA_SASL_MECHANISM: {{ .kafka.saslMechanism | quote }}
+  {{- end }}
+  {{- if .kafka.saslUsername }}
+  KSEAL_KAFKA_SASL_USERNAME: {{ .kafka.saslUsername | quote }}
+  {{- end }}
+  {{- if .clickhouse.addr }}
+  KSEAL_CLICKHOUSE_ADDR: {{ join "," .clickhouse.addr | quote }}
+  {{- end }}
+  {{- if .clickhouse.database }}
+  KSEAL_CLICKHOUSE_DATABASE: {{ .clickhouse.database | quote }}
+  {{- end }}
+  {{- if .clickhouse.username }}
+  KSEAL_CLICKHOUSE_USERNAME: {{ .clickhouse.username | quote }}
+  {{- end }}
+  {{- if .clickhouse.table }}
+  KSEAL_CLICKHOUSE_TABLE: {{ .clickhouse.table | quote }}
+  {{- end }}
+  {{- if .clickhouse.cluster }}
+  KSEAL_CLICKHOUSE_CLUSTER: {{ .clickhouse.cluster | quote }}
+  {{- end }}
+  KSEAL_CLICKHOUSE_TLS: {{ .clickhouse.tls | quote }}
+  {{- if .clickhouse.caSecret.name }}
+  KSEAL_CLICKHOUSE_CA_FILE: {{ printf "%s/%s" (trimSuffix "/" .clickhouse.caSecret.mountPath) .clickhouse.caSecret.key | quote }}
+  {{- end }}
+  {{- if and (not (kindIs "invalid" .clickhouse.retentionTtlDays)) (ne (.clickhouse.retentionTtlDays | toString) "") }}
+  KSEAL_CLICKHOUSE_RETENTION_TTL_DAYS: {{ .clickhouse.retentionTtlDays | quote }}
+  {{- end }}
+  {{- end }}

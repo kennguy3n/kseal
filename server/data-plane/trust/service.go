@@ -11,6 +11,9 @@ import (
 	"connectrpc.com/connect"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/kennguy3n/kseal/server/control-plane/compliance"
 	"github.com/kennguy3n/kseal/server/control-plane/registry"
@@ -32,6 +35,7 @@ type Service struct {
 	nonces   *NonceStore
 	verifier *attestation.Verifier
 	tokenTTL time.Duration
+	tracer   trace.Tracer
 
 	// Optional canary health feed; nil disables it (default behavior).
 	detector *guardrails.Detector
@@ -44,7 +48,13 @@ func NewService(store registry.Store, nonces *NonceStore, verifier *attestation.
 	if tokenTTL <= 0 {
 		tokenTTL = 15 * time.Minute
 	}
-	return &Service{store: store, nonces: nonces, verifier: verifier, tokenTTL: tokenTTL}
+	return &Service{
+		store:    store,
+		nonces:   nonces,
+		verifier: verifier,
+		tokenTTL: tokenTTL,
+		tracer:   otel.Tracer("github.com/kennguy3n/kseal/server/data-plane/trust"),
+	}
 }
 
 // AttachCanaryHealth wires the guardrail health feed for canary auto-rollback.
@@ -94,6 +104,13 @@ func (s *Service) VerifyAttestation(ctx context.Context, req *connect.Request[ks
 	if m.TenantId == "" || m.AppId == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("tenant_id and app_id required"))
 	}
+
+	ctx, span := s.tracer.Start(ctx, "trust.VerifyAttestation", trace.WithAttributes(
+		attribute.String("tenant", m.TenantId),
+		attribute.String("app", m.AppId),
+		attribute.String("platform", m.Platform.String()),
+	))
+	defer span.End()
 
 	// The nonce must have been issued for this exact app (anti cross-app replay).
 	ok, err := s.nonces.Consume(ctx, m.TenantId, m.Nonce, m.AppId)

@@ -105,6 +105,24 @@ spec:
         - protocol: TCP
           port: {{ $egress.otelCollector.port }}
     {{- end }}
+    {{- if $egress.kafka.enabled }}
+    # Kafka/Redpanda broker (WS-Q production data plane).
+    - to:
+        - ipBlock:
+            cidr: {{ $egress.kafka.cidr | quote }}
+      ports:
+        - protocol: TCP
+          port: {{ $egress.kafka.port }}
+    {{- end }}
+    {{- if $egress.clickhouse.enabled }}
+    # ClickHouse analytics store (WS-Q production data plane).
+    - to:
+        - ipBlock:
+            cidr: {{ $egress.clickhouse.cidr | quote }}
+      ports:
+        - protocol: TCP
+          port: {{ $egress.clickhouse.port }}
+    {{- end }}
     {{- with $egress.siemSinks }}
     # SIEM / tenant webhook sinks (HMAC-signed fan-out from the data plane).
     {{- range . }}

@@ -50,3 +50,25 @@ variable "kek" {
   type        = string
   sensitive   = true
 }
+
+# --- WS-Q production data plane (default-off) --------------------------------
+# Provision the Kafka (MSK Serverless) broker and/or the ClickHouse access
+# boundary. Both default to off so existing prod stacks are unchanged until the
+# data plane is explicitly rolled out (see docs/data-plane-scale.md).
+variable "data_plane_kafka_enabled" {
+  description = "Provision the MSK Serverless broker for the telemetry pipeline."
+  type        = bool
+  default     = false
+}
+
+variable "data_plane_clickhouse_enabled" {
+  description = "Provision the ClickHouse analytics-store access boundary."
+  type        = bool
+  default     = false
+}
+
+variable "clickhouse_endpoint_host" {
+  description = "ClickHouse endpoint host (ClickHouse Cloud PrivateLink DNS or in-VPC service address). Required when data_plane_clickhouse_enabled is true."
+  type        = string
+  default     = ""
+}

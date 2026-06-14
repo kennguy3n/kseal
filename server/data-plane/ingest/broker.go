@@ -18,6 +18,19 @@ type Broker interface {
 	Close()
 }
 
+// PersistAcker is optionally implemented by a Broker whose durable read
+// position must only advance after events are persisted to the analytics store.
+// The Writer calls Ack(n) after each successful flush, naming the number of
+// events — in Consume() hand-off (FIFO) order — that are now durable. This makes
+// the pipeline genuinely at-least-once through the store: a record's offset is
+// committed only after ClickHouse has it, so a crash (or a ClickHouse outage)
+// redelivers rather than loses, and the store's id-keyed dedup collapses the
+// retry. Brokers with no durable position (the in-process ChannelBroker) simply
+// do not implement this and the Writer's Ack call is a no-op.
+type PersistAcker interface {
+	Ack(n int)
+}
+
 // ChannelBroker is an in-process, buffered-channel broker.
 type ChannelBroker struct {
 	ch        chan StoredEvent
