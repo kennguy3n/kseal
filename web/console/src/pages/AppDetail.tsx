@@ -10,7 +10,7 @@ import {
   EmptyState,
   ErrorNotice,
   LoadMore,
-  Spinner,
+  SkeletonRows,
   Badge,
 } from "../components/ui";
 import {
@@ -52,14 +52,19 @@ export function AppDetailPage() {
         </Link>
       </header>
 
-      {app.isError && <ErrorNotice error={app.error} />}
+      {app.isError && (
+        <ErrorNotice error={app.error} onRetry={() => void app.refetch()} />
+      )}
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card title="Active policy">
           {activePolicy.isLoading ? (
-            <Spinner />
+            <SkeletonRows rows={2} />
           ) : activePolicy.isError ? (
-            <ErrorNotice error={activePolicy.error} />
+            <ErrorNotice
+              error={activePolicy.error}
+              onRetry={() => void activePolicy.refetch()}
+            />
           ) : activePolicy.data ? (
             <dl className="space-y-2 text-sm">
               <div className="flex justify-between">
@@ -103,9 +108,12 @@ export function AppDetailPage() {
 
         <Card title="Builds">
           {builds.isLoading ? (
-            <Spinner />
+            <SkeletonRows rows={2} />
           ) : builds.isError ? (
-            <ErrorNotice error={builds.error} />
+            <ErrorNotice
+              error={builds.error}
+              onRetry={() => void builds.refetch()}
+            />
           ) : !builds.data || builds.data.length === 0 ? (
             <EmptyState>No builds recorded.</EmptyState>
           ) : (
@@ -146,9 +154,12 @@ export function AppDetailPage() {
 
       <Card title="Recent events">
         {events.isLoading ? (
-          <Spinner />
+          <SkeletonRows rows={3} />
         ) : events.isError ? (
-          <ErrorNotice error={events.error} />
+          <ErrorNotice
+            error={events.error}
+            onRetry={() => void events.refetch()}
+          />
         ) : !events.data || events.data.length === 0 ? (
           <EmptyState>No events for this app.</EmptyState>
         ) : (

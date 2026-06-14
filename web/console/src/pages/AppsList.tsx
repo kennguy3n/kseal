@@ -5,30 +5,48 @@ import {
   EmptyState,
   ErrorNotice,
   LoadMore,
-  Spinner,
+  PageHeader,
+  SkeletonRows,
   Badge,
 } from "../components/ui";
 import { platformLabels } from "../lib/format";
+import { docs } from "../lib/links";
 
 export function AppsListPage() {
   const apps = useApps();
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-xl font-semibold text-fg-strong">Apps</h1>
-        <p className="text-sm text-fg-muted">
-          Registered applications for this tenant.
-        </p>
-      </header>
+      <PageHeader
+        title="Apps"
+        description="Applications registered to this tenant. Each app binds the SDK and CLI to its own signing keys."
+      />
 
       <Card>
         {apps.isLoading ? (
-          <Spinner />
+          <SkeletonRows rows={4} />
         ) : apps.isError ? (
-          <ErrorNotice error={apps.error} />
+          <ErrorNotice
+            error={apps.error}
+            onRetry={() => void apps.refetch()}
+          />
         ) : !apps.data || apps.data.length === 0 ? (
-          <EmptyState>No apps registered yet.</EmptyState>
+          <EmptyState
+            title="No apps registered yet"
+            action={
+              <a
+                href={docs.quickstart()}
+                target="_blank"
+                rel="noreferrer"
+                className="btn-primary"
+              >
+                Open the quickstart
+              </a>
+            }
+          >
+            Register your first app with the kseal CLI to get its app ID and
+            signing keys, then integrate the SDK.
+          </EmptyState>
         ) : (
           <>
             <table className="w-full">

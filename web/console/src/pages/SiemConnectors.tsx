@@ -4,7 +4,14 @@ import {
   useRegisterSiemConnector,
   useSiemConnectors,
 } from "../hooks/queries";
-import { Card, EmptyState, ErrorNotice, Spinner, Badge } from "../components/ui";
+import {
+  Card,
+  EmptyState,
+  ErrorNotice,
+  PageHeader,
+  SkeletonRows,
+  Badge,
+} from "../components/ui";
 import { SiemKind } from "../gen/kseal/v1/siem_pb";
 import { formatTimestamp } from "../lib/format";
 
@@ -124,20 +131,20 @@ export function SiemConnectorsPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-xl font-semibold text-fg-strong">SIEM connectors</h1>
-        <p className="text-sm text-fg-muted">
-          Stream privacy-minimized trust/risk events to Splunk HEC, Microsoft
-          Sentinel, or Elastic. Secrets are sealed server-side and never shown.
-        </p>
-      </header>
+      <PageHeader
+        title="SIEM connectors"
+        description="Stream privacy-minimized trust/risk events to Splunk HEC, Microsoft Sentinel, or Elastic. Secrets are sealed server-side and never shown."
+      />
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card title="Registered connectors">
           {connectors.isLoading ? (
-            <Spinner />
+            <SkeletonRows rows={3} />
           ) : connectors.isError ? (
-            <ErrorNotice error={connectors.error} />
+            <ErrorNotice
+              error={connectors.error}
+              onRetry={() => void connectors.refetch()}
+            />
           ) : !connectors.data || connectors.data.length === 0 ? (
             <EmptyState>No SIEM connectors registered.</EmptyState>
           ) : (

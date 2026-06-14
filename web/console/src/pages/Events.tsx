@@ -5,7 +5,8 @@ import {
   EmptyState,
   ErrorNotice,
   LoadMore,
-  Spinner,
+  PageHeader,
+  SkeletonRows,
   Badge,
 } from "../components/ui";
 import { EventType, TrustLevel } from "../gen/kseal/v1/common_pb";
@@ -74,12 +75,10 @@ export function EventsPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-xl font-semibold text-fg-strong">Events</h1>
-        <p className="text-sm text-fg-muted">
-          Risk events across the tenant. Filter by type, risk level and time.
-        </p>
-      </header>
+      <PageHeader
+        title="Events"
+        description="Risk and policy-decision events across the tenant. Filter by type, risk level and time."
+      />
 
       <Card title="Filters">
         <div className="space-y-4">
@@ -185,9 +184,12 @@ export function EventsPage() {
         }
       >
         {events.isLoading ? (
-          <Spinner />
+          <SkeletonRows rows={5} />
         ) : events.isError ? (
-          <ErrorNotice error={events.error} />
+          <ErrorNotice
+            error={events.error}
+            onRetry={() => void events.refetch()}
+          />
         ) : visible.length === 0 ? (
           <>
             <EmptyState>No events match the current filters.</EmptyState>

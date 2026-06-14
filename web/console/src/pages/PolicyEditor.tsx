@@ -5,7 +5,14 @@ import {
   useCreatePolicy,
   usePolicies,
 } from "../hooks/queries";
-import { Card, EmptyState, ErrorNotice, Spinner, Badge } from "../components/ui";
+import {
+  Card,
+  EmptyState,
+  ErrorNotice,
+  PageHeader,
+  SkeletonRows,
+  Badge,
+} from "../components/ui";
 import { EnforcementMode } from "../gen/kseal/v1/common_pb";
 import { enforcementModeLabels } from "../lib/format";
 import {
@@ -76,13 +83,10 @@ export function PolicyEditorPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-xl font-semibold text-fg-strong">Policies</h1>
-        <p className="text-sm text-fg-muted">
-          Author and activate enforcement policies. Empty app selection targets
-          the tenant-wide default.
-        </p>
-      </header>
+      <PageHeader
+        title="Policies"
+        description="Author and activate enforcement policies. An empty app selection targets the tenant-wide default."
+      />
 
       <Card title="Scope">
         <label htmlFor="policyApp" className="label">
@@ -106,9 +110,12 @@ export function PolicyEditorPage() {
       <div className="grid gap-6 lg:grid-cols-2">
         <Card title="Policies">
           {policies.isLoading ? (
-            <Spinner />
+            <SkeletonRows rows={3} />
           ) : policies.isError ? (
-            <ErrorNotice error={policies.error} />
+            <ErrorNotice
+              error={policies.error}
+              onRetry={() => void policies.refetch()}
+            />
           ) : !policies.data || policies.data.length === 0 ? (
             <EmptyState>No policies yet for this scope.</EmptyState>
           ) : (

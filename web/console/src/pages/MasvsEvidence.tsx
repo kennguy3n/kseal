@@ -5,8 +5,9 @@ import {
   Card,
   EmptyState,
   ErrorNotice,
+  InfoHint,
   LoadMore,
-  Spinner,
+  SkeletonRows,
 } from "../components/ui";
 import { formatTimestamp } from "../lib/format";
 import { buildMasvsReport } from "../lib/masvs";
@@ -32,12 +33,26 @@ export function MasvsEvidencePage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-xl font-semibold text-fg-strong">MASVS evidence</h1>
-        <p className="text-sm text-fg-muted">
-          OWASP MASVS coverage for a release, derived from the registered
-          build-proof manifest — the same evidence the report generator emits.
-        </p>
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5">
+            <h1 className="text-xl font-semibold text-fg-strong">
+              MASVS evidence
+            </h1>
+            <InfoHint label="About MASVS evidence">
+              The OWASP Mobile Application Security Verification Standard (MASVS)
+              defines security categories every mobile app should meet. kseal
+              maps each protection your build applied to the categories it
+              evidences, so a release’s coverage is derived from its signed
+              build-proof manifest — not a self-assessment.
+            </InfoHint>
+          </div>
+          <p className="mt-1 max-w-2xl text-sm text-fg-muted">
+            OWASP MASVS coverage for a release, derived from the registered
+            build-proof manifest — the same evidence the report generator
+            emits.
+          </p>
+        </div>
       </header>
 
       <Card title="Release">
@@ -96,9 +111,12 @@ export function MasvsEvidencePage() {
       {!appId ? (
         <EmptyState>Select an app to view its MASVS evidence.</EmptyState>
       ) : builds.isLoading ? (
-        <Spinner />
+        <SkeletonRows rows={4} />
       ) : builds.isError ? (
-        <ErrorNotice error={builds.error} />
+        <ErrorNotice
+          error={builds.error}
+          onRetry={() => void builds.refetch()}
+        />
       ) : !report || !selectedBuild ? (
         <EmptyState>No builds registered for this app yet.</EmptyState>
       ) : (

@@ -4,7 +4,8 @@ import {
   Badge,
   Card,
   ErrorNotice,
-  Spinner,
+  InfoHint,
+  SkeletonRows,
   UnavailableNotice,
 } from "../components/ui";
 import { AppSelect } from "../components/AppSelect";
@@ -56,13 +57,26 @@ export function KillSwitchPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-xl font-semibold text-fg-strong">Kill switch</h1>
-        <p className="text-sm text-fg-muted">
-          View and issue a signed enable/disable of protection enforcement.
-          Signing and authority are server-side; the console only requests the
-          change.
-        </p>
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5">
+            <h1 className="text-xl font-semibold text-fg-strong">
+              Kill switch
+            </h1>
+            <InfoHint label="About the kill switch">
+              The kill switch is a signed, tenant- or app-scoped command that
+              turns protection enforcement on or off. Commands are signed
+              (Ed25519) and authorized server-side and recorded in the audit
+              trail — the console only requests the change, it never signs in
+              the browser.
+            </InfoHint>
+          </div>
+          <p className="mt-1 max-w-2xl text-sm text-fg-muted">
+            View and issue a signed enable/disable of protection enforcement.
+            Signing and authority are server-side; the console only requests
+            the change.
+          </p>
+        </div>
       </header>
 
       <Card title="Scope">
@@ -80,11 +94,14 @@ export function KillSwitchPage() {
 
       <Card title="Current state">
         {state.isLoading ? (
-          <Spinner />
+          <SkeletonRows rows={2} />
         ) : state.isError && isUnavailableError(state.error) ? (
           <UnavailableNotice feature="The kill switch" />
         ) : state.isError ? (
-          <ErrorNotice error={state.error} />
+          <ErrorNotice
+            error={state.error}
+            onRetry={() => void state.refetch()}
+          />
         ) : (
           <div className="space-y-4">
             <div className="flex items-center gap-3">

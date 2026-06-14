@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../state/useAuth";
 import { defaultApiBaseUrl } from "../config";
+import { ShieldIcon } from "../components/icons";
 
 interface LocationState {
   from?: string;
@@ -39,7 +40,12 @@ export function LoginPage() {
     <div className="flex min-h-full items-center justify-center p-6">
       <form onSubmit={onSubmit} className="card w-full max-w-md space-y-4">
         <div>
-          <h1 className="text-xl font-semibold text-fg-strong">kseal console</h1>
+          <div className="flex items-center gap-2 text-fg-strong">
+            <span className="text-accent-strong">
+              <ShieldIcon className="h-6 w-6" />
+            </span>
+            <h1 className="text-xl font-semibold">kseal console</h1>
+          </div>
           <p className="mt-1 text-sm text-fg-muted">
             Sign in with a tenant API key to manage apps, policies and events.
           </p>

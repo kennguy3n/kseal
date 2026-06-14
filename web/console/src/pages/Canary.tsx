@@ -5,7 +5,8 @@ import {
   Card,
   EmptyState,
   ErrorNotice,
-  Spinner,
+  InfoHint,
+  SkeletonRows,
   UnavailableNotice,
 } from "../components/ui";
 import { AppSelect } from "../components/AppSelect";
@@ -51,12 +52,25 @@ export function CanaryPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-xl font-semibold text-fg-strong">Canary monitor</h1>
-        <p className="text-sm text-fg-muted">
-          Staged policy/config rollout for an app: rollout percentage, candidate
-          health and auto-rollback status.
-        </p>
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5">
+            <h1 className="text-xl font-semibold text-fg-strong">
+              Canary monitor
+            </h1>
+            <InfoHint label="About canary rollouts">
+              A canary rolls a new policy or config out to a small percentage of
+              traffic first. kseal watches the candidate cohort’s block rate and
+              automatically rolls back to the last-known-good policy if it
+              crosses the configured threshold — so a bad change can’t take down
+              every user.
+            </InfoHint>
+          </div>
+          <p className="mt-1 max-w-2xl text-sm text-fg-muted">
+            Staged policy/config rollout for an app: rollout percentage,
+            candidate health and auto-rollback status.
+          </p>
+        </div>
       </header>
 
       <Card title="Scope">
@@ -65,11 +79,14 @@ export function CanaryPage() {
 
       <Card title="Rollout">
         {canary.isLoading ? (
-          <Spinner />
+          <SkeletonRows rows={2} />
         ) : canary.isError && isUnavailableError(canary.error) ? (
           <UnavailableNotice feature="The canary monitor" />
         ) : canary.isError ? (
-          <ErrorNotice error={canary.error} />
+          <ErrorNotice
+            error={canary.error}
+            onRetry={() => void canary.refetch()}
+          />
         ) : status === null ? (
           <EmptyState>No staged rollout for this scope.</EmptyState>
         ) : (

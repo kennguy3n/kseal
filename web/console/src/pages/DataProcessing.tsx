@@ -5,7 +5,8 @@ import {
   Card,
   EmptyState,
   ErrorNotice,
-  Spinner,
+  InfoHint,
+  SkeletonRows,
   UnavailableNotice,
 } from "../components/ui";
 import { AppSelect } from "../components/AppSelect";
@@ -35,14 +36,26 @@ export function DataProcessingPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-xl font-semibold text-fg-strong">
-          Data-processing registry
-        </h1>
-        <p className="text-sm text-fg-muted">
-          What data each app / SDK processes — categories, purpose, retention
-          and lawful basis — for your processing register and privacy reviews.
-        </p>
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5">
+            <h1 className="text-xl font-semibold text-fg-strong">
+              Data-processing registry
+            </h1>
+            <InfoHint label="About the data-processing registry">
+              A machine-readable record of what each app and SDK processes —
+              data categories, purpose, retention and lawful basis. It backs
+              your GDPR Article 30 processing register and app-store data-safety
+              disclosures, derived from declared SDK behaviour rather than
+              hand-maintained spreadsheets.
+            </InfoHint>
+          </div>
+          <p className="mt-1 max-w-2xl text-sm text-fg-muted">
+            What data each app / SDK processes — categories, purpose, retention
+            and lawful basis — for your processing register and privacy
+            reviews.
+          </p>
+        </div>
       </header>
 
       <Card title="Scope">
@@ -63,11 +76,14 @@ export function DataProcessingPage() {
         }
       >
         {registry.isLoading ? (
-          <Spinner />
+          <SkeletonRows rows={3} />
         ) : registry.isError && isUnavailableError(registry.error) ? (
           <UnavailableNotice feature="The data-processing registry" />
         ) : registry.isError ? (
-          <ErrorNotice error={registry.error} />
+          <ErrorNotice
+            error={registry.error}
+            onRetry={() => void registry.refetch()}
+          />
         ) : records.length === 0 ? (
           <EmptyState>
             No data-processing records declared for this scope.
