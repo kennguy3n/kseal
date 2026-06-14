@@ -3,7 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="dark light" />
+    <!-- Order matches the CSS default (:root { color-scheme: light } in
+         src/index.css): light first so the browser paints native UI (form
+         controls, scrollbars, canvas background) in light before CSS loads,
+         avoiding a dark flash for light-mode users. The inline script below
+         flips to .dark up-front when the resolved theme is dark. -->
+    <meta name="color-scheme" content="light dark" />
     <title>kseal console</title>
     <!--
       Runtime config injection (NoOps): a prebuilt image renders /env.js at
