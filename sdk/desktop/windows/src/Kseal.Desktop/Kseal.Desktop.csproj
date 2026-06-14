@@ -13,6 +13,8 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <AssemblyName>Kseal.Desktop</AssemblyName>
     <RootNamespace>Kseal.Desktop</RootNamespace>
+    <!-- Semver: keep in lockstep with CHANGELOG.md. Minimum runtime: .NET 8.0. -->
+    <Version>0.1.0</Version>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
   </PropertyGroup>
 

@@ -63,7 +63,20 @@ public class KsealDesktopClientTests
     public void GetRequestProofThrowsWithoutTrustToken()
     {
         var (client, _, _) = NewClient();
-        Assert.Throws<TrustCoreException>(() => client.GetRequestProof([1, 2, 3]));
+        var ex = Assert.Throws<TrustCoreException>(() => client.GetRequestProof([1, 2, 3]));
+        Assert.Equal(KsealErrorCode.TrustTokenMissing, ex.Code);
+    }
+
+    [Theory]
+    [InlineData(-1, KsealErrorCode.InvalidArgument)]
+    [InlineData(-2, KsealErrorCode.DecodeFailed)]
+    [InlineData(-3, KsealErrorCode.InvalidArgument)]
+    [InlineData(-4, KsealErrorCode.CryptoFailed)]
+    [InlineData(-5, KsealErrorCode.TransportFailed)]
+    [InlineData(-6, KsealErrorCode.InternalError)]
+    public void ErrorCodeMapsFromFFIStatus(int status, KsealErrorCode expected)
+    {
+        Assert.Equal(expected, TrustCoreException.CodeFromStatus(status));
     }
 
     [Fact]

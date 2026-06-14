@@ -8,10 +8,65 @@ struct CoreRiskScore {
     let confidence: Confidence
 }
 
-/// Raised when an FFI call returns a failure status.
-public struct TrustCoreError: Error, CustomStringConvertible {
+/// Typed classification for every error the kseal SDK can raise. Callers branch
+/// on `kind` (a stable, exhaustive enum) instead of parsing a message string.
+///
+/// The FFI-backed cases mirror the trust core's C ABI status codes one-to-one
+/// (see `kseal.h` / `Status` in `kseal-ffi`); the remaining cases describe
+/// SDK-level precondition failures that never reach the core.
+public enum KsealErrorKind: Equatable, Sendable {
+    /// A request proof was requested before a trust token was set; complete
+    /// attestation and call `setTrustToken(_:)` (or `establishTrustSession`) first.
+    case trustTokenMissing
+    /// The trust core could not be created (e.g. malformed key arguments).
+    case coreInitializationFailed
+    /// A signed config was rejected (bad signature, rollback, or decode failure).
+    case configRejected
+    /// An argument was null or otherwise invalid at the FFI boundary.
+    case invalidArgument
+    /// A protobuf payload failed to decode.
+    case decodeFailed
+    /// A cryptographic operation failed.
+    case cryptoFailed
+    /// Serialization/compression on the telemetry transport path failed.
+    case transportFailed
+    /// An unexpected internal failure (should not occur in normal operation).
+    case internalError
+
+    /// Maps a raw FFI status code (`kseal-ffi` `Status`) to a typed kind.
+    public init(status: Int32) {
+        switch status {
+        case -1, -3: self = .invalidArgument // ErrNull, ErrInvalid
+        case -2: self = .decodeFailed // ErrDecode
+        case -4: self = .cryptoFailed // ErrCrypto
+        case -5: self = .transportFailed // ErrTransport
+        default: self = .internalError // ErrPanic / unknown
+        }
+    }
+}
+
+/// Error raised by the kseal SDK.
+///
+/// Carries a typed ``KsealErrorKind`` for branching plus a human-readable
+/// `message` for logs/diagnostics. Messages never contain PII.
+public struct TrustCoreError: Error, CustomStringConvertible, LocalizedError, Equatable {
+    /// Typed classification of the failure; switch on this rather than the message.
+    public let kind: KsealErrorKind
+    /// Diagnostic detail (safe to log; contains no PII).
     public let message: String
+
+    public init(kind: KsealErrorKind, message: String) {
+        self.kind = kind
+        self.message = message
+    }
+
+    /// FFI call-site convenience: derives ``kind`` from the C ABI status code.
+    init(status: Int32, message: String) {
+        self.init(kind: KsealErrorKind(status: status), message: message)
+    }
+
     public var description: String { message }
+    public var errorDescription: String? { message }
 }
 
 /// High-level handle to the Rust trust core, hiding the raw FFI surface.
@@ -110,7 +165,7 @@ final class NativeTrustCore: TrustCore {
             }
         }
         guard let handle else {
-            throw TrustCoreError(message: "failed to create trust core (bad key arguments?)")
+            throw TrustCoreError(kind: .coreInitializationFailed, message: "failed to create trust core (bad key arguments?)")
         }
         return NativeTrustCore(handle: handle)
     }
@@ -126,7 +181,7 @@ final class NativeTrustCore: TrustCore {
                 kseal_load_config(handle, b.bindMemory(to: UInt8.self).baseAddress, UInt(b.count))
             }
             if status != 0 {
-                throw TrustCoreError(message: "loadConfig failed: status=\(status)")
+                throw TrustCoreError(kind: .configRejected, message: "loadConfig failed: status=\(status)")
             }
         }
     }
@@ -160,7 +215,7 @@ final class NativeTrustCore: TrustCore {
         var confidence: Int32 = 0
         let status = kseal_evaluate_risk(handle, riskBits, &score, &confidence)
         if status != 0 {
-            throw TrustCoreError(message: "evaluateRisk failed: status=\(status)")
+            throw TrustCoreError(status: status, message: "evaluateRisk failed: status=\(status)")
         }
         return CoreRiskScore(score: score, confidence: Confidence(code: confidence))
     }
@@ -201,7 +256,7 @@ final class NativeTrustCore: TrustCore {
             }
             if status != 0 {
                 kseal_buffer_free(out)
-                throw TrustCoreError(message: "createEvent failed: status=\(status)")
+                throw TrustCoreError(status: status, message: "createEvent failed: status=\(status)")
             }
             return Self.consume(&out)
         }
@@ -215,7 +270,7 @@ final class NativeTrustCore: TrustCore {
             }
             if status != 0 {
                 kseal_buffer_free(out)
-                throw TrustCoreError(message: "batchAndCompress failed: status=\(status)")
+                throw TrustCoreError(status: status, message: "batchAndCompress failed: status=\(status)")
             }
             return Self.consume(&out)
         }
@@ -240,7 +295,7 @@ final class NativeTrustCore: TrustCore {
             }
             if status != 0 {
                 kseal_buffer_free(out)
-                throw TrustCoreError(message: "generateRequestProof failed: status=\(status)")
+                throw TrustCoreError(status: status, message: "generateRequestProof failed: status=\(status)")
             }
             return Self.consume(&out)
         }
@@ -251,7 +306,7 @@ final class NativeTrustCore: TrustCore {
         let status = kseal_generate_nonce(UInt(max(0, length)), &out)
         if status != 0 {
             kseal_buffer_free(out)
-            throw TrustCoreError(message: "generateNonce failed: status=\(status)")
+            throw TrustCoreError(status: status, message: "generateNonce failed: status=\(status)")
         }
         return Self.consume(&out)
     }
@@ -263,7 +318,7 @@ final class NativeTrustCore: TrustCore {
         }
         if status != 0 {
             kseal_buffer_free(out)
-            throw TrustCoreError(message: "compress failed: status=\(status)")
+            throw TrustCoreError(status: status, message: "compress failed: status=\(status)")
         }
         return Self.consume(&out)
     }
@@ -275,7 +330,7 @@ final class NativeTrustCore: TrustCore {
         }
         if status != 0 {
             kseal_buffer_free(out)
-            throw TrustCoreError(message: "decompress failed: status=\(status)")
+            throw TrustCoreError(status: status, message: "decompress failed: status=\(status)")
         }
         return Self.consume(&out)
     }

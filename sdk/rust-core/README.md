@@ -13,4 +13,11 @@ The Rust core owns everything that must be **identical, deterministic, and audit
 
 **Platform probes stay native** — the core consumes signals passed in from the platform SDKs; it does not call OS APIs directly.
 
-See [ARCHITECTURE.md](../../ARCHITECTURE.md#rust-core-scope). **Status:** scaffold — see [PROGRESS.md](../../PROGRESS.md) (Phase 1).
+See [ARCHITECTURE.md](../../ARCHITECTURE.md#rust-core-scope). **Minimum toolchain:** Rust 1.74.
+
+## Get secure fast
+
+Most integrators should use a platform SDK ([android](../android), [ios](../ios),
+[desktop/macos](../desktop/macos), [desktop/windows](../desktop/windows)). To
+embed the C ABI directly, follow [QUICKSTART.md](QUICKSTART.md). The C ABI
+(`kseal.h`) is **additive-only**; see [CHANGELOG.md](CHANGELOG.md).

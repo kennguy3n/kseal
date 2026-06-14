@@ -126,11 +126,12 @@ class KsealSDK internal constructor(
      * Builds a per-request proof binding [requestHash] to the current trust
      * token using a fresh nonce and a strictly increasing sequence number.
      *
-     * @throws IllegalStateException if no trust token has been set (attest first).
+     * @throws KsealException with [KsealErrorCode.TRUST_TOKEN_MISSING] if no
+     *   trust token has been set (complete attestation first).
      */
     fun getRequestProof(requestHash: ByteArray): RequestProof {
         val token = trustTokenId
-            ?: throw IllegalStateException("no trust token set; complete attestation and call setTrustToken()")
+            ?: throw KsealException(KsealErrorCode.TRUST_TOKEN_MISSING, "no trust token set; complete attestation and call setTrustToken()")
         val nonce = core.generateNonce(NONCE_LEN)
         val seq = sequence.incrementAndGet()
         val proofBytes = core.generateRequestProof(token, requestHash, nonce, seq)

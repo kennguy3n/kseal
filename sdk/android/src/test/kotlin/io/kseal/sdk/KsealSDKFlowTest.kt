@@ -89,9 +89,20 @@ class KsealSDKFlowTest {
 
     @Test
     fun requestProofRequiresTrustToken() {
-        assertThrows(IllegalStateException::class.java) {
+        val ex = assertThrows(KsealException::class.java) {
             sdk.getRequestProof(ByteArray(32))
         }
+        assertEquals(KsealErrorCode.TRUST_TOKEN_MISSING, ex.code)
+    }
+
+    @Test
+    fun errorCodeMapsFromFFIStatus() {
+        assertEquals(KsealErrorCode.INVALID_ARGUMENT, KsealErrorCode.fromStatus(-1))
+        assertEquals(KsealErrorCode.DECODE_FAILED, KsealErrorCode.fromStatus(-2))
+        assertEquals(KsealErrorCode.INVALID_ARGUMENT, KsealErrorCode.fromStatus(-3))
+        assertEquals(KsealErrorCode.CRYPTO_FAILED, KsealErrorCode.fromStatus(-4))
+        assertEquals(KsealErrorCode.TRANSPORT_FAILED, KsealErrorCode.fromStatus(-5))
+        assertEquals(KsealErrorCode.INTERNAL_ERROR, KsealErrorCode.fromStatus(-6))
     }
 
     @Test

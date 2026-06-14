@@ -35,7 +35,7 @@ instead of blocking the calling thread.
 ## Run
 
 ```bash
-cd examples/ios
+cd examples/ios-quickstart
 swift run kseal-ios-quickstart
 ```
 
