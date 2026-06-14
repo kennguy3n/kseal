@@ -284,7 +284,12 @@ export function Layout() {
                   <CloseIcon className="h-5 w-5" />
                 </button>
               </div>
-              <nav className="flex flex-col gap-4" aria-label="Primary">
+              {/* No aria-label here: the enclosing role="dialog" is already
+                  named "Navigation", and labeling this nav "Primary" too would
+                  create a second "Primary" navigation landmark alongside the
+                  desktop sidebar. Leaving it unnamed keeps a single canonical
+                  "Primary" landmark in the DOM. */}
+              <nav className="flex flex-col gap-4">
                 <NavSections onNavigate={() => setMobileOpen(false)} />
               </nav>
               <div className="mt-auto space-y-2 pt-4 text-xs text-fg-subtle">
