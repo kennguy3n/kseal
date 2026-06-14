@@ -10,7 +10,7 @@ import {
   InfoIcon,
   RefreshIcon,
 } from "./icons";
-import { errorMessage } from "../lib/errors";
+import { errorMessage, isConnectionError } from "../lib/errors";
 
 export function Card({
   title,
@@ -245,6 +245,10 @@ export function UnavailableNotice({
 // Renders a Connect error as a thin, defensive fallback for transient failures
 // (the read RPCs are implemented server-side, so this is no longer a "pending
 // support" degrade path). An optional `onRetry` adds a retry affordance.
+//
+// A connection failure (server unreachable / blocked by CORS) is shown with
+// dedicated, actionable copy rather than the raw browser "Failed to fetch":
+// that text alone leaves an operator guessing, so we name the likely causes.
 export function ErrorNotice({
   error,
   onRetry,
@@ -252,6 +256,7 @@ export function ErrorNotice({
   error: unknown;
   onRetry?: () => void;
 }) {
+  const connection = isConnectionError(error);
   return (
     <div
       role="alert"
@@ -259,9 +264,13 @@ export function ErrorNotice({
     >
       <AlertIcon className="mt-0.5 h-5 w-5 shrink-0" />
       <div className="min-w-0 flex-1">
-        <div className="font-medium">Something went wrong</div>
+        <div className="font-medium">
+          {connection ? "Can’t reach the kseal API" : "Something went wrong"}
+        </div>
         <p className="mt-0.5 break-words text-rose-700/90 dark:text-rose-200/80">
-          {errorMessage(error)}
+          {connection
+            ? "The console couldn’t connect to the API server. Check that the server is running and reachable, and that the API base URL is correct."
+            : errorMessage(error)}
         </p>
         {onRetry && (
           <button

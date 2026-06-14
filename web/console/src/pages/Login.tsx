@@ -60,9 +60,19 @@ export function LoginPage() {
             className="input"
             value={apiBaseUrl}
             onChange={(e) => setApiBaseUrl(e.target.value)}
-            placeholder="http://localhost:8080"
+            placeholder={defaultApiBaseUrl()}
             autoComplete="off"
+            aria-describedby="apiBaseUrl-hint"
           />
+          <p id="apiBaseUrl-hint" className="mt-1 text-xs text-fg-muted">
+            Defaults to this console&rsquo;s origin. In local development
+            requests are proxied to the kseal API (set
+            {" "}
+            <code>KSEAL_DEV_API_PROXY_TARGET</code>, default
+            {" "}
+            <code>http://localhost:8080</code>); point elsewhere to call a
+            remote API directly.
+          </p>
         </div>
 
         <div>
