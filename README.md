@@ -287,7 +287,7 @@ flowchart TB
 | Key material | KMS / HSM | Per-tenant keys, signing keys, CMK for regulated tier |
 | Observability | OpenTelemetry | Traces/metrics/logs across planes |
 
-See the full tables in [ARCHITECTURE.md](ARCHITECTURE.md#tech-stack).
+The production **Kafka/Redpanda** broker, **ClickHouse** analytics store, and real **OTLP** spans/metrics are delivered behind the ingest interfaces and enabled via `KSEAL_BROKER`/`KSEAL_ANALYTICS`/`KSEAL_OTLP_ENDPOINT` (default off, fail-closed); the default build runs the in-process broker + in-memory store. See [`docs/data-plane-scale.md`](docs/data-plane-scale.md) and the full delivered-vs-target tables in [ARCHITECTURE.md](ARCHITECTURE.md#tech-stack).
 
 ---
 
@@ -312,7 +312,7 @@ kseal must be invisible to end users. The on-device SDK operates within hard bud
 
 ## Developer Journey
 
-kseal is NoOps and self-service. The journey is designed so a developer sees value in minutes and reaches production-grade enforcement without a services engagement.
+kseal is NoOps and self-service. The journey is designed so a developer sees value in minutes and reaches production-grade enforcement without a services engagement. Start from the guided **"Secure your app"** walkthrough ([`site/secure-your-app.md`](site/secure-your-app.md)) or a runnable sample under [`examples/`](examples/) (Android, iOS, macOS, backend), and the console's first-run onboarding stepper walks you the rest of the way. The `kseal` CLI mirrors this with `kseal init` (guided setup) and `kseal doctor` (tells you exactly what to do next).
 
 | Time | Outcome |
 |---|---|
