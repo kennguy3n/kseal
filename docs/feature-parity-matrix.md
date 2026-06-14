@@ -109,6 +109,19 @@ claim full parity with Guardsquare/Promon there.
 no per-build cloud compute. See [build-hardening-android.md](build-hardening-android.md)
 and [build-hardening-ios.md](build-hardening-ios.md).
 
+The GA polish in this wave makes both plugins **deterministic and reproducible**:
+given identical inputs (same sources, same pinned seed) the hardened output is
+byte-for-byte identical, asserted by cross-build functional tests on both
+platforms. A misconfigured option (an unknown obfuscation strength, a malformed
+pinned seed) now **fails the build loudly** with an actionable message rather
+than silently weakening protection. Every shipped artifact's native posture
+(RELRO+BIND_NOW, NX, PIE, stack-canary, FORTIFY, plus CFI/MTE/BTI/PAC) is
+verified across `aarch64`/`arm`/`x86_64`/`x86` and recorded in the
+`kseal.build-proof` manifest, whose v2 sections add an auditable `hash_coverage`
+(an independent `artifacts_root` digest a verifier can recompute) and an explicit
+`reproducibility` posture — every option is documented in
+[plugins/gradle/README.md](../plugins/gradle/README.md).
+
 Guardsquare is still the build-hardening leader (its heritage is ProGuard/
 DexGuard). kseal deliberately
 [avoids heavy VM obfuscation](../ARCHITECTURE.md#what-to-avoid): it ships string/
@@ -116,7 +129,8 @@ resource/symbol encryption, native hardening, per-build polymorphism and
 mapping-aware R8, but **does not ship a Guardsquare-class source/IR obfuscator** —
 hence those two rows stay **partial**. kseal competes on **local-CI execution**
 (no per-build cloud cost) + **mapping-aware R8 compatibility** + **polymorphism
-feeding a decaying-bypass server model**, not on raw obfuscation depth.
+feeding a decaying-bypass server model** + **reproducible, build-proof-attested
+output**, not on raw obfuscation depth.
 
 ---
 
@@ -196,8 +210,8 @@ IDs**. kseal treats privacy as a
 | MASVS-anchored coverage (open standard) | has | partial | partial | partial | partial | partial |
 | Auto-generated MASVS evidence report | has | missing | partial | partial | missing | missing |
 | MASTG-based verification procedures | partial | missing | missing | partial | missing | missing |
-| iOS privacy manifest generator | planned (P5) | missing | partial | missing | missing | missing |
-| Google Data Safety helper | planned (P5) | missing | partial | missing | missing | missing |
+| iOS privacy manifest generator | has | missing | partial | missing | missing | missing |
+| Google Data Safety helper | has | missing | partial | missing | missing | missing |
 | Audit trail / data-processing registry | partial | partial | partial | partial | partial | partial |
 | Regional retention controls | partial | partial | partial | partial | partial | partial |
 
@@ -206,12 +220,19 @@ auto-generated evidence report via the Gradle `GenerateMasvsReportTask`
 (`plugins/gradle/src/`) and `kseal masvs` in `cmd/kseal-cli/internal/cli/masvs.go`
 (report sample in [masvs-evidence.md](masvs-evidence.md)). Retention/purge controls
 are in `server/data-plane/ingest/retention.go`; the queryable event read model
-(`server/data-plane/query/`) provides an audit-style trail.
+(`server/data-plane/query/`) provides an audit-style trail. The **iOS privacy
+manifest generator** (`tools/privacy-manifest/`, emitting `PrivacyInfo.xcprivacy`
+from the SDK's machine-readable data contract) and the **Google Data-Safety
+helper** (`tools/datasafety/` + `kseal compliance` in
+`cmd/kseal-cli/internal/cli/compliance.go`) generate store-submission disclosures
+directly from that same contract — see [privacy-manifest.md](privacy-manifest.md)
+and [data-safety.md](data-safety.md).
 
 What stays honest here: **MASTG procedures are partial** (the mapping references
 MASTG but kseal does not ship a full executable verification suite); the **iOS
-privacy-manifest generator and Google Data-Safety helper are not built yet**
-(planned); **audit trail is partial** (security-event query exists, but a formal
+privacy-manifest generator and Google Data-Safety helper now ship** (both derive
+their output from the enforced SDK data contract rather than hand-maintained
+lists); **audit trail is partial** (security-event query exists, but a formal
 data-processing registry / ROPA does not); and **regional retention is partial**
 (per-tenant retention/purge ships, region-scoping comes from the residency
 topology rather than per-region retention knobs). kseal anchors to the open,
@@ -232,9 +253,9 @@ vendor-neutral [OWASP MASVS](https://mas.owasp.org/MASVS/) and ships
 | Private link / on-prem verifier | has | missing | partial | partial | has | partial |
 | Self-service onboarding (NoOps) | has | has | partial | partial | missing | missing |
 | Vertical policy packs (fintech/gaming/health/media) | has | partial | partial | missing | partial | partial |
-| Canary rollout + auto-rollback | partial | missing | partial | missing | missing | partial |
+| Canary rollout + auto-rollback | has | missing | partial | missing | missing | partial |
 | Automatic false-positive detection | has | missing | partial | missing | missing | partial |
-| Signed kill switch (remote disable) | partial | partial | partial | partial | partial | partial |
+| Signed kill switch (remote disable) | has | partial | partial | partial | partial | partial |
 | Self-service SIEM templates | has | partial | partial | partial | missing | has |
 
 **Implemented in:** logical isolation via `server/shared/auth/` (`EnforceTenant`/
@@ -248,18 +269,27 @@ and private link (`deploy/terraform/modules/private-link/`,
 ([byok.md](byok.md)); the NoOps CLI in `cmd/kseal-cli/` (tenant/app/key lifecycle,
 [cli.md](cli.md)); vertical policy packs in
 `cmd/kseal-cli/internal/cli/packs_data/{fintech,gaming,health,media}.json`
-([policy-packs.md](policy-packs.md)); false-positive detection + auto-rollback
-flagging in `server/data-plane/guardrails/detector.go`; and SIEM templates
+([policy-packs.md](policy-packs.md)); false-positive detection in
+`server/data-plane/guardrails/detector.go`; staged **canary rollout with
+auto-rollback** in `server/data-plane/canary/` (`controller.go` reverts a
+candidate cohort to the last-known-good policy when its guardrail block-rate
+breaches threshold, `bucket.go` does the deterministic percentage bucketing,
+`registry.go` tracks active canaries) — gated by `compliance.FlagCanaryRollout`
+([canary-rollout.md](canary-rollout.md)); the **signed kill switch**
+(`ksealv1.SignedKillSwitch`, resolved per app/build in
+`server/data-plane/config/service.go` and delivered through the signed config
+response, persisted in `server/control-plane/compliance/`) — gated by
+`compliance.FlagKillSwitch` ([kill-switch.md](kill-switch.md)); and SIEM templates
 (Elastic ECS, Splunk, Sentinel) in `server/data-plane/siem/templates/`
 ([siem-integration.md](siem-integration.md)).
 
-Two rows stay **partial** by honest reading: **canary rollout + auto-rollback** —
-the guardrails detector ships the auto-rollback safety net (block-rate regression
-detection per tenant/app/policy) and per-module FP detection, but a staged
-percentage-canary rollout is not yet productized; and **signed kill switch** —
-config is cryptographically signed and carries an enforcement mode
-(observe / step-up / block), and trust sessions and API keys can be revoked
-server-side, but there is no single dedicated "disable the SDK" kill switch yet.
+Both **canary rollout + auto-rollback** and the **signed kill switch** now ship:
+candidate policies roll out to a deterministic percentage cohort and auto-revert
+to the last-known-good policy when the guardrails detector observes a block-rate
+regression, and a cryptographically **signed**, app/build-scoped kill switch is
+resolved server-side and delivered through the signed config response (so a
+compromised build can be fenced off without shipping an app update). Both are
+gated behind per-tenant feature flags for safe rollout.
 kseal combines **enterprise isolation** (CMK, private link, regulated tier —
 typically Promon/Zimperium strengths) with **AppSealing-style self-service NoOps**,
 a combination no single incumbent offers per the
@@ -275,8 +305,8 @@ a combination no single incumbent offers per the
 | Windows Authenticode / PE integrity | has | missing | partial | partial | partial | partial |
 | Desktop API attestation / trust session | has | missing | missing | missing | partial | missing |
 | Dylib / DLL injection detection | has | missing | partial | partial | has | partial |
-| TPM / Keychain-bound request proofs | planned (P5) | missing | missing | missing | partial | missing |
-| Secure-update integration | planned (P5) | missing | partial | partial | partial | partial |
+| TPM / Keychain-bound request proofs | has | missing | missing | missing | partial | missing |
+| Secure-update integration | has | missing | partial | partial | partial | partial |
 
 **Implemented in:** `sdk/desktop/macos/Sources/KsealDesktop/` (code-signature,
 notarization and hardened-runtime probes, dylib-injection detection, and the
@@ -285,12 +315,20 @@ trust-session client + request proof in `TrustCore.swift`) and
 `PeIntegrityProbe`, `DllInjectionProbe`, `DebuggerProbe`, and the trust-session
 client). See [desktop-sdk.md](desktop-sdk.md).
 
-What stays honest: the per-request proof key on desktop is a **portable
-software-backed key by default** — binding it to the **macOS Keychain / Secure
-Enclave** or a **Windows TPM (CNG/NCrypt)** is documented as the production path
-but is not shipped, so that row is **planned**. **Secure-update integration** is
-also not built yet. Desktop deliberately starts with **API attestation + code
-integrity** and defers aggressive anti-debug
+The per-request proof key on desktop is now **bound to a hardware element where
+the platform provides one** — the **macOS Keychain (Secure-Enclave-wrapped on
+Apple silicon)** via `KeychainHardwareKeyStore`
+(`sdk/desktop/macos/Sources/KsealDesktop/Security/HardwareKeyStore.swift`) and a
+**Windows TPM through the CNG Platform Crypto Provider** via
+`TpmHardwareKeyStore` (`sdk/desktop/windows/src/Kseal.Desktop/Security/HardwareKeyStore.cs`).
+The proof-byte layout is unchanged (`HMAC(proofKey, …)`); only how `proofKey` is
+protected at rest changes, so the sealed secret cannot be lifted and replayed
+from another device. A clean software fallback keeps CI/virtualized hosts
+working, and `isHardwareBacked` is surfaced so a policy can **require** hardware
+binding and fail closed. **Secure-update integration** also ships
+(`Update/SecureUpdate.{swift,cs}`, signature- and version-checked updates — see
+[desktop-secure-update.md](desktop-secure-update.md)). Desktop deliberately
+starts with **API attestation + code integrity** and defers aggressive anti-debug
 ([Desktop caution](../ARCHITECTURE.md#desktop-caution)). The differentiator is
 extending the **same trust-session backbone** to desktop, which the mobile-first
 incumbents largely do not productize.
