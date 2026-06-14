@@ -149,7 +149,7 @@ public sealed class KsealDesktopClient : IDisposable
         {
             if (_trustTokenId is null)
             {
-                throw new TrustCoreException("no trust token set; call EstablishTrustSession() or SetTrustToken()");
+                throw new TrustCoreException(KsealErrorCode.TrustTokenMissing, "no trust token set; call EstablishTrustSession() or SetTrustToken()");
             }
             token = _trustTokenId;
             seq = ++_sequence;

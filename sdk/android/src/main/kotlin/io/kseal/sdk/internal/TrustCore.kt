@@ -2,6 +2,8 @@ package io.kseal.sdk.internal
 
 import io.kseal.sdk.Confidence
 import io.kseal.sdk.EventType
+import io.kseal.sdk.KsealErrorCode
+import io.kseal.sdk.KsealException
 import io.kseal.sdk.Platform
 import io.kseal.sdk.TrustLevel
 import java.util.concurrent.locks.ReentrantReadWriteLock
@@ -77,8 +79,16 @@ internal interface TrustCore : AutoCloseable {
     }
 }
 
-/** Raised when an FFI call returns a failure status. */
-internal class TrustCoreException(message: String) : RuntimeException(message)
+/**
+ * Raised when an FFI call returns a failure status. A [KsealException] so callers
+ * can catch the whole SDK error family and branch on [KsealException.code]; the
+ * message-only constructor defaults to [KsealErrorCode.INTERNAL_ERROR] for the
+ * JNI paths that collapse a granular status into a null result.
+ */
+internal class TrustCoreException : KsealException {
+    constructor(message: String) : super(KsealErrorCode.INTERNAL_ERROR, message)
+    constructor(code: KsealErrorCode, message: String) : super(code, message)
+}
 
 /**
  * Real trust core backed by the Rust `kseal-ffi` C ABI over JNI.
@@ -109,7 +119,7 @@ internal class NativeTrustCore private constructor(
         check(!closed) { "core is closed" }
         val status = NativeBridge.nativeLoadConfig(handle, signedConfigBytes)
         if (status != STATUS_OK) {
-            throw TrustCoreException("loadConfig failed: status=$status")
+            throw TrustCoreException(KsealErrorCode.CONFIG_REJECTED, "loadConfig failed: status=$status")
         }
     }
 
@@ -231,7 +241,7 @@ internal class NativeTrustCore private constructor(
                 zstdLevel,
             )
             if (handle == 0L) {
-                throw TrustCoreException("failed to create trust core (bad key arguments?)")
+                throw TrustCoreException(KsealErrorCode.CORE_INITIALIZATION_FAILED, "failed to create trust core (bad key arguments?)")
             }
             return NativeTrustCore(handle)
         }

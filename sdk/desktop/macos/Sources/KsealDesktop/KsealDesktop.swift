@@ -159,7 +159,7 @@ public final class KsealDesktop {
         lock.lock()
         guard let token = trustTokenId else {
             lock.unlock()
-            throw TrustCoreError(message: "no trust token set; call establishTrustSession() or setTrustToken()")
+            throw TrustCoreError(kind: .trustTokenMissing, message: "no trust token set; call establishTrustSession() or setTrustToken()")
         }
         sequence += 1
         let seq = sequence

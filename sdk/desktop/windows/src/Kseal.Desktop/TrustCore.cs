@@ -6,8 +6,58 @@ namespace Kseal.Desktop;
 /// <summary>Weighted risk score plus the confidence the core derived for it.</summary>
 public readonly record struct CoreRiskScore(uint Score, Confidence Confidence);
 
-/// <summary>Raised when an FFI call returns a failure status.</summary>
-public sealed class TrustCoreException(string message) : Exception(message);
+/// <summary>
+/// Typed classification for every error the kseal SDK can raise. Callers branch
+/// on <see cref="TrustCoreException.Code"/> instead of parsing a message string.
+/// The FFI-backed values mirror the trust core's C ABI status codes one-to-one
+/// (see <c>kseal.h</c> / <c>Status</c> in <c>kseal-ffi</c>); the remaining values
+/// describe SDK-level precondition failures that never reach the core.
+/// </summary>
+public enum KsealErrorCode
+{
+    /// <summary>A request proof was requested before a trust token was set.</summary>
+    TrustTokenMissing,
+    /// <summary>The trust core could not be created (e.g. malformed key arguments).</summary>
+    CoreInitializationFailed,
+    /// <summary>A signed config was rejected (bad signature, rollback, or decode failure).</summary>
+    ConfigRejected,
+    /// <summary>An argument was null or otherwise invalid at the FFI boundary.</summary>
+    InvalidArgument,
+    /// <summary>A protobuf payload failed to decode.</summary>
+    DecodeFailed,
+    /// <summary>A cryptographic operation failed.</summary>
+    CryptoFailed,
+    /// <summary>Serialization/compression on the telemetry transport path failed.</summary>
+    TransportFailed,
+    /// <summary>An unexpected internal failure (should not occur in normal operation).</summary>
+    InternalError,
+}
+
+/// <summary>
+/// Raised when the kseal SDK fails. Carries a typed <see cref="Code"/> for
+/// branching plus a human-readable message for logs/diagnostics (no PII).
+/// </summary>
+public sealed class TrustCoreException : Exception
+{
+    /// <summary>Typed classification of the failure; switch on this rather than the message.</summary>
+    public KsealErrorCode Code { get; }
+
+    public TrustCoreException(KsealErrorCode code, string message, Exception? inner = null)
+        : base(message, inner) => Code = code;
+
+    /// <summary>Convenience for paths without a granular status; defaults to <see cref="KsealErrorCode.InternalError"/>.</summary>
+    public TrustCoreException(string message) : this(KsealErrorCode.InternalError, message) { }
+
+    /// <summary>Maps a raw FFI status code (<c>kseal-ffi</c> <c>Status</c>) to a typed code.</summary>
+    public static KsealErrorCode CodeFromStatus(int status) => status switch
+    {
+        -1 or -3 => KsealErrorCode.InvalidArgument, // ErrNull, ErrInvalid
+        -2 => KsealErrorCode.DecodeFailed, // ErrDecode
+        -4 => KsealErrorCode.CryptoFailed, // ErrCrypto
+        -5 => KsealErrorCode.TransportFailed, // ErrTransport
+        _ => KsealErrorCode.InternalError, // ErrPanic / unknown
+    };
+}
 
 /// <summary>High-level handle to the Rust trust core, hiding the raw FFI surface.</summary>
 public interface ITrustCore : IDisposable
@@ -67,7 +117,7 @@ public sealed unsafe class NativeTrustCore : ITrustCore
         }
         if (handle == IntPtr.Zero)
         {
-            throw new TrustCoreException("failed to create trust core (bad key arguments?)");
+            throw new TrustCoreException(KsealErrorCode.CoreInitializationFailed, "failed to create trust core (bad key arguments?)");
         }
         return new NativeTrustCore(handle);
     }
@@ -85,7 +135,7 @@ public sealed unsafe class NativeTrustCore : ITrustCore
     {
         if (!TryLoadConfig(signedConfigBytes))
         {
-            throw new TrustCoreException("loadConfig failed");
+            throw new TrustCoreException(KsealErrorCode.ConfigRejected, "loadConfig failed");
         }
     }
 
@@ -130,7 +180,7 @@ public sealed unsafe class NativeTrustCore : ITrustCore
         uint score = 0;
         int confidence = 0;
         int status = kseal_evaluate_risk(_handle, riskBits, &score, &confidence);
-        if (status != 0) throw new TrustCoreException($"evaluateRisk failed: status={status}");
+        if (status != 0) throw new TrustCoreException(TrustCoreException.CodeFromStatus(status), $"evaluateRisk failed: status={status}");
         return new CoreRiskScore(score, (Confidence)confidence);
     }
 
@@ -241,7 +291,7 @@ public sealed unsafe class NativeTrustCore : ITrustCore
         if (status != 0)
         {
             kseal_buffer_free(buffer);
-            throw new TrustCoreException($"{op} failed: status={status}");
+            throw new TrustCoreException(TrustCoreException.CodeFromStatus(status), $"{op} failed: status={status}");
         }
         if (buffer.Data == null || buffer.Len == 0)
         {

@@ -66,7 +66,18 @@ final class KsealDesktopFlowTests: XCTestCase {
 
     func testRequestProofRequiresTrustToken() throws {
         let sdk = try makeSDK()
-        XCTAssertThrowsError(try sdk.getRequestProof(requestHash: Data(repeating: 1, count: 32)))
+        XCTAssertThrowsError(try sdk.getRequestProof(requestHash: Data(repeating: 1, count: 32))) { error in
+            XCTAssertEqual((error as? TrustCoreError)?.kind, .trustTokenMissing)
+        }
+    }
+
+    func testErrorKindMapsFromFFIStatus() {
+        XCTAssertEqual(KsealErrorKind(status: -1), .invalidArgument)
+        XCTAssertEqual(KsealErrorKind(status: -2), .decodeFailed)
+        XCTAssertEqual(KsealErrorKind(status: -3), .invalidArgument)
+        XCTAssertEqual(KsealErrorKind(status: -4), .cryptoFailed)
+        XCTAssertEqual(KsealErrorKind(status: -5), .transportFailed)
+        XCTAssertEqual(KsealErrorKind(status: -6), .internalError)
     }
 
     func testRequestProofBindsTokenAndIncrementsSequence() throws {
