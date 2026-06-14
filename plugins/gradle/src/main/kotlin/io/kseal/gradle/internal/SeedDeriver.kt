@@ -31,9 +31,17 @@ internal object SeedDeriver {
         inputs.explicitSeedHex?.takeIf { it.isNotBlank() }?.let { raw ->
             val hexSeed = raw.trim()
             val expectedHexChars = Crypto.SEED_BYTES * 2
-            require(hexSeed.length == expectedHexChars && hexSeed.all(::isHexDigit)) {
+            // Report length and encoding faults distinctly: a value of the right
+            // length but with non-hex characters must not say "got N character(s)",
+            // which misleads the user into chasing a length problem they don't have.
+            require(hexSeed.length == expectedHexChars) {
                 "kseal polymorphism.explicitSeedHex must be exactly $expectedHexChars hex characters " +
                     "(a ${Crypto.SEED_BYTES}-byte seed); got ${hexSeed.length} character(s). " +
+                    "Generate one with: openssl rand -hex ${Crypto.SEED_BYTES}"
+            }
+            require(hexSeed.all(::isHexDigit)) {
+                "kseal polymorphism.explicitSeedHex contains non-hex characters; it must be " +
+                    "exactly $expectedHexChars hex characters (0-9, a-f). " +
                     "Generate one with: openssl rand -hex ${Crypto.SEED_BYTES}"
             }
             return Crypto.unhex(hexSeed)

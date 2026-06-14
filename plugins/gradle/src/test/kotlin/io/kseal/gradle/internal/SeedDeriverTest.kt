@@ -40,11 +40,16 @@ class SeedDeriverTest {
     }
 
     @Test
-    fun `explicit seed with non-hex characters is rejected`() {
+    fun `explicit seed of correct length but non-hex reports the encoding fault, not a length one`() {
+        // 64 chars (the expected length) but invalid hex: the message must point
+        // at the encoding, not claim a length problem the user doesn't have.
         val ex = assertThrows(IllegalArgumentException::class.java) {
             SeedDeriver.derive(inputs(explicit = "zz".repeat(32)))
         }
-        assertTrue(ex.message!!.contains("explicitSeedHex"))
+        assertTrue(ex.message!!.contains("explicitSeedHex"), "names the offending DSL property")
+        assertTrue(ex.message!!.contains("non-hex characters"), "calls out the encoding fault")
+        assertFalse(ex.message!!.contains("got 64 character(s)"), "must not imply the length is wrong")
+        assertTrue(ex.message!!.contains("openssl rand -hex 32"), "tells the user how to generate one")
     }
 
     @Test
