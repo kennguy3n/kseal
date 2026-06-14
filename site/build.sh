@@ -21,8 +21,12 @@ fi
 rm -rf .staging
 mkdir -p .staging/docs
 
-# Landing page (owned by site/).
+# Landing page + other site-owned Markdown (the only Markdown this dir authors).
 ln -s ../index.md .staging/index.md
+ln -s ../secure-your-app.md .staging/secure-your-app.md
+
+# Site-owned static assets (custom theme CSS, images).
+ln -s ../css .staging/css
 
 # Root docs that docs/*.md cross-link to via ../NAME.md.
 for f in PROPOSAL.md ARCHITECTURE.md PROGRESS.md; do

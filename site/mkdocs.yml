@@ -1,26 +1,83 @@
-site_name: kseal documentation
-site_description: Mobile & desktop app shielding — RASP, API attestation, build hardening, NoOps ops.
+site_name: kseal
+site_description: Mobile & desktop app shielding — build-time hardening, on-device RASP, server-authoritative API attestation, and NoOps operations for thousands of SME tenants.
+site_url: https://kennguy3n.github.io/kseal/
 docs_dir: .staging
 site_dir: build
 use_directory_urls: true
-theme:
-  name: readthedocs
-  highlightjs: true
 
 # .staging is assembled by build.sh from the canonical Markdown (symlinks, so no
 # doc body is duplicated). Links from docs/*.md to ../ARCHITECTURE.md etc. resolve
 # because build.sh mirrors the repo layout into .staging.
+theme:
+  name: material
+  language: en
+  icon:
+    logo: material/shield-lock
+    repo: fontawesome/brands/github
+  font:
+    text: Inter
+    code: JetBrains Mono
+  palette:
+    # Palette toggle: light mode (default) ↔ dark mode, persisted per visitor.
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.top
+    - navigation.tracking
+    - navigation.instant
+    - navigation.instant.progress
+    - navigation.footer
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+
+repo_url: https://github.com/kennguy3n/kseal
+repo_name: kennguy3n/kseal
+edit_uri: ""
+
+extra_css:
+  - css/kseal.css
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/kennguy3n/kseal
+      name: kseal on GitHub
+  generator: false
+
 nav:
   - Home: index.md
+  - Secure your app: secure-your-app.md
   - Getting started:
       - Project overview: project-overview.md
       - Threat model: docs/threat-model.md
   - Architecture:
       - Architecture overview: ARCHITECTURE.md
       - Design proposal: PROPOSAL.md
+  - Build hardening:
+      - Android (Gradle plugin): docs/build-hardening-android.md
+      - iOS (Xcode plugin): docs/build-hardening-ios.md
+      - Feature parity matrix: docs/feature-parity-matrix.md
   - SDK guides:
-      - Android build hardening: docs/build-hardening-android.md
-      - iOS build hardening: docs/build-hardening-ios.md
       - Desktop SDK (macOS + Windows): docs/desktop-sdk.md
       - CLI: docs/cli.md
       - Policy packs: docs/policy-packs.md
@@ -39,11 +96,14 @@ nav:
       - MASVS evidence report: docs/masvs-evidence.md
       - Android policy review: docs/android-policy-review.md
       - iOS app review: docs/ios-app-review.md
-  - Parity matrix: docs/feature-parity-matrix.md
 
 markdown_extensions:
   - admonition
   - tables
+  - attr_list
+  - md_in_html
+  - def_list
+  - footnotes
   # GitHub-compatible heading slugs so the docs' hand-written #anchor links
   # (e.g. #compliance--evidence) resolve in the rendered site.
   - toc:
@@ -51,6 +111,20 @@ markdown_extensions:
       slugify: !!python/object/apply:pymdownx.slugs.slugify
         kwds:
           case: lower
-  - fenced_code
-  - codehilite
-  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.details
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
