@@ -6,7 +6,7 @@ per-request proofs bound to a hardware-backed key; the **server** makes the
 trust decision (ALLOW / STEP_UP / DENY). Uses only Gatekeeper-safe public APIs.
 
 > A complete, runnable version lives in
-> [`examples/desktop-macos`](../../examples/desktop-macos)
+> [`examples/desktop-macos`](../../../examples/desktop-macos)
 > (`swift run kseal-desktop-quickstart`).
 
 ## Requirements
@@ -14,7 +14,7 @@ trust decision (ALLOW / STEP_UP / DENY). Uses only Gatekeeper-safe public APIs.
 - macOS **11 (Big Sur)** or newer.
 - A tenant + app provisioned on your kseal control plane (`tenantId`, `appId`).
   Seed a local dev tenant with
-  [`examples/backend-quickstart`](../../examples/backend-quickstart).
+  [`examples/backend-quickstart`](../../../examples/backend-quickstart).
 
 ## 1. Add the package
 

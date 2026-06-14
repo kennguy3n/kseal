@@ -11,7 +11,7 @@ makes the trust decision (ALLOW / STEP_UP / DENY).
   also builds cross-platform for host testing).
 - The native `kseal_ffi` library on the load path. For local/host testing point
   `KSEAL_FFI_LIBRARY` at the built `libkseal_ffi.{so,dylib,dll}`
-  (see [`scripts/build-rust-host.sh`](../../../scripts/build-rust-host.sh)).
+  (see [`scripts/build-rust-host.sh`](scripts/build-rust-host.sh)).
 - A tenant + app provisioned on your kseal control plane (`tenantId`, `appId`).
   Seed a local dev tenant with
   [`examples/backend-quickstart`](../../../examples/backend-quickstart).

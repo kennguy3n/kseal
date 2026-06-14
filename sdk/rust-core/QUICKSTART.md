@@ -17,8 +17,9 @@ the C ABI directly (a new platform binding, or a C/C++/Rust host).
 # Host shared library (for tests / desktop bindings):
 cargo build -p kseal-ffi            # → target/debug/libkseal_ffi.{so,dylib}
 
-# A convenience script stages the header + host lib for the Swift/.NET SDKs:
-../../scripts/build-rust-host.sh
+# Each platform SDK ships a convenience wrapper that runs the above and stages
+# the header + host lib into that SDK, e.g. for iOS:
+../ios/scripts/build-rust-host.sh
 ```
 
 The release profile is `panic = "abort"` + LTO + stripped, so a panic can never
