@@ -24,7 +24,12 @@ const AUDIT_PAGE_SIZE = 50;
 export const complianceKeys = {
   audit: (tenant: string, filter: unknown) =>
     ["audit", tenant, filter] as const,
-  auditActivity: (tenant: string) => ["auditActivity", tenant] as const,
+  // Nested under the ["audit", tenant] prefix (not a sibling top-level key) so
+  // that any audit-trail mutation which invalidates ["audit", tenant] — e.g.
+  // kill-switch issuance — also refreshes this probe. A sibling key like
+  // ["auditActivity", tenant] would silently escape that prefix invalidation
+  // and leave the onboarding step stale until staleTime elapsed.
+  auditActivity: (tenant: string) => ["audit", tenant, "activity"] as const,
   auditChain: (tenant: string) => ["auditChain", tenant] as const,
   dataProcessing: (tenant: string) => ["dataProcessing", tenant] as const,
   killSwitch: (tenant: string, appId: string) =>
@@ -169,8 +174,10 @@ export function useIssueKillSwitch() {
         queryKey: complianceKeys.killSwitch(tenantId, input.appId),
       });
       // A signed kill-switch change is itself an audited control-plane
-      // mutation: it appends to the audit trail and advances the chain head,
-      // so refresh both the event list and the chain verification.
+      // mutation: it appends to the audit trail and advances the chain head.
+      // This ["audit", tenantId] prefix invalidation covers the paginated
+      // event list and the onboarding activity probe (both nested under it);
+      // the chain verification is a separate top-level key, refreshed below.
       void qc.invalidateQueries({ queryKey: ["audit", tenantId] });
       void qc.invalidateQueries({
         queryKey: complianceKeys.auditChain(tenantId),

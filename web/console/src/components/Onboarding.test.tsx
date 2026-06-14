@@ -125,6 +125,27 @@ describe("Onboarding", () => {
     ).toBeInTheDocument();
   });
 
+  it("still offers a resume banner when dismissed with zero progress", async () => {
+    // A developer who dismisses the checklist before completing any step must
+    // still be able to bring it back — the resume banner is their only path
+    // (short of clearing storage), so genuine 0-progress must not be hidden.
+    localStorage.setItem(
+      `kseal.console.onboarding.${TEST_SESSION.tenantId}`,
+      JSON.stringify({ dismissed: true }),
+    );
+    const transport = buildTransport({}); // every step "not done yet"
+
+    renderWithProviders(<Onboarding />, { transport });
+
+    const resume = await screen.findByRole("button", { name: "Resume setup" });
+    expect(resume).toBeInTheDocument();
+    expect(screen.getByText("0 of 5")).toBeInTheDocument();
+    // The full checklist heading stays collapsed until the user resumes.
+    expect(
+      screen.queryByRole("heading", { name: "Secure your app" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("shows a completed state when every step is satisfied", async () => {
     const transport = buildTransport({
       appCount: 2,

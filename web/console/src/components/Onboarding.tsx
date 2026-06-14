@@ -107,14 +107,15 @@ export function Onboarding() {
   const headingId = useId();
 
   // Dismissed users never see the loading skeleton for a section they
-  // explicitly closed. Wait for live data before choosing between the slim
-  // resumable banner (mid-way) and hiding entirely (complete); render nothing
-  // until then so a stale "0 of N" count never flashes. We also hide the banner
-  // when no progress is detectable (completedCount === 0) — that way a transient
-  // all-queries-failed state can't surface a misleading "0 of N done" nudge to
-  // someone who may actually have progress.
+  // explicitly closed. Render nothing while data is still loading (so a stale
+  // "0 of N" never flashes), when everything is done (nothing to resume), or
+  // when the state is untrustworthy because every query failed with no progress
+  // detected (the `error` flag). A genuine zero-progress state (queries
+  // succeeded, nothing done yet) is NOT hidden — those users most need the
+  // resume nudge, otherwise a developer who dismisses before completing a step
+  // could never get the checklist back without clearing localStorage.
   if (dismissed) {
-    if (loading || error || allDone || completedCount === 0) return null;
+    if (loading || allDone || (error && completedCount === 0)) return null;
     return (
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-surface px-4 py-3">
         <div className="flex items-center gap-2 text-sm text-fg">
