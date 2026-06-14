@@ -76,7 +76,7 @@ data:
   {{- if .clickhouse.caSecret.name }}
   KSEAL_CLICKHOUSE_CA_FILE: {{ printf "%s/%s" (trimSuffix "/" .clickhouse.caSecret.mountPath) .clickhouse.caSecret.key | quote }}
   {{- end }}
-  {{- if .clickhouse.retentionTtlDays | toString | ne "" }}
+  {{- if and (not (kindIs "invalid" .clickhouse.retentionTtlDays)) (ne (.clickhouse.retentionTtlDays | toString) "") }}
   KSEAL_CLICKHOUSE_RETENTION_TTL_DAYS: {{ .clickhouse.retentionTtlDays | quote }}
   {{- end }}
   {{- end }}
