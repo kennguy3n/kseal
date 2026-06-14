@@ -131,6 +131,17 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      # Data-plane backends only exist under the `dataplane` profile.
+      # `required: false` means the default `docker compose up` (no profile)
+      # starts the server normally without these, but `--profile dataplane up`
+      # gates startup on their health so the server doesn't crash-loop dialing
+      # a not-yet-ready Redpanda/ClickHouse.
+      redpanda:
+        condition: service_healthy
+        required: false
+      clickhouse:
+        condition: service_healthy
+        required: false
     security_opt:
       - no-new-privileges:true
     cap_drop: ["ALL"]
