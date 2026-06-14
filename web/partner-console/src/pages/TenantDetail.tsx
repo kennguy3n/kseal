@@ -78,6 +78,17 @@ export function TenantDetailPage() {
     );
   }
 
+  // A transport-level failure (network error before fetchTenantSnapshot runs)
+  // rejects the query; surface it instead of rendering KPI zeros with no reason.
+  if (snapshotQuery.isError) {
+    return (
+      <div className="space-y-4">
+        <BackLink />
+        <ErrorNotice error={snapshotQuery.error} />
+      </div>
+    );
+  }
+
   const snapshot = snapshotQuery.data;
   const overview = snapshot?.overview;
   const trust = snapshot?.trust;

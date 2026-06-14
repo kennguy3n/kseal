@@ -49,6 +49,11 @@ export const EMPTY_FILTER: FilterState = Object.freeze({
   onlyBreaching: false,
 });
 
+/** True when `sort` differs from the default worst-first-by-health order. */
+export function isSortActive(sort: SortState): boolean {
+  return sort.key !== DEFAULT_SORT.key || sort.dir !== DEFAULT_SORT.dir;
+}
+
 /** True when `filter` would narrow the list (i.e. differs from EMPTY_FILTER). */
 export function isFilterActive(filter: FilterState): boolean {
   return (

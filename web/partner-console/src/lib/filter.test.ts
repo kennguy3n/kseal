@@ -3,8 +3,10 @@ import {
   allRegions,
   applyFilters,
   applySort,
+  DEFAULT_SORT,
   EMPTY_FILTER,
   isFilterActive,
+  isSortActive,
   type FilterState,
 } from "./filter";
 import { EMPTY_THRESHOLDS } from "./thresholds";
@@ -25,6 +27,14 @@ describe("isFilterActive", () => {
     expect(isFilterActive(filter({ bands: ["healthy"] }))).toBe(true);
     expect(isFilterActive(filter({ region: "US" }))).toBe(true);
     expect(isFilterActive(filter({ onlyBreaching: true }))).toBe(true);
+  });
+});
+
+describe("isSortActive", () => {
+  it("is false for the default sort and true once changed", () => {
+    expect(isSortActive(DEFAULT_SORT)).toBe(false);
+    expect(isSortActive({ key: "apps", dir: "asc" })).toBe(true);
+    expect(isSortActive({ key: DEFAULT_SORT.key, dir: "desc" })).toBe(true);
   });
 });
 

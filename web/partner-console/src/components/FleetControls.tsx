@@ -1,6 +1,6 @@
 import { useEffect, useId, useState } from "react";
 import type { HealthBand, FleetRollup } from "../lib/rollup";
-import { isFilterActive, type FilterState } from "../lib/filter";
+import { isFilterActive, isSortActive, type FilterState } from "../lib/filter";
 import { hasActiveThresholds } from "../lib/thresholds";
 import { healthBandLabel, healthBandTone } from "../lib/health";
 import type { SavedView } from "../lib/views";
@@ -22,13 +22,15 @@ export function FleetControls({
   rollup: FleetRollup;
   regions: readonly string[];
 }) {
-  const { filter, thresholds, setFilter, setThresholds } = view;
+  const { filter, sort, thresholds, setFilter, setThresholds } = view;
   const searchId = useId();
   const regionId = useId();
   // Show Reset whenever there is non-default state to clear: an active filter,
-  // or any threshold set (even with zero current breaches, so the operator can
-  // always clear thresholds they configured).
-  const active = isFilterActive(filter) || hasActiveThresholds(thresholds);
+  // any threshold set (even with zero current breaches, so the operator can
+  // always clear thresholds they configured), or a non-default sort — since
+  // resetView restores the default sort too, Reset must be reachable for it.
+  const active =
+    isFilterActive(filter) || hasActiveThresholds(thresholds) || isSortActive(sort);
 
   const patch = (p: Partial<FilterState>) => setFilter({ ...filter, ...p });
 
