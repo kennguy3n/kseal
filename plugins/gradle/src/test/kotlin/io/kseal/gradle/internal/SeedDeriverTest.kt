@@ -3,6 +3,8 @@ package io.kseal.gradle.internal
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class SeedDeriverTest {
@@ -19,6 +21,30 @@ class SeedDeriverTest {
     fun `explicit seed is used verbatim`() {
         val hex = "ab".repeat(32)
         assertArrayEquals(Crypto.unhex(hex), SeedDeriver.derive(inputs(explicit = hex)))
+    }
+
+    @Test
+    fun `explicit seed tolerates surrounding whitespace and mixed case`() {
+        val hex = "Ab".repeat(32)
+        assertArrayEquals(Crypto.unhex(hex.lowercase()), SeedDeriver.derive(inputs(explicit = "  $hex\n")))
+    }
+
+    @Test
+    fun `explicit seed of the wrong length fails with an actionable message`() {
+        val ex = assertThrows(IllegalArgumentException::class.java) {
+            SeedDeriver.derive(inputs(explicit = "abcd"))
+        }
+        assertTrue(ex.message!!.contains("explicitSeedHex"), "names the offending DSL property")
+        assertTrue(ex.message!!.contains("64 hex characters"), "states the expected length")
+        assertTrue(ex.message!!.contains("openssl rand -hex 32"), "tells the user how to generate one")
+    }
+
+    @Test
+    fun `explicit seed with non-hex characters is rejected`() {
+        val ex = assertThrows(IllegalArgumentException::class.java) {
+            SeedDeriver.derive(inputs(explicit = "zz".repeat(32)))
+        }
+        assertTrue(ex.message!!.contains("explicitSeedHex"))
     }
 
     @Test

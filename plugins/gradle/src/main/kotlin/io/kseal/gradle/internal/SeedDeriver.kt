@@ -28,12 +28,15 @@ internal object SeedDeriver {
     )
 
     fun derive(inputs: Inputs): ByteArray {
-        inputs.explicitSeedHex?.takeIf { it.isNotBlank() }?.let { hexSeed ->
-            val seed = Crypto.unhex(hexSeed.trim())
-            require(seed.size == Crypto.SEED_BYTES) {
-                "kseal polymorphism seed must be ${Crypto.SEED_BYTES} bytes (${Crypto.SEED_BYTES * 2} hex chars)"
+        inputs.explicitSeedHex?.takeIf { it.isNotBlank() }?.let { raw ->
+            val hexSeed = raw.trim()
+            val expectedHexChars = Crypto.SEED_BYTES * 2
+            require(hexSeed.length == expectedHexChars && hexSeed.all(::isHexDigit)) {
+                "kseal polymorphism.explicitSeedHex must be exactly $expectedHexChars hex characters " +
+                    "(a ${Crypto.SEED_BYTES}-byte seed); got ${hexSeed.length} character(s). " +
+                    "Generate one with: openssl rand -hex ${Crypto.SEED_BYTES}"
             }
-            return seed
+            return Crypto.unhex(hexSeed)
         }
         if (inputs.randomize) return Crypto.randomSeed()
 
@@ -47,4 +50,6 @@ internal object SeedDeriver {
             length = Crypto.SEED_BYTES,
         )
     }
+
+    private fun isHexDigit(c: Char): Boolean = c in '0'..'9' || c in 'a'..'f' || c in 'A'..'F'
 }

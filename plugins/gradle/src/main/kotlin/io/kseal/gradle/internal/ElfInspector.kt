@@ -303,7 +303,8 @@ internal object ElfInspector {
         val shoff: Long
         val shentsize: Int
         val shnum: Int
-        val shstrndx: Int
+        // Sections are matched by their `sh_type` (DYNSYM/SYMTAB/NOTE/…), not by
+        // name, so the section-header string table index (e_shstrndx) is not read.
         if (is64) {
             phoff = buf.getLong(32)
             shoff = buf.getLong(40)
@@ -311,7 +312,6 @@ internal object ElfInspector {
             phnum = buf.getShort(56).toInt() and 0xffff
             shentsize = buf.getShort(58).toInt() and 0xffff
             shnum = buf.getShort(60).toInt() and 0xffff
-            shstrndx = buf.getShort(62).toInt() and 0xffff
         } else {
             phoff = buf.getInt(28).toLong() and 0xffffffffL
             shoff = buf.getInt(32).toLong() and 0xffffffffL
@@ -319,7 +319,6 @@ internal object ElfInspector {
             phnum = buf.getShort(44).toInt() and 0xffff
             shentsize = buf.getShort(46).toInt() and 0xffff
             shnum = buf.getShort(48).toInt() and 0xffff
-            shstrndx = buf.getShort(50).toInt() and 0xffff
         }
 
         val segments = readProgramHeaders(buf, bytes.size, phoff, phentsize, phnum, is64)
@@ -337,7 +336,6 @@ internal object ElfInspector {
         val sections = (0 until shnum).map { idx ->
             readSection(buf, bytes.size, shoff + idx.toLong() * shentsize, is64)
         }
-        val shstr = sections.getOrNull(shstrndx)
 
         var hasCfi = false
         var memtag: Int? = null

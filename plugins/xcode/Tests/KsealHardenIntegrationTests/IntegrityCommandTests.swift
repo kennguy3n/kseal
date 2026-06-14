@@ -88,6 +88,31 @@ final class IntegrityCommandTests: XCTestCase {
         XCTAssertEqual(reBaked.transforms.filter { $0.kind == "macho-binary-posture" }.count, 1)
     }
 
+    /// An explicitly supplied but invalid `--build-seed` must fail loudly with an
+    /// actionable message rather than silently downgrading to a random,
+    /// non-reproducible seed.
+    func testGenerateRejectsInvalidExplicitSeed() throws {
+        let cli = try locateCLI()
+        let scratch = FileManager.default.temporaryDirectory
+            .appendingPathComponent("kseal-seed-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: scratch) }
+
+        let result = try run(cli, [
+            "generate",
+            "--target", "Demo",
+            "--out-strings", scratch.appendingPathComponent("strings.swift").path,
+            "--out-manifest", scratch.appendingPathComponent("manifest.json").path,
+            "--build-seed", "not-a-valid-hex-seed",
+        ])
+
+        XCTAssertEqual(result.exitCode, 2, "an invalid pinned seed must fail the build")
+        XCTAssertTrue(result.standardError.contains("--build-seed"), "error names the offending flag")
+        XCTAssertTrue(result.standardError.contains("openssl rand -hex 32"), "error tells the user how to generate one")
+        // It must not have written a manifest from a silently-randomized seed.
+        XCTAssertFalse(FileManager.default.fileExists(atPath: scratch.appendingPathComponent("manifest.json").path))
+    }
+
     // MARK: - helpers
 
     private func locateCLI() throws -> URL {
