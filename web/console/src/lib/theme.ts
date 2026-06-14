@@ -1,14 +1,15 @@
-import { useCallback, useEffect, useState } from "react";
+import { createContext, useContext } from "react";
 
 // Color theme handling. The active theme is persisted in localStorage and
 // applied as a `.dark` class on <html> (Tailwind's class-based dark mode). An
 // inline script in index.html applies the same precedence before first paint
-// to avoid a flash; this hook keeps the toggle and any cross-tab changes in
-// sync at runtime.
+// to avoid a flash. The single source of truth at runtime is ThemeProvider
+// (see ThemeProvider.tsx): every consumer shares one piece of state, and a
+// `storage` listener keeps other tabs in sync.
 
 export type Theme = "light" | "dark";
 
-const STORAGE_KEY = "kseal.console.theme";
+export const THEME_STORAGE_KEY = "kseal.console.theme";
 
 function systemPrefersDark(): boolean {
   return (
@@ -22,7 +23,7 @@ function systemPrefersDark(): boolean {
 // back to the OS preference (and finally light).
 export function resolveInitialTheme(): Theme {
   try {
-    const stored = localStorage.getItem(STORAGE_KEY);
+    const stored = localStorage.getItem(THEME_STORAGE_KEY);
     if (stored === "light" || stored === "dark") return stored;
   } catch {
     /* localStorage unavailable (private mode, SSR) — fall through. */
@@ -35,22 +36,17 @@ export function applyTheme(theme: Theme): void {
   document.documentElement.classList.toggle("dark", theme === "dark");
 }
 
-export function useTheme(): { theme: Theme; toggleTheme: () => void } {
-  const [theme, setTheme] = useState<Theme>(resolveInitialTheme);
+export interface ThemeContextValue {
+  theme: Theme;
+  toggleTheme: () => void;
+}
 
-  // Keep the DOM class and persisted value in step with state.
-  useEffect(() => {
-    applyTheme(theme);
-    try {
-      localStorage.setItem(STORAGE_KEY, theme);
-    } catch {
-      /* ignore persistence failures */
-    }
-  }, [theme]);
+export const ThemeContext = createContext<ThemeContextValue | null>(null);
 
-  const toggleTheme = useCallback(() => {
-    setTheme((t) => (t === "dark" ? "light" : "dark"));
-  }, []);
-
-  return { theme, toggleTheme };
+export function useTheme(): ThemeContextValue {
+  const ctx = useContext(ThemeContext);
+  if (!ctx) {
+    throw new Error("useTheme must be used within a ThemeProvider");
+  }
+  return ctx;
 }

@@ -14,16 +14,22 @@
     <script src="/env.js"></script>
     <!--
       Apply the persisted (or OS-preferred) color theme before first paint to
-      avoid a light/dark flash. Mirrors the precedence in src/lib/theme.ts.
+      avoid a light/dark flash. Mirrors resolveInitialTheme() in
+      src/lib/theme.tsx: an explicit "light"/"dark" choice wins, any other
+      value falls through to the OS preference.
     -->
     <script>
       (function () {
         try {
           var stored = localStorage.getItem("kseal.console.theme");
-          var prefersDark =
-            window.matchMedia &&
-            window.matchMedia("(prefers-color-scheme: dark)").matches;
-          var dark = stored ? stored === "dark" : prefersDark;
+          var dark;
+          if (stored === "light" || stored === "dark") {
+            dark = stored === "dark";
+          } else {
+            dark =
+              window.matchMedia &&
+              window.matchMedia("(prefers-color-scheme: dark)").matches;
+          }
           document.documentElement.classList.toggle("dark", dark);
         } catch (e) {
           /* localStorage may be unavailable; default to light. */

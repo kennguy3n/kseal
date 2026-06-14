@@ -12,7 +12,6 @@ import {
   EmptyState,
   PageHeader,
   SkeletonRows,
-  SkeletonStat,
 } from "../components/ui";
 import { Onboarding } from "../components/Onboarding";
 import {
@@ -43,41 +42,30 @@ export function DashboardPage() {
       <Onboarding />
 
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-        {overview.isLoading ? (
-          <>
-            <SkeletonStat />
-            <SkeletonStat />
-            <SkeletonStat />
-            <SkeletonStat />
-          </>
-        ) : (
-          <>
-            <Stat
-              label="Apps"
-              value={overview.data ? overview.data.appCount : "—"}
-              hint="Mobile or desktop apps registered to this tenant."
-            />
-            <Stat
-              label="Webhooks"
-              value={overview.data ? overview.data.webhookCount : "—"}
-              hint="Endpoints receiving signed event deliveries."
-            />
-            <Stat
-              label="Events (24h)"
-              value={
-                overview.data ? Number(overview.data.eventsLast24h) : "—"
-              }
-              hint="Risk and policy-decision events in the last 24 hours."
-            />
-            <Stat
-              label="Trust sessions"
-              value={
-                stats.data ? Number(stats.data.totalSessions) : "—"
-              }
-              hint="Devices that completed attestation and were issued a trust token."
-            />
-          </>
-        )}
+        <Stat
+          label="Apps"
+          loading={overview.isLoading}
+          value={overview.data ? overview.data.appCount : "—"}
+          hint="Mobile or desktop apps registered to this tenant."
+        />
+        <Stat
+          label="Webhooks"
+          loading={overview.isLoading}
+          value={overview.data ? overview.data.webhookCount : "—"}
+          hint="Endpoints receiving signed event deliveries."
+        />
+        <Stat
+          label="Events (24h)"
+          loading={overview.isLoading}
+          value={overview.data ? Number(overview.data.eventsLast24h) : "—"}
+          hint="Risk and policy-decision events in the last 24 hours."
+        />
+        <Stat
+          label="Trust sessions"
+          loading={stats.isLoading}
+          value={stats.data ? Number(stats.data.totalSessions) : "—"}
+          hint="Devices that completed attestation and were issued a trust token."
+        />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">

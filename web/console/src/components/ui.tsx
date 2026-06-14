@@ -71,11 +71,16 @@ export function Stat({
   label,
   value,
   hint,
+  loading = false,
 }: {
   label: string;
   value: ReactNode;
   hint?: ReactNode;
+  // When the value's own query is still loading, show a placeholder for this
+  // card instead of a stale dash — each stat tracks its own source query.
+  loading?: boolean;
 }) {
+  if (loading) return <SkeletonStat />;
   return (
     <div className="card">
       <div className="flex items-center gap-1.5 text-xs uppercase tracking-wide text-fg-muted">

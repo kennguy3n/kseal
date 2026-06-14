@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { applyTheme, resolveInitialTheme, useTheme } from "./theme";
+import { ThemeProvider } from "./ThemeProvider";
+
+function wrapper({ children }: { children: ReactNode }) {
+  return <ThemeProvider>{children}</ThemeProvider>;
+}
 
 const STORAGE_KEY = "kseal.console.theme";
 
@@ -46,7 +52,7 @@ describe("theme", () => {
 
   it("useTheme persists the toggled value and updates the DOM", () => {
     stubMatchMedia(false);
-    const { result } = renderHook(() => useTheme());
+    const { result } = renderHook(() => useTheme(), { wrapper });
     expect(result.current.theme).toBe("light");
 
     act(() => result.current.toggleTheme());
@@ -54,5 +60,22 @@ describe("theme", () => {
     expect(result.current.theme).toBe("dark");
     expect(document.documentElement.classList.contains("dark")).toBe(true);
     expect(localStorage.getItem(STORAGE_KEY)).toBe("dark");
+  });
+
+  it("syncs the theme across tabs via the storage event", () => {
+    stubMatchMedia(false);
+    const { result } = renderHook(() => useTheme(), { wrapper });
+    expect(result.current.theme).toBe("light");
+
+    // Simulate another tab writing "dark" to localStorage.
+    act(() => {
+      localStorage.setItem(STORAGE_KEY, "dark");
+      window.dispatchEvent(
+        new StorageEvent("storage", { key: STORAGE_KEY, newValue: "dark" }),
+      );
+    });
+
+    expect(result.current.theme).toBe("dark");
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
   });
 });

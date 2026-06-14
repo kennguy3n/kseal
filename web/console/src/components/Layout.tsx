@@ -133,12 +133,17 @@ export function Layout() {
   // wire Escape to close — basic dialog focus management.
   useEffect(() => {
     if (!mobileOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
     closeButtonRef.current?.focus();
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") setMobileOpen(false);
     }
     document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", onKey);
+    };
   }, [mobileOpen]);
 
   return (
@@ -189,7 +194,7 @@ export function Layout() {
               onClick={() => setMobileOpen(true)}
               aria-label="Open navigation menu"
               aria-expanded={mobileOpen}
-              aria-controls="mobile-nav"
+              aria-controls={mobileOpen ? "mobile-nav" : undefined}
               className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-line-strong text-fg hover:bg-elevated"
             >
               <MenuIcon className="h-5 w-5" />
