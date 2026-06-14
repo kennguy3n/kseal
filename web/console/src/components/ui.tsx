@@ -94,9 +94,9 @@ export function LoadMore({
   );
 }
 
-// Graceful-degradation state for console-local RPCs that the server has not
-// deployed yet (returns UNIMPLEMENTED/UNAVAILABLE). Distinct from ErrorNotice:
-// this is an expected, non-alarming "coming soon" state, not a failure.
+// Graceful-degradation state for a ComplianceService RPC that the connected
+// server build does not expose yet (returns UNIMPLEMENTED/UNAVAILABLE). Distinct
+// from ErrorNotice: this is an expected, non-alarming "coming soon" state.
 export function UnavailableNotice({
   feature,
   children,

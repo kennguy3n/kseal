@@ -65,19 +65,20 @@ defined in the canonical `//proto/kseal/v1/query.proto` +
 keyset-paginated queries. The pages render real data; a thin `ErrorNotice`
 fallback covers transient RPC failures.
 
-### Compliance & ops surface — console-local RPCs
+### Compliance & ops surface — canonical `ComplianceService`
 
-The audit-trail, data-processing-registry, kill-switch and canary views read
-from RPCs being added to the canonical server by another component. Until they
-land, the console talks to them through a **console-local** proto module
-(`proto-local/kseal/consolelocal/v1/`, package `kseal.consolelocal.v1`)
-generated into `src/gen-local/` via `npm run proto:gen:local`, and **degrades
-gracefully** — rendering a "not available yet" state on
-`UNIMPLEMENTED`/`UNAVAILABLE` (`src/lib/availability.ts`). The MASVS-evidence
-view needs no new RPC: it is derived client-side from `RegistryService`
-build manifests (`src/lib/masvs.ts`). See
+The audit-trail, data-processing-registry, kill-switch and canary views read the
+canonical `ComplianceService` (`//proto/kseal/v1/compliance.proto` +
+`compliance_service.proto`), generated into `src/gen/` by `npm run proto:gen`.
+Each view still **degrades gracefully** — rendering a "not available yet" state
+on `UNIMPLEMENTED`/`UNAVAILABLE` (`src/lib/availability.ts`) — so a server build
+that predates the service does not error the console. Audit-chain integrity is
+verified through the dedicated `VerifyAuditChain` RPC; kill-switch issuance is a
+signed control-plane op (the console requests it, the server signs with Ed25519).
+The MASVS-evidence view needs no RPC: it is derived client-side from
+`RegistryService` build manifests (`src/lib/masvs.ts`). See
 [`docs/compliance-console.md`](../../docs/compliance-console.md) for the full
-design and the migration path to the canonical client.
+design.
 
 ### Pagination
 

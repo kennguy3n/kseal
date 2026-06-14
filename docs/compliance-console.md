@@ -27,55 +27,47 @@ cache keys are tenant-scoped, so caches never bleed across the tenant boundary.
 
 Two classes of data back these views:
 
-1. **Canonical, available today.** The **MASVS evidence** view is computed
-   entirely client-side from `RegistryService.ListBuilds` build manifests — the
-   same derivation the CLI report generator does
-   (`cmd/kseal-cli/internal/cli/masvs.go`), ported in `src/lib/masvs.ts`. No new
-   server capability is required; it works against `main`.
+1. **Derived client-side.** The **MASVS evidence** view is computed entirely
+   client-side from `RegistryService.ListBuilds` build manifests — the same
+   derivation the CLI report generator does
+   (`cmd/kseal-cli/internal/cli/masvs.go`), ported in `src/lib/masvs.ts`. No
+   compliance RPC is required.
 
-2. **Console-local RPCs (graceful degradation).** The **audit trail**,
-   **data-processing registry**, **kill switch** and **canary monitor** read
-   from RPCs that are being added to the canonical server by WS-K. Until those
-   land, the console talks to them through a **console-local generated client**
-   and renders a clean *"not available yet"* state when the server returns
-   `UNIMPLEMENTED`/`UNAVAILABLE`.
+2. **Canonical `ComplianceService` (graceful degradation).** The **audit
+   trail**, **data-processing registry**, **kill switch** and **canary monitor**
+   read the canonical `kseal.v1.ComplianceService`
+   (`//proto/kseal/v1/compliance.proto` + `compliance_service.proto`). A server
+   build that predates the service returns `UNIMPLEMENTED`/`UNAVAILABLE`, which
+   each view renders as a clean *"not available yet"* state rather than an error.
 
-### Console-local proto client
+### Canonical compliance client
 
-Because the canonical `//proto` module is owned by another component and must
-not be modified here, the console-local RPCs live in their own module under
-`web/console/`:
+The console consumes the generated `ComplianceService` client from `src/gen/`,
+produced by the standard `npm run proto:gen` against the canonical `//proto`
+module — there is no console-local proto module. Notable shape mappings the
+views/hooks (`src/hooks/compliance.ts`) apply:
 
-```
-web/console/
-  proto-local/kseal/consolelocal/v1/compliance.proto   # source of truth (local)
-  buf.gen.local.yaml                                    # codegen template
-  scripts/gen-proto-local.sh                            # npm run proto:gen:local
-  src/gen-local/…                                       # committed generated client
-```
-
-- The package is `kseal.consolelocal.v1` (deliberately distinct from `kseal.v1`)
-  so generated symbols never collide with the canonical client in `src/gen/`.
-- Generation is fully separate from the canonical `npm run proto:gen` (which
-  uses `clean: true` on `src/gen`), so regenerating one never clobbers the other.
-- `src/gen-local/` is committed, mirroring `src/gen/`, so the Docker build
-  (context = `web/console/` only) needs no proto access.
+- Audit events use canonical field names (`seq`, `created_at`, `actor_key_id`,
+  `hash`, `prev_hash`); chain integrity is verified through the dedicated
+  `VerifyAuditChain` RPC rather than a per-page flag.
+- The data-processing registry is unpaginated (`GetDataProcessingRegistry`);
+  app filtering is applied client-side.
+- Kill-switch state is a `KillSwitchCommand` enum (`ENABLE`/`DISABLE`); issuance
+  is the signed `IssueKillSwitch` control-plane RPC.
+- Canary status is a single `GetCanaryStatus` per app (`NotFound` ⇒ no rollout),
+  with a `CanaryState` enum (`ACTIVE`/`PROMOTED`/`ROLLED_BACK`).
 
 Detection of the degraded state is centralized in `src/lib/availability.ts`
 (`isUnavailableError`, `retryUnlessUnavailable`); the
 [`UnavailableNotice`](../web/console/src/components/ui.tsx) component renders it.
 
-**Migration:** once WS-K's RPCs merge into the canonical module, the parent
-re-points these hooks at the canonical `src/gen` client and deletes
-`proto-local/` + `src/gen-local/`. The view code does not change.
-
 ## Views
 
 ### Audit trail (`/audit`)
 - Tenant-scoped, newest-first, keyset-paginated (`Load more`).
-- Filters: actor, resource type, action keys (comma-separated), time range.
+- Filters: action, resource type, time range.
 - Renders the per-entry chain hash and surfaces a **chain-verification warning**
-  when the server reports a broken link (`chain_verified=false`), so tampering is
+  when `VerifyAuditChain` reports a broken link (`intact=false`), so tampering is
   visible rather than silent.
 - Metadata is rendered as a deterministic, sorted `key=value` list — only the
   small non-PII context map the server returns.
@@ -93,8 +85,8 @@ re-points these hooks at the canonical `src/gen` client and deletes
   generator semantics).
 
 ### Kill switch (`/kill-switch`)
-- Shows the current signed state (armed/disabled), who changed it, when, the
-  signing key id, and the recorded reason.
+- Shows the current effective command (armed/disabled), the active signed
+  record's version, signing key id, and recorded reason.
 - A change is a **two-step, fail-safe action**: the operator must enter a reason
   and explicitly confirm before a signed change is requested. The console only
   *requests* the change — **all signing and authority are server-side** (WS-K).
@@ -102,9 +94,9 @@ re-points these hooks at the canonical `src/gen` client and deletes
   (the change is itself an audited mutation).
 
 ### Canary monitor (`/canary`)
-- Lists staged rollouts with rollout percentage (visualized), cohort health,
-  auto-rollback armed/triggered status, canary vs. baseline error rate, cohort
-  size, and the rollback reason when auto-rolled back.
+- Shows the staged rollout for the selected scope: rollout percentage
+  (visualized), `CanaryState` (active/promoted/rolled back), block rate vs.
+  rollback threshold, sample count, and the last event when auto-rolled back.
 
 ## Privacy & security
 
@@ -124,7 +116,7 @@ Each view has component tests (`src/pages/*.test.tsx`) driven by an in-memory
 Connect router transport (`createRouterTransport`), plus unit tests for the
 MASVS derivation (`src/lib/masvs.test.ts`) and the availability helpers
 (`src/lib/availability.test.ts`). The graceful-degradation path is covered by
-asserting the *"not available yet"* state when the console-local service is
+asserting the *"not available yet"* state when `ComplianceService` is
 unregistered (i.e. the server returns `UNIMPLEMENTED`).
 
 ```bash
@@ -132,5 +124,5 @@ cd web/console
 npm install
 npm run lint
 npm test
-npm run proto:gen:local   # regenerate the console-local client (needs buf)
+npm run proto:gen   # regenerate the canonical client (needs buf)
 ```

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useAuditEvents } from "../hooks/compliance";
+import { useAuditEvents, useVerifyAuditChain } from "../hooks/compliance";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import {
   Badge,
@@ -27,51 +27,36 @@ function formatMetadata(metadata: Record<string, string>): string {
 }
 
 export function AuditTrailPage() {
-  const [actorInput, setActorInput] = useState("");
+  const [actionInput, setActionInput] = useState("");
   const [resourceType, setResourceType] = useState("");
-  const [actionsInput, setActionsInput] = useState("");
   const [startLocal, setStartLocal] = useState("");
   const [endLocal, setEndLocal] = useState("");
 
   // Debounce the free-text filters so typing coalesces into a single query
   // instead of firing a request per keystroke. Date pickers change discretely,
   // so they drive the query directly.
-  const actorQuery = useDebouncedValue(actorInput);
+  const actionQuery = useDebouncedValue(actionInput);
   const resourceQuery = useDebouncedValue(resourceType);
-  const actionsQuery = useDebouncedValue(actionsInput);
-
-  const actions = useMemo(
-    () =>
-      actionsQuery
-        .split(",")
-        .map((a) => a.trim())
-        .filter((a) => a.length > 0),
-    [actionsQuery],
-  );
 
   const audit = useAuditEvents({
-    actor: actorQuery.trim() || undefined,
+    action: actionQuery.trim() || undefined,
     resourceType: resourceQuery.trim() || undefined,
-    actions: actions.length > 0 ? actions : undefined,
     startTime: toMillis(startLocal),
     endTime: toMillis(endLocal),
   });
+  const chain = useVerifyAuditChain();
 
   const events = useMemo(
     () => audit.data?.pages.flatMap((p) => p.events) ?? [],
     [audit.data],
   );
-  // The server reports chain verification per page; surface a warning if ANY
-  // returned page failed verification.
-  const chainBreak = useMemo(
-    () => audit.data?.pages.find((p) => !p.chainVerified),
-    [audit.data],
-  );
+  // The dedicated VerifyAuditChain RPC recomputes the whole tenant chain; warn
+  // if it is not intact (an insertion, deletion, or edit was detected).
+  const chainBroken = chain.data && !chain.data.intact ? chain.data : null;
 
   const hasFilters =
-    Boolean(actorInput) ||
+    Boolean(actionInput) ||
     Boolean(resourceType) ||
-    actions.length > 0 ||
     Boolean(startLocal) ||
     Boolean(endLocal);
 
@@ -88,15 +73,15 @@ export function AuditTrailPage() {
       <Card title="Filters">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <div>
-            <label htmlFor="auditActor" className="label">
-              Actor
+            <label htmlFor="auditAction" className="label">
+              Action
             </label>
             <input
-              id="auditActor"
+              id="auditAction"
               className="input"
-              placeholder="operator or service id"
-              value={actorInput}
-              onChange={(e) => setActorInput(e.target.value)}
+              placeholder="e.g. policy.activate"
+              value={actionInput}
+              onChange={(e) => setActionInput(e.target.value)}
             />
           </div>
           <div>
@@ -106,21 +91,9 @@ export function AuditTrailPage() {
             <input
               id="auditResource"
               className="input"
-              placeholder="policy, killswitch, app…"
+              placeholder="policy, kill_switch, app…"
               value={resourceType}
               onChange={(e) => setResourceType(e.target.value)}
-            />
-          </div>
-          <div>
-            <label htmlFor="auditActions" className="label">
-              Actions
-            </label>
-            <input
-              id="auditActions"
-              className="input"
-              placeholder="comma-separated, e.g. policy.activate"
-              value={actionsInput}
-              onChange={(e) => setActionsInput(e.target.value)}
             />
           </div>
           <div>
@@ -153,9 +126,8 @@ export function AuditTrailPage() {
             type="button"
             className="btn-ghost mt-4"
             onClick={() => {
-              setActorInput("");
+              setActionInput("");
               setResourceType("");
-              setActionsInput("");
               setStartLocal("");
               setEndLocal("");
             }}
@@ -165,14 +137,16 @@ export function AuditTrailPage() {
         )}
       </Card>
 
-      {chainBreak && (
+      {chainBroken && (
         <div
           role="alert"
           className="rounded-lg border border-rose-700/50 bg-rose-900/20 p-4 text-sm text-rose-200"
         >
           Audit chain verification failed
-          {chainBreak.chainError ? `: ${chainBreak.chainError}` : ""}. Entries
-          below may have been tampered with.
+          {chainBroken.brokenSeq > 0n
+            ? ` at sequence ${chainBroken.brokenSeq.toString()}`
+            : ""}
+          . Entries may have been tampered with.
         </div>
       )}
 
@@ -208,14 +182,19 @@ export function AuditTrailPage() {
                 </thead>
                 <tbody>
                   {events.map((e) => (
-                    <tr key={e.id} className="border-b border-slate-800/60">
+                    <tr
+                      key={e.seq.toString()}
+                      className="border-b border-slate-800/60"
+                    >
                       <td className="td font-mono text-xs text-slate-500">
-                        {e.sequence.toString()}
+                        {e.seq.toString()}
                       </td>
                       <td className="td font-mono text-xs text-slate-400">
-                        {formatTimestamp(e.timestamp)}
+                        {formatTimestamp(e.createdAt)}
                       </td>
-                      <td className="td text-slate-300">{e.actor || "—"}</td>
+                      <td className="td text-slate-300">
+                        {e.actorKeyId || "—"}
+                      </td>
                       <td className="td">
                         <Badge>{e.action || "—"}</Badge>
                       </td>
@@ -233,9 +212,9 @@ export function AuditTrailPage() {
                       </td>
                       <td
                         className="td font-mono text-xs text-slate-500"
-                        title={e.entryHash}
+                        title={e.hash}
                       >
-                        {e.entryHash ? `${e.entryHash.slice(0, 12)}…` : "—"}
+                        {e.hash ? `${e.hash.slice(0, 12)}…` : "—"}
                       </td>
                     </tr>
                   ))}

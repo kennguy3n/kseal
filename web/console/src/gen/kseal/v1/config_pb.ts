@@ -6,30 +6,42 @@ import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import type { EnforcementMode, Platform } from "./common_pb.js";
 import { file_kseal_v1_common } from "./common_pb.js";
+import type { SignedKillSwitch } from "./compliance_pb.js";
+import { file_kseal_v1_compliance } from "./compliance_pb.js";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file kseal/v1/config.proto.
  */
 export const file_kseal_v1_config: GenFile = /*@__PURE__*/
-  fileDesc("ChVrc2VhbC92MS9jb25maWcucHJvdG8SCGtzZWFsLnYxIm0KDFNpZ25lZENvbmZpZxIUCgxjb25maWdfYnl0ZXMYASABKAwSEQoJc2lnbmF0dXJlGAIgASgMEg4KBmtleV9pZBgDIAEoCRIPCgd2ZXJzaW9uGAQgASgDEhMKC3R0bF9zZWNvbmRzGAUgASgDIn4KClBvbGljeVJ1bGUSCgoCaWQYASABKAkSEQoJcmlza19tYXNrGAIgASgEEhEKCW1pbl9zY29yZRgDIAEoDRIpCgZhY3Rpb24YBCABKA4yGS5rc2VhbC52MS5FbmZvcmNlbWVudE1vZGUSEwoLZGVzY3JpcHRpb24YBSABKAkihwMKDFBvbGljeUNvbmZpZxIjCgVydWxlcxgBIAMoCzIULmtzZWFsLnYxLlBvbGljeVJ1bGUSQwoPcmlza190aHJlc2hvbGRzGAIgAygLMioua3NlYWwudjEuUG9saWN5Q29uZmlnLlJpc2tUaHJlc2hvbGRzRW50cnkSLwoMZGVmYXVsdF9tb2RlGAMgASgOMhkua3NlYWwudjEuRW5mb3JjZW1lbnRNb2RlEhcKD21vZHVsZXNfZW5hYmxlZBgEIAMoCRJBCg5zaWduYWxfd2VpZ2h0cxgFIAMoCzIpLmtzZWFsLnYxLlBvbGljeUNvbmZpZy5TaWduYWxXZWlnaHRzRW50cnkSEwoLcG9saWN5X2hhc2gYBiABKAkaNQoTUmlza1RocmVzaG9sZHNFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKA06AjgBGjQKElNpZ25hbFdlaWdodHNFbnRyeRILCgNrZXkYASABKA0SDQoFdmFsdWUYAiABKA06AjgBIm0KDUNvbmZpZ1JlcXVlc3QSEQoJdGVuYW50X2lkGAEgASgJEg4KBmFwcF9pZBgCIAEoCRIkCghwbGF0Zm9ybRgDIAEoDjISLmtzZWFsLnYxLlBsYXRmb3JtEhMKC3Nka192ZXJzaW9uGAQgASgJIl0KDkNvbmZpZ1Jlc3BvbnNlEiYKBmNvbmZpZxgBIAEoCzIWLmtzZWFsLnYxLlNpZ25lZENvbmZpZxIMCgRldGFnGAIgASgJEhUKDWxhc3RfbW9kaWZpZWQYAyABKAMiMgoNUG9saWN5UmVxdWVzdBIRCgl0ZW5hbnRfaWQYASABKAkSDgoGYXBwX2lkGAIgASgJIjgKDlBvbGljeVJlc3BvbnNlEiYKBnBvbGljeRgBIAEoCzIWLmtzZWFsLnYxLlBvbGljeUNvbmZpZ0I4WjZnaXRodWIuY29tL2tlbm5ndXkzbi9rc2VhbC9zZXJ2ZXIvZ2VuL2tzZWFsL3YxO2tzZWFsdjFiBnByb3RvMw", [file_kseal_v1_common]);
+  fileDesc("ChVrc2VhbC92MS9jb25maWcucHJvdG8SCGtzZWFsLnYxIm0KDFNpZ25lZENvbmZpZxIUCgxjb25maWdfYnl0ZXMYASABKAwSEQoJc2lnbmF0dXJlGAIgASgMEg4KBmtleV9pZBgDIAEoCRIPCgd2ZXJzaW9uGAQgASgDEhMKC3R0bF9zZWNvbmRzGAUgASgDIn4KClBvbGljeVJ1bGUSCgoCaWQYASABKAkSEQoJcmlza19tYXNrGAIgASgEEhEKCW1pbl9zY29yZRgDIAEoDRIpCgZhY3Rpb24YBCABKA4yGS5rc2VhbC52MS5FbmZvcmNlbWVudE1vZGUSEwoLZGVzY3JpcHRpb24YBSABKAkihwMKDFBvbGljeUNvbmZpZxIjCgVydWxlcxgBIAMoCzIULmtzZWFsLnYxLlBvbGljeVJ1bGUSQwoPcmlza190aHJlc2hvbGRzGAIgAygLMioua3NlYWwudjEuUG9saWN5Q29uZmlnLlJpc2tUaHJlc2hvbGRzRW50cnkSLwoMZGVmYXVsdF9tb2RlGAMgASgOMhkua3NlYWwudjEuRW5mb3JjZW1lbnRNb2RlEhcKD21vZHVsZXNfZW5hYmxlZBgEIAMoCRJBCg5zaWduYWxfd2VpZ2h0cxgFIAMoCzIpLmtzZWFsLnYxLlBvbGljeUNvbmZpZy5TaWduYWxXZWlnaHRzRW50cnkSEwoLcG9saWN5X2hhc2gYBiABKAkaNQoTUmlza1RocmVzaG9sZHNFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKA06AjgBGjQKElNpZ25hbFdlaWdodHNFbnRyeRILCgNrZXkYASABKA0SDQoFdmFsdWUYAiABKA06AjgBIpYBCg1Db25maWdSZXF1ZXN0EhEKCXRlbmFudF9pZBgBIAEoCRIOCgZhcHBfaWQYAiABKAkSJAoIcGxhdGZvcm0YAyABKA4yEi5rc2VhbC52MS5QbGF0Zm9ybRITCgtzZGtfdmVyc2lvbhgEIAEoCRITCgtpbnN0YW5jZV9pZBgFIAEoCRISCgpidWlsZF9oYXNoGAYgASgJIo4BCg5Db25maWdSZXNwb25zZRImCgZjb25maWcYASABKAsyFi5rc2VhbC52MS5TaWduZWRDb25maWcSDAoEZXRhZxgCIAEoCRIVCg1sYXN0X21vZGlmaWVkGAMgASgDEi8KC2tpbGxfc3dpdGNoGAQgASgLMhoua3NlYWwudjEuU2lnbmVkS2lsbFN3aXRjaCIyCg1Qb2xpY3lSZXF1ZXN0EhEKCXRlbmFudF9pZBgBIAEoCRIOCgZhcHBfaWQYAiABKAkiOAoOUG9saWN5UmVzcG9uc2USJgoGcG9saWN5GAEgASgLMhYua3NlYWwudjEuUG9saWN5Q29uZmlnQjhaNmdpdGh1Yi5jb20va2Vubmd1eTNuL2tzZWFsL3NlcnZlci9nZW4va3NlYWwvdjE7a3NlYWx2MWIGcHJvdG8z", [file_kseal_v1_common, file_kseal_v1_compliance]);
 
 /**
  * SignedConfig wraps a serialized PolicyConfig with an Ed25519 signature so the
  * SDK can verify authenticity offline and cache it behind a CDN.
  *
+ * The signature authenticates the whole envelope, not just config_bytes. It is
+ * computed over a canonical, domain-separated, length-prefixed preimage:
+ *   u32_be(len)||"kseal/v1/signed-config" || i64_be(version) ||
+ *   i64_be(ttl_seconds) || u32_be(len)||key_id || u32_be(len)||config_bytes
+ * so version (rollback anchor), ttl_seconds (staleness anchor), key_id and
+ * config_bytes are all covered, closing the CDN/cache tamper vector. The Go
+ * server and the Rust device core mirror this layout byte-for-byte (pinned by a
+ * shared golden vector).
+ *
  * @generated from message kseal.v1.SignedConfig
  */
 export type SignedConfig = Message<"kseal.v1.SignedConfig"> & {
   /**
-   * Serialized PolicyConfig bytes that the signature covers.
+   * Serialized PolicyConfig bytes (part of the signed envelope preimage).
    *
    * @generated from field: bytes config_bytes = 1;
    */
   configBytes: Uint8Array;
 
   /**
-   * Ed25519 signature over config_bytes.
+   * Ed25519 signature over the canonical envelope preimage (see message docs):
+   * version, ttl_seconds, key_id and config_bytes are all authenticated.
    *
    * @generated from field: bytes signature = 2;
    */
@@ -184,6 +196,24 @@ export type ConfigRequest = Message<"kseal.v1.ConfigRequest"> & {
    * @generated from field: string sdk_version = 4;
    */
   sdkVersion: string;
+
+  /**
+   * Opaque, tenant-scoped rotating instance identifier used for deterministic
+   * canary bucketing. Empty disables candidate selection for the caller
+   * (fail-safe: it stays on the stable config). Never a device fingerprint.
+   *
+   * @generated from field: string instance_id = 5;
+   */
+  instanceId: string;
+
+  /**
+   * Registered build hash of the running binary. Lets the server deliver a
+   * build-scoped kill switch (the most specific scope) in addition to
+   * app/tenant-scoped ones. Empty falls back to app/tenant scope resolution.
+   *
+   * @generated from field: string build_hash = 6;
+   */
+  buildHash: string;
 };
 
 /**
@@ -213,6 +243,16 @@ export type ConfigResponse = Message<"kseal.v1.ConfigResponse"> & {
    * @generated from field: int64 last_modified = 3;
    */
   lastModified: bigint;
+
+  /**
+   * Signed remote kill switch in effect for the scope, when one is active and
+   * the kill-switch feature is enabled for the tenant. Absent by default. The
+   * SDK verifies the Ed25519 signature before acting; an absent or invalid
+   * command never disables (fail-safe).
+   *
+   * @generated from field: kseal.v1.SignedKillSwitch kill_switch = 4;
+   */
+  killSwitch?: SignedKillSwitch | undefined;
 };
 
 /**

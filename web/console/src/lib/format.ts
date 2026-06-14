@@ -6,9 +6,9 @@ import {
   TrustLevel,
 } from "../gen/kseal/v1/common_pb";
 import {
-  CanaryHealth,
-  KillSwitchStatus,
-} from "../gen-local/kseal/consolelocal/v1/compliance_pb";
+  CanaryState,
+  KillSwitchCommand,
+} from "../gen/kseal/v1/compliance_pb";
 
 export const platformLabels: Record<Platform, string> = {
   [Platform.UNSPECIFIED]: "Unspecified",
@@ -70,38 +70,39 @@ export function riskLevelTone(level: TrustLevel): string {
   }
 }
 
-export const killSwitchStatusLabels: Record<KillSwitchStatus, string> = {
-  [KillSwitchStatus.UNSPECIFIED]: "Unknown",
-  [KillSwitchStatus.ARMED]: "Armed",
-  [KillSwitchStatus.DISABLED]: "Disabled",
+// The canonical kill switch resolves an effective command per scope. ENABLE
+// (and the UNSPECIFIED default) means protection is armed; DISABLE means
+// enforcement has been remotely disabled.
+export const killSwitchCommandLabels: Record<KillSwitchCommand, string> = {
+  [KillSwitchCommand.UNSPECIFIED]: "Armed",
+  [KillSwitchCommand.ENABLE]: "Armed",
+  [KillSwitchCommand.DISABLE]: "Disabled",
 };
 
-// Tone for a kill-switch status badge: armed (enforcing) is the healthy state.
-export function killSwitchStatusTone(status: KillSwitchStatus): string {
-  switch (status) {
-    case KillSwitchStatus.ARMED:
-      return "bg-emerald-500/15 text-emerald-300 border-emerald-500/30";
-    case KillSwitchStatus.DISABLED:
+// Tone for a kill-switch badge: enabled/armed (enforcing) is the healthy state.
+export function killSwitchCommandTone(command: KillSwitchCommand): string {
+  switch (command) {
+    case KillSwitchCommand.DISABLE:
       return "bg-rose-500/15 text-rose-300 border-rose-500/30";
     default:
-      return "bg-slate-500/15 text-slate-300 border-slate-500/30";
+      return "bg-emerald-500/15 text-emerald-300 border-emerald-500/30";
   }
 }
 
-export const canaryHealthLabels: Record<CanaryHealth, string> = {
-  [CanaryHealth.UNSPECIFIED]: "Unknown",
-  [CanaryHealth.HEALTHY]: "Healthy",
-  [CanaryHealth.DEGRADED]: "Degraded",
-  [CanaryHealth.ROLLED_BACK]: "Rolled back",
+export const canaryStateLabels: Record<CanaryState, string> = {
+  [CanaryState.UNSPECIFIED]: "Unknown",
+  [CanaryState.ACTIVE]: "Active",
+  [CanaryState.PROMOTED]: "Promoted",
+  [CanaryState.ROLLED_BACK]: "Rolled back",
 };
 
-export function canaryHealthTone(health: CanaryHealth): string {
-  switch (health) {
-    case CanaryHealth.HEALTHY:
+export function canaryStateTone(state: CanaryState): string {
+  switch (state) {
+    case CanaryState.ACTIVE:
+      return "bg-sky-500/15 text-sky-300 border-sky-500/30";
+    case CanaryState.PROMOTED:
       return "bg-emerald-500/15 text-emerald-300 border-emerald-500/30";
-    case CanaryHealth.DEGRADED:
-      return "bg-amber-500/15 text-amber-300 border-amber-500/30";
-    case CanaryHealth.ROLLED_BACK:
+    case CanaryState.ROLLED_BACK:
       return "bg-rose-500/15 text-rose-300 border-rose-500/30";
     default:
       return "bg-slate-500/15 text-slate-300 border-slate-500/30";

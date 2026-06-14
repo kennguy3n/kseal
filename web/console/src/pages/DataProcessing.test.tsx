@@ -6,9 +6,9 @@ import { RegistryService } from "../gen/kseal/v1/registry_service_pb";
 import { ListAppsResponseSchema } from "../gen/kseal/v1/registry_pb";
 import {
   DataProcessingRecordSchema,
-  DataProcessingRegistryService,
-  ListDataProcessingRecordsResponseSchema,
-} from "../gen-local/kseal/consolelocal/v1/compliance_pb";
+  GetDataProcessingRegistryResponseSchema,
+} from "../gen/kseal/v1/compliance_pb";
+import { ComplianceService } from "../gen/kseal/v1/compliance_service_pb";
 import { DataProcessingPage } from "./DataProcessing";
 import { renderWithProviders } from "../test/render";
 
@@ -19,29 +19,28 @@ function withApps(router: ConnectRouter) {
   });
 }
 
-function record(id: string, category: string, personalData: boolean) {
+function record(category: string, thirdPartySharing: boolean) {
   return create(DataProcessingRecordSchema, {
-    id,
-    category,
+    appId: "app-1",
+    dataCategories: [category, "os_version"],
     purpose: "Runtime risk scoring",
-    retention: "30 days",
+    retentionDays: 30,
     legalBasis: "Legitimate interest",
-    personalData,
-    dataFields: ["device_integrity", "os_version"],
+    thirdPartySharing,
     updatedAt: 1_700_000_000_000n,
   });
 }
 
 describe("DataProcessingPage", () => {
-  it("renders data-processing records with personal-data flags", async () => {
+  it("renders data-processing records with third-party-sharing flags", async () => {
     const transport = createRouterTransport((router) => {
       withApps(router);
-      router.service(DataProcessingRegistryService, {
-        listDataProcessingRecords() {
-          return create(ListDataProcessingRecordsResponseSchema, {
+      router.service(ComplianceService, {
+        getDataProcessingRegistry() {
+          return create(GetDataProcessingRegistryResponseSchema, {
             records: [
-              record("a", "Device integrity signals", false),
-              record("b", "Coarse location", true),
+              record("Device integrity signals", false),
+              record("Coarse location", true),
             ],
           });
         },
@@ -54,18 +53,22 @@ describe("DataProcessingPage", () => {
     });
 
     await waitFor(() =>
-      expect(screen.getByText("Device integrity signals")).toBeInTheDocument(),
+      expect(
+        screen.getByText("Device integrity signals, os_version"),
+      ).toBeInTheDocument(),
     );
-    expect(screen.getByText("Coarse location")).toBeInTheDocument();
-    expect(screen.getByText("Personal data")).toBeInTheDocument();
-    expect(screen.getByText("Non-personal")).toBeInTheDocument();
-    expect(screen.getAllByText("device_integrity").length).toBeGreaterThan(0);
+    expect(
+      screen.getByText("Coarse location, os_version"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Not shared")).toBeInTheDocument();
+    expect(screen.getByText("Shared with third party")).toBeInTheDocument();
+    expect(screen.getAllByText("os_version").length).toBeGreaterThan(0);
   });
 
   it("degrades gracefully when the RPC is not deployed", async () => {
     const transport = createRouterTransport((router) => {
       withApps(router);
-      // DataProcessingRegistryService intentionally unregistered.
+      // ComplianceService intentionally unregistered.
     });
 
     renderWithProviders(<DataProcessingPage />, {
@@ -83,9 +86,9 @@ describe("DataProcessingPage", () => {
   it("shows an empty state when there are no records", async () => {
     const transport = createRouterTransport((router) => {
       withApps(router);
-      router.service(DataProcessingRegistryService, {
-        listDataProcessingRecords: () =>
-          create(ListDataProcessingRecordsResponseSchema, {}),
+      router.service(ComplianceService, {
+        getDataProcessingRegistry: () =>
+          create(GetDataProcessingRegistryResponseSchema, {}),
       });
     });
 

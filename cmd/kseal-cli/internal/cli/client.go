@@ -8,7 +8,6 @@ import (
 
 	"connectrpc.com/connect"
 
-	"github.com/kennguy3n/kseal/cli/internal/compliancepb/compliancepbconnect"
 	"github.com/kennguy3n/kseal/server/gen/kseal/v1/ksealv1connect"
 )
 
@@ -42,10 +41,11 @@ type CLI struct {
 	webhookClient  ksealv1connect.WebhookServiceClient
 	queryClient    ksealv1connect.QueryServiceClient
 
-	// complianceClient is a STREAM-LOCAL client for the read-only compliance
-	// RPCs WS-K is adding. Commands using it degrade gracefully when the server
-	// does not yet implement the RPC (see compliance.go).
-	complianceClient compliancepbconnect.ComplianceServiceClient
+	// complianceClient talks to the canonical ComplianceService (audit trail,
+	// data-processing registry, kill switch, canary). Commands using it degrade
+	// gracefully when the connected server build predates the service (see
+	// compliance.go).
+	complianceClient ksealv1connect.ComplianceServiceClient
 }
 
 // clientOptions returns the Connect client options shared by every service
@@ -98,9 +98,9 @@ func (c *CLI) query() ksealv1connect.QueryServiceClient {
 	return c.queryClient
 }
 
-func (c *CLI) compliance() compliancepbconnect.ComplianceServiceClient {
+func (c *CLI) compliance() ksealv1connect.ComplianceServiceClient {
 	if c.complianceClient == nil {
-		c.complianceClient = compliancepbconnect.NewComplianceServiceClient(c.httpc(), c.endpoint, c.clientOptions()...)
+		c.complianceClient = ksealv1connect.NewComplianceServiceClient(c.httpc(), c.endpoint, c.clientOptions()...)
 	}
 	return c.complianceClient
 }
