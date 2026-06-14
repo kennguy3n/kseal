@@ -38,7 +38,11 @@ export function ThresholdsEditor({
       }
       const n = Number(raw);
       if (!Number.isFinite(n)) return;
-      setField({ [key]: Math.min(1, Math.max(0, n / 100)) });
+      // Round to a whole percent before storing (the field is integer-percent,
+      // step=1) so the persisted rate always matches what the input redisplays —
+      // no lossy round-trip where e.g. "0.5" stores 0.005 but shows as "1".
+      const pct = Math.min(100, Math.max(0, Math.round(n)));
+      setField({ [key]: pct / 100 });
     };
 
   return (
