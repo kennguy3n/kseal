@@ -113,6 +113,11 @@ spec:
               mountPath: {{ .Values.server.config.dataPlane.kafka.caSecret.mountPath | quote }}
               readOnly: true
             {{- end }}
+            {{- if .Values.server.config.dataPlane.clickhouse.caSecret.name }}
+            - name: clickhouse-ca
+              mountPath: {{ .Values.server.config.dataPlane.clickhouse.caSecret.mountPath | quote }}
+              readOnly: true
+            {{- end }}
       volumes:
         # readOnlyRootFilesystem is on; give the process a writable scratch dir.
         - name: tmp
@@ -135,4 +140,13 @@ spec:
             items:
               - key: {{ .Values.server.config.dataPlane.kafka.caSecret.key | quote }}
                 path: {{ .Values.server.config.dataPlane.kafka.caSecret.key | quote }}
+        {{- end }}
+        {{- if .Values.server.config.dataPlane.clickhouse.caSecret.name }}
+        # Custom CA bundle for ClickHouse TLS (KSEAL_CLICKHOUSE_CA_FILE points here).
+        - name: clickhouse-ca
+          secret:
+            secretName: {{ .Values.server.config.dataPlane.clickhouse.caSecret.name | quote }}
+            items:
+              - key: {{ .Values.server.config.dataPlane.clickhouse.caSecret.key | quote }}
+                path: {{ .Values.server.config.dataPlane.clickhouse.caSecret.key | quote }}
         {{- end }}

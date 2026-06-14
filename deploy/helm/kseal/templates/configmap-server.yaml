@@ -73,6 +73,9 @@ data:
   KSEAL_CLICKHOUSE_CLUSTER: {{ .clickhouse.cluster | quote }}
   {{- end }}
   KSEAL_CLICKHOUSE_TLS: {{ .clickhouse.tls | quote }}
+  {{- if .clickhouse.caSecret.name }}
+  KSEAL_CLICKHOUSE_CA_FILE: {{ printf "%s/%s" (trimSuffix "/" .clickhouse.caSecret.mountPath) .clickhouse.caSecret.key | quote }}
+  {{- end }}
   {{- if .clickhouse.retentionTtlDays | toString | ne "" }}
   KSEAL_CLICKHOUSE_RETENTION_TTL_DAYS: {{ .clickhouse.retentionTtlDays | quote }}
   {{- end }}

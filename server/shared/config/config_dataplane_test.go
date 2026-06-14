@@ -61,6 +61,7 @@ func TestDataPlaneParsesFullConfig(t *testing.T) {
 	t.Setenv("KSEAL_KAFKA_TOPIC", "events")
 	t.Setenv("KSEAL_KAFKA_CONSUMER_GROUP", "writer")
 	t.Setenv("KSEAL_KAFKA_TLS", "true")
+	t.Setenv("KSEAL_KAFKA_CA_FILE", "/etc/kseal/kafka-tls/ca.crt")
 	t.Setenv("KSEAL_KAFKA_SASL_MECHANISM", "SCRAM-SHA-256")
 	t.Setenv("KSEAL_KAFKA_SASL_USERNAME", "u")
 	t.Setenv("KSEAL_KAFKA_SASL_PASSWORD", "p")
@@ -71,6 +72,7 @@ func TestDataPlaneParsesFullConfig(t *testing.T) {
 	t.Setenv("KSEAL_CLICKHOUSE_CLUSTER", "main")
 	t.Setenv("KSEAL_CLICKHOUSE_RETENTION_TTL_DAYS", "45")
 	t.Setenv("KSEAL_CLICKHOUSE_TLS", "true")
+	t.Setenv("KSEAL_CLICKHOUSE_CA_FILE", "/etc/kseal/clickhouse-tls/ca.crt")
 
 	c, err := Load()
 	if err != nil {
@@ -91,6 +93,14 @@ func TestDataPlaneParsesFullConfig(t *testing.T) {
 	}
 	if d.ClickHouseRetentionTTLDays != 45 || !d.ClickHouseTLS {
 		t.Fatalf("clickhouse ttl/tls not parsed: ttl=%d tls=%v", d.ClickHouseRetentionTTLDays, d.ClickHouseTLS)
+	}
+	// CA files for both backends must be loaded from env so TLS pinning is not
+	// silently disabled when a custom CA is configured.
+	if d.KafkaCAFile != "/etc/kseal/kafka-tls/ca.crt" {
+		t.Fatalf("kafka CA file not loaded: %q", d.KafkaCAFile)
+	}
+	if d.ClickHouseCAFile != "/etc/kseal/clickhouse-tls/ca.crt" {
+		t.Fatalf("clickhouse CA file not loaded: %q", d.ClickHouseCAFile)
 	}
 }
 

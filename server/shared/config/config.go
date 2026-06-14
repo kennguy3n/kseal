@@ -287,6 +287,7 @@ func (c *Config) loadDataPlane() error {
 		ClickHousePassword: os.Getenv("KSEAL_CLICKHOUSE_PASSWORD"),
 		ClickHouseTable:    strings.TrimSpace(os.Getenv("KSEAL_CLICKHOUSE_TABLE")),
 		ClickHouseCluster:  strings.TrimSpace(os.Getenv("KSEAL_CLICKHOUSE_CLUSTER")),
+		ClickHouseCAFile:   strings.TrimSpace(os.Getenv("KSEAL_CLICKHOUSE_CA_FILE")),
 	}
 
 	var err error

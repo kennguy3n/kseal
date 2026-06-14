@@ -84,6 +84,7 @@ missing required connection info **fails closed**.
 | `KSEAL_CLICKHOUSE_TABLE` | `telemetry_events` | Events table; created by the server (`CREATE TABLE IF NOT EXISTS`). |
 | `KSEAL_CLICKHOUSE_CLUSTER` | `""` | Cluster name for `ON CLUSTER` DDL (replicated/sharded). Empty = single-node DDL. |
 | `KSEAL_CLICKHOUSE_TLS` | `false` | Dial over TLS. |
+| `KSEAL_CLICKHOUSE_CA_FILE` | `""` | Pin a ClickHouse CA (PEM); empty uses system roots. |
 | `KSEAL_CLICKHOUSE_INSECURE_SKIP_VERIFY` | `false` | Dev/test only. |
 | `KSEAL_CLICKHOUSE_RETENTION_TTL_DAYS` | inherits `KSEAL_RAW_RETENTION_DAYS` | Coarse table-level TTL backstop (see Retention). |
 

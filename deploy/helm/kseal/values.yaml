@@ -204,6 +204,12 @@ server:
         # Empty = single-node DDL.
         cluster: ""
         tls: false                          # KSEAL_CLICKHOUSE_TLS
+        # Custom CA for ClickHouse TLS (KSEAL_CLICKHOUSE_CA_FILE). Mounted from
+        # caSecret when caSecret.name is set; empty uses the system trust store.
+        caSecret:
+          name: ""
+          key: ca.crt
+          mountPath: /etc/kseal/clickhouse-tls
         # Table-level TTL backstop in days (KSEAL_CLICKHOUSE_RETENTION_TTL_DAYS).
         # Empty inherits rawRetentionDays. The per-tenant Purger enforces precise
         # retention; this is only a coarse safety net.
