@@ -21,7 +21,7 @@ export function Sparkline({
 }) {
   const gradientId = useId();
   const total = buckets.reduce((acc, b) => acc + b.total, 0);
-  const elevated = buckets.reduce((acc, b) => acc + b.elevated, 0);
+  const highRisk = buckets.reduce((acc, b) => acc + b.highRisk, 0);
 
   if (buckets.length === 0 || total === 0) {
     return (
@@ -39,13 +39,13 @@ export function Sparkline({
     buckets.map((b, i) => `${(i * stepX).toFixed(2)},${y(pick(b)).toFixed(2)}`);
 
   const totalPts = pointsFor((b) => b.total);
-  const elevatedPts = pointsFor((b) => b.elevated);
+  const highRiskPts = pointsFor((b) => b.highRisk);
   const areaPath = `M0,${height} L${totalPts.join(" L")} L${(width).toFixed(2)},${height} Z`;
 
   return (
     <svg
       role="img"
-      aria-label={`${label}: ${total} signals in window, ${elevated} high-risk`}
+      aria-label={`${label}: ${total} signals in window, ${highRisk} high-risk`}
       viewBox={`0 0 ${width} ${height}`}
       width={width}
       height={height}
@@ -67,9 +67,9 @@ export function Sparkline({
         strokeLinejoin="round"
         strokeLinecap="round"
       />
-      {elevated > 0 && (
+      {highRisk > 0 && (
         <polyline
-          points={elevatedPts.join(" ")}
+          points={highRiskPts.join(" ")}
           fill="none"
           stroke="rgb(244 63 94)"
           strokeWidth="1.5"

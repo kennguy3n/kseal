@@ -16,12 +16,16 @@ const EVENTS_PAGE_SIZE = 25;
  * the fleet fan-out (`["fleet-tenant", apiBaseUrl, tenantId]`), so opening a
  * tenant reuses the already-cached read instead of refetching.
  */
-export function useTenantSnapshot(tenantId: string) {
+export function useTenantSnapshot(tenantId: string, enabled = true) {
   const { query } = useClients();
   const { apiBaseUrl } = useSession();
   return useQuery<TenantSnapshot>({
     queryKey: ["fleet-tenant", apiBaseUrl, tenantId] as const,
     queryFn: () => fetchTenantSnapshot(query, tenantId),
+    // Don't issue reads for a tenant outside the operator's managed set: the
+    // server would reject them anyway, so firing wastes bandwidth and pollutes
+    // the cache. The caller gates this on fleet membership.
+    enabled: enabled && tenantId.length > 0,
     staleTime: 15_000,
   });
 }
@@ -50,6 +54,7 @@ export interface UseTenantEventsResult {
 export function useTenantEvents(
   tenantId: string,
   riskLevels: TrustLevel[] = [],
+  enabled = true,
 ): UseTenantEventsResult {
   const { query } = useClients();
   const { apiBaseUrl } = useSession();
@@ -78,6 +83,9 @@ export function useTenantEvents(
       };
     },
     getNextPageParam: (last) => (last.nextPageToken ? last.nextPageToken : undefined),
+    // Same fleet-membership gate as useTenantSnapshot: no reads for unmanaged
+    // tenants.
+    enabled: enabled && tenantId.length > 0,
     staleTime: 15_000,
   });
 

@@ -74,11 +74,6 @@ export function useFleetView(rollup: FleetRollup): UseFleetViewResult {
     setState((s) => ({ ...s, thresholds: next }));
   }, []);
 
-  const persistViews = useCallback((next: SavedView[]) => {
-    setViews(next);
-    saveViews(next);
-  }, []);
-
   const saveView = useCallback(
     (name: string) => {
       const trimmed = name.trim();
@@ -102,12 +97,14 @@ export function useFleetView(rollup: FleetRollup): UseFleetViewResult {
     [filter, sort, thresholds],
   );
 
-  const deleteView = useCallback(
-    (id: string) => {
-      persistViews(views.filter((v) => v.id !== id));
-    },
-    [persistViews, views],
-  );
+  const deleteView = useCallback((id: string) => {
+    // Functional updater (like saveView) so it never operates on stale state.
+    setViews((prev) => {
+      const next = prev.filter((v) => v.id !== id);
+      saveViews(next);
+      return next;
+    });
+  }, []);
 
   const applyView = useCallback((view: SavedView) => {
     setState({

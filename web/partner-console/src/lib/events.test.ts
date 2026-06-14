@@ -25,13 +25,13 @@ describe("bucketSignals", () => {
   it("returns all-zero buckets of the requested length for no signals", () => {
     const buckets = bucketSignals([], now, span, 6);
     expect(buckets).toHaveLength(6);
-    expect(buckets.every((b) => b.total === 0 && b.elevated === 0)).toBe(true);
+    expect(buckets.every((b) => b.total === 0 && b.highRisk === 0)).toBe(true);
     // Buckets are ordered oldest-first and evenly spaced.
     expect(buckets[0].startMs).toBe(now - span);
     expect(buckets[1].startMs - buckets[0].startMs).toBe(span / 6);
   });
 
-  it("places signals into the correct slot and counts elevated", () => {
+  it("places signals into the correct slot and counts high-risk", () => {
     const buckets = bucketSignals(
       [
         makeSignal({ timestampMs: now - span + 1, riskLevel: 1 }), // first slot
@@ -43,9 +43,9 @@ describe("bucketSignals", () => {
       6,
     );
     expect(buckets[0].total).toBe(1);
-    expect(buckets[0].elevated).toBe(0);
+    expect(buckets[0].highRisk).toBe(0);
     expect(buckets[5].total).toBe(2);
-    expect(buckets[5].elevated).toBe(2);
+    expect(buckets[5].highRisk).toBe(2);
   });
 
   it("ignores signals outside the window or with no timestamp", () => {

@@ -40,8 +40,8 @@ export interface SignalBucket {
   startMs: number;
   /** Total signals in the bucket. */
   total: number;
-  /** Signals with high/critical fused risk in the bucket. */
-  elevated: number;
+  /** Signals with high/critical fused risk in the bucket (see isHighRisk). */
+  highRisk: number;
 }
 
 /**
@@ -63,7 +63,7 @@ export function bucketSignals(
   const buckets: SignalBucket[] = Array.from({ length: n }, (_, i) => ({
     startMs: Math.round(start + i * slot),
     total: 0,
-    elevated: 0,
+    highRisk: 0,
   }));
   for (const s of signals) {
     if (s.timestampMs <= 0 || s.timestampMs < start || s.timestampMs > nowMs) {
@@ -73,7 +73,7 @@ export function bucketSignals(
     if (idx < 0) idx = 0;
     if (idx >= n) idx = n - 1;
     buckets[idx].total += 1;
-    if (isHighRisk(s.riskLevel)) buckets[idx].elevated += 1;
+    if (isHighRisk(s.riskLevel)) buckets[idx].highRisk += 1;
   }
   return buckets;
 }

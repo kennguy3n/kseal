@@ -15,10 +15,14 @@ import { EventType, TrustLevel } from "../gen/kseal/v1/common_pb";
 import { TenantDetailPage } from "./TenantDetail";
 import { renderWithProviders } from "../test/render";
 
-function transport(listCalls: { last?: TrustLevel[] } = {}) {
+function transport(
+  listCalls: { last?: TrustLevel[] } = {},
+  counts: { overview: number; list: number } = { overview: 0, list: 0 },
+) {
   return createRouterTransport(({ service }) => {
     service(QueryService, {
       getTenantOverview() {
+        counts.overview += 1;
         return create(GetTenantOverviewResponseSchema, {
           appCount: 4,
           buildCount: 9,
@@ -43,6 +47,7 @@ function transport(listCalls: { last?: TrustLevel[] } = {}) {
         });
       },
       listEvents(req) {
+        counts.list += 1;
         listCalls.last = req.riskLevels;
         return create(ListEventsResponseSchema, {
           events: [
@@ -99,10 +104,14 @@ describe("TenantDetailPage", () => {
     await waitFor(() => expect(calls.last).toEqual([TrustLevel.CRITICAL]));
   });
 
-  it("shows a clear message for a tenant outside the managed fleet", async () => {
-    renderDetail("/tenants/tenant-z");
+  it("shows a clear message for a tenant outside the managed fleet and issues no reads", async () => {
+    const counts = { overview: 0, list: 0 };
+    renderDetail("/tenants/tenant-z", transport({}, counts));
     await waitFor(() =>
       expect(screen.getByText("Tenant not in your fleet")).toBeInTheDocument(),
     );
+    // The drill-down must not read a tenant the operator does not manage.
+    expect(counts.overview).toBe(0);
+    expect(counts.list).toBe(0);
   });
 });

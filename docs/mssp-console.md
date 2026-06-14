@@ -106,9 +106,13 @@ penalty = 0.6 * highRiskRate + 0.3 * attestationFailureRate + 0.1 * mediumRiskRa
 score   = round(clamp(1 - penalty, 0, 1) * 100)
 ```
 
-Banded as: `healthy` (≥ 80), `watch` (50–79), `at-risk` (< 50). A tenant with no
-usable data or an `error` status is scored 0 and banded **`unknown`**, so it
-surfaces for the operator rather than silently counting as healthy.
+Banded as: `healthy` (≥ 80), `watch` (50–79), `at-risk` (< 50). Because the score
+is derived **entirely from trust-session / attestation rates**, a tenant is only
+health-assessable when it has some trust signal (any sessions or tokens). A
+tenant with an `error` status, or one with apps registered but **zero sessions
+and zero tokens** (e.g. newly onboarded, no runtime traffic yet), is scored 0 and
+banded **`unknown`** — so it surfaces for the operator rather than silently
+counting as a clean `healthy` 100.
 
 ## Data gap (flagged, not worked around)
 

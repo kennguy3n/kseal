@@ -44,8 +44,8 @@ export function TenantDetailPage() {
 
   const [riskFilter, setRiskFilter] = useState<TrustLevel[]>([]);
 
-  const snapshotQuery = useTenantSnapshot(tenantId);
-  const events = useTenantEvents(managed ? tenantId : "", riskFilter);
+  const snapshotQuery = useTenantSnapshot(tenantId, managed);
+  const events = useTenantEvents(tenantId, riskFilter, managed);
 
   const health = useMemo(
     () => (snapshotQuery.data ? tenantHealthFromSnapshot(snapshotQuery.data) : null),

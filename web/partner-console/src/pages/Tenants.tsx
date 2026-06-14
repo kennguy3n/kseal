@@ -25,8 +25,11 @@ export function TenantsPage() {
         <div>
           <h1 className="text-xl font-semibold text-heading">Tenants</h1>
           <p className="mt-1 text-sm text-muted">
-            {rollup.healthyTenants} healthy · {rollup.degradedTenants} degraded ·
-            filter, search, set alert thresholds, and export.
+            {rollup.tenantCount} tenants · {rollup.bandCounts["at-risk"]} at risk ·{" "}
+            {rollup.bandCounts.watch} watch · {rollup.bandCounts.healthy} healthy
+            {rollup.bandCounts.unknown > 0 && ` · ${rollup.bandCounts.unknown} unknown`}
+            {rollup.degradedTenants > 0 && ` · ${rollup.degradedTenants} with degraded reads`}
+            . Filter, search, set alert thresholds, and export.
           </p>
         </div>
         <button className="btn-ghost focus-ring" onClick={refetch} disabled={isFetching}>

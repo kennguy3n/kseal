@@ -174,7 +174,12 @@ export function tenantHealthFromSnapshot(s: TenantSnapshot): TenantHealth {
   const attestationFailureRate = safeRate(failed, tokens);
   const highRiskRate = safeRate(highRisk, sessions);
   const mediumRiskRate = safeRate(mediumRisk, sessions);
-  const hasData = s.overview !== undefined || s.trust !== undefined;
+  // The health score is derived entirely from trust-session / attestation
+  // rates, so a tenant is only health-assessable if it has some trust signal.
+  // A tenant with apps registered but zero sessions and zero tokens (e.g. newly
+  // onboarded, no runtime traffic yet) has no basis for a score and is banded
+  // "unknown" so it surfaces for the operator instead of reading as a clean 100.
+  const hasData = sessions > 0 || tokens > 0;
 
   const { healthScore, band } = tenantHealthScore({
     status: s.status,
