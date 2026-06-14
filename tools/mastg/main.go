@@ -21,6 +21,9 @@ const (
 	exitBlocked = 3
 )
 
+// version is overridable at build time via -ldflags "-X main.version=...".
+var version = "dev"
+
 func main() {
 	code, err := run(os.Args[1:], os.Stdout, os.Stderr)
 	if err != nil {
@@ -38,13 +41,26 @@ func run(args []string, stdout, stderr *os.File) (int, error) {
 	format := fs.String("format", "md", "output format: md|json")
 	out := fs.String("out", "", "write report to this path (default stdout)")
 	requirePass := fs.Bool("require-pass", false, "strict mode: pending device procedures also block the release")
+	quiet := fs.Bool("quiet", false, "suppress the blocked-release summary line on stderr")
+	showVersion := fs.Bool("version", false, "print the tool version and exit")
 	fs.Usage = func() {
-		_, _ = fmt.Fprintln(stderr, "Usage: mastg [flags]")
-		_, _ = fmt.Fprintln(stderr, "Run kseal MASTG verification procedures against per-release evidence.")
+		_, _ = fmt.Fprintf(stderr, "Usage: mastg [flags]\n\n"+
+			"Map the kseal MASVS catalog to OWASP MASTG verification procedures and emit a\n"+
+			"per-release pass/observed report. Exit codes: 0 ok, 1 error, 2 usage, 3 release blocked.\n\nFlags:\n")
 		fs.PrintDefaults()
+		_, _ = fmt.Fprintln(stderr, "\nExamples:")
+		_, _ = fmt.Fprintln(stderr, "  # Static report from the catalog alone")
+		_, _ = fmt.Fprintln(stderr, "  mastg -format md")
+		_, _ = fmt.Fprintln(stderr, "")
+		_, _ = fmt.Fprintln(stderr, "  # Gate a release on build evidence + device assertions")
+		_, _ = fmt.Fprintln(stderr, "  mastg -masvs-report masvs.json -evidence device-tests.json -require-pass")
 	}
 	if err := fs.Parse(args); err != nil {
 		return exitErr, nil // flag already printed the error/usage
+	}
+	if *showVersion {
+		fmt.Fprintf(stdout, "mastg %s\n", version)
+		return 0, nil
 	}
 	if *format != "md" && *format != "json" {
 		return exitErr, fmt.Errorf("invalid -format %q (want md|json)", *format)
@@ -102,7 +118,9 @@ func run(args []string, stdout, stderr *os.File) (int, error) {
 	}
 
 	if report.Gating.Blocked {
-		_, _ = fmt.Fprintf(stderr, "mastg: release blocked (failed=%d pending=%d)\n", report.Gating.Failed, report.Gating.Pending)
+		if !*quiet {
+			_, _ = fmt.Fprintf(stderr, "mastg: release blocked (failed=%d pending=%d)\n", report.Gating.Failed, report.Gating.Pending)
+		}
 		return exitBlocked, nil
 	}
 	return 0, nil

@@ -43,6 +43,10 @@ const (
 	defaultProfile    = "default"
 	defaultEndpoint   = "http://localhost:8080"
 	configEnvVar      = "KSEAL_CONFIG"
+	profileEnvVar     = "KSEAL_PROFILE"
+	endpointEnvVar    = "KSEAL_ENDPOINT"
+	tenantEnvVar      = "KSEAL_TENANT"
+	outputEnvVar      = "KSEAL_OUTPUT"
 	xdgConfigHomeEnv  = "XDG_CONFIG_HOME"
 	configDirName     = "kseal"
 	configFileName    = "config.json"
@@ -52,6 +56,18 @@ const (
 
 // ErrProfileNotFound is returned when a named profile is missing.
 var ErrProfileNotFound = errors.New("profile not found")
+
+// firstNonEmpty returns the first argument that is non-empty after trimming
+// surrounding whitespace, or "" if all are empty. It encodes the CLI's
+// flag > environment > profile precedence as a single, readable expression.
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if s := strings.TrimSpace(v); s != "" {
+			return s
+		}
+	}
+	return ""
+}
 
 // DefaultConfigPath resolves the config file path, honoring KSEAL_CONFIG and
 // XDG_CONFIG_HOME, falling back to ~/.config/kseal/config.json.
@@ -153,6 +169,15 @@ func (p *Profile) apiKeyEnvName() string {
 	return defaultAPIKeyEnv
 }
 
+// resolveAPIKeyAvailable reports whether an API key can be resolved for the
+// profile right now (env var set or readable key file). It never returns or
+// logs the key value — it is used by guided flows (`init`, `doctor`) to tell the
+// developer whether credentials are wired up without exposing the secret.
+func (p *Profile) resolveAPIKeyAvailable() bool {
+	_, err := p.resolveAPIKey()
+	return err == nil
+}
+
 // resolveAPIKey returns the API key for the profile, reading it from the
 // configured environment variable first and then from the configured file. It
 // returns the key value to the caller but the value is never logged or printed.
@@ -169,5 +194,10 @@ func (p *Profile) resolveAPIKey() (string, error) {
 			return v, nil
 		}
 	}
-	return "", newAuthError("no API key found: set $%s or configure an api_key_file for this profile", p.apiKeyEnvName())
+	return "", withHint(
+		newAuthError("no API key found for this profile"),
+		"export $%s with your key, or set --api-key-file on the profile. Keys are read at "+
+			"runtime and never stored. Create one in the console under Settings → API keys.",
+		p.apiKeyEnvName(),
+	)
 }

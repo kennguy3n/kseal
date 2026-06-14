@@ -129,7 +129,7 @@ func (c *CLI) tailEvents(ctx context.Context, tenant string, filters *eventFilte
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	if c.output != outputJSON {
+	if !c.structured() {
 		// Print the fixed-width header once; events stream as aligned rows.
 		if _, err := fmt.Fprintln(c.out, formatTailRow(eventColumnHeaders())); err != nil {
 			return err
@@ -221,11 +221,15 @@ func isTransientError(err error) bool {
 // cleanly: one compact NDJSON object per line for json, or one fixed-width row
 // (column-aligned with the header) for table.
 func (c *CLI) emitOneEvent(e *ksealv1.EventRecord) error {
-	if c.output == outputJSON {
+	switch c.output {
+	case outputJSON:
 		return renderJSONCompact(c.out, newEventView(e))
+	case outputYAML:
+		return renderYAMLCompact(c.out, newEventView(e))
+	default:
+		_, err := fmt.Fprintln(c.out, formatTailRow(eventRow(e)))
+		return err
 	}
-	_, err := fmt.Fprintln(c.out, formatTailRow(eventRow(e)))
-	return err
 }
 
 // formatTailRow renders cells in the fixed-width tail layout defined by

@@ -355,8 +355,8 @@ func (c *CLI) handleCapability(err error, rpc string) (handled bool, _ error) {
 	// Always emit a machine-parseable result on stdout so scripts get consistent
 	// output across formats (JSON object in --output json, a one-row table
 	// otherwise) instead of an empty stdout with a clean exit.
-	if c.output == outputJSON {
-		_ = renderJSON(c.out, capabilityUnavailable{Available: false, RPC: rpc})
+	if c.structured() {
+		_ = c.renderStructured(capabilityUnavailable{Available: false, RPC: rpc})
 	} else {
 		_ = table{Headers: []string{"RPC", "AVAILABLE"}, Rows: [][]string{{rpc, "false"}}}.render(c.out)
 	}

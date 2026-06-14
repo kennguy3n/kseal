@@ -16,6 +16,9 @@ import (
 	"github.com/kennguy3n/kseal/tools/privacy-manifest/contract"
 )
 
+// version is overridable at build time via -ldflags "-X main.version=...".
+var version = "dev"
+
 func main() {
 	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintln(os.Stderr, "datasafety: "+err.Error())
@@ -30,13 +33,23 @@ func run(args []string, stdout, stderr *os.File) error {
 	outJSON := fs.String("out-json", "", "write the machine-readable Data-Safety form to this path")
 	outMD := fs.String("out-md", "", "write the human-readable Markdown summary to this path (default stdout)")
 	includeOptional := fs.Bool("include-optional", false, "include data types that are off by default in the contract (e.g. coarse region)")
-	fs.Usage = func() {
-		_, _ = fmt.Fprintln(stderr, "Usage: datasafety [flags]")
-		_, _ = fmt.Fprintln(stderr, "Generate Google Play Data-Safety form answers for the kseal SDK from the data contract.")
-		fs.PrintDefaults()
-	}
+	quiet := fs.Bool("quiet", false, "suppress the human-readable summary line on stderr")
+	showVersion := fs.Bool("version", false, "print the tool version and exit")
+	fs.Usage = usageFunc(stderr, "datasafety",
+		"Generate Google Play Console Data-Safety form answers for the kseal SDK from the canonical data contract.",
+		fs,
+		"  # Print the Markdown summary to stdout",
+		"  datasafety",
+		"",
+		"  # Emit the machine-readable form for CI diffing",
+		"  datasafety -out-json data-safety.json -out-md data-safety.md",
+	)
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *showVersion {
+		fmt.Fprintf(stdout, "datasafety %s\n", version)
+		return nil
 	}
 
 	c, err := contract.Load(*contractPath)
@@ -67,8 +80,10 @@ func run(args []string, stdout, stderr *os.File) error {
 		}
 		return nil
 	}
-	_, _ = fmt.Fprintf(stderr, "datasafety: %d data type(s) collected, shares=%t, encrypted-in-transit=%t\n",
-		len(form.DataTypes), form.SharesData, form.EncryptedInTransit)
+	if !*quiet {
+		_, _ = fmt.Fprintf(stderr, "datasafety: %d data type(s) collected, shares=%t, encrypted-in-transit=%t\n",
+			len(form.DataTypes), form.SharesData, form.EncryptedInTransit)
+	}
 	return nil
 }
 
@@ -82,4 +97,20 @@ func writeFile(path string, data []byte) error {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
 	return nil
+}
+
+// usageFunc builds a consistent --help renderer: a usage line, a one-line
+// description, the flag defaults, and optional copy/paste examples. Keeping the
+// shape identical across the compliance tools makes them feel like one suite.
+func usageFunc(w *os.File, name, desc string, fs *flag.FlagSet, examples ...string) func() {
+	return func() {
+		_, _ = fmt.Fprintf(w, "Usage: %s [flags]\n\n%s\n\nFlags:\n", name, desc)
+		fs.PrintDefaults()
+		if len(examples) > 0 {
+			_, _ = fmt.Fprintln(w, "\nExamples:")
+			for _, ex := range examples {
+				_, _ = fmt.Fprintln(w, ex)
+			}
+		}
+	}
 }

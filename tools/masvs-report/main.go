@@ -19,6 +19,9 @@ import (
 	"github.com/kennguy3n/kseal/tools/masvs-report/internal/report"
 )
 
+// version is overridable at build time via -ldflags "-X main.version=...".
+var version = "dev"
+
 func main() {
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "masvs-report: "+err.Error())
@@ -32,8 +35,26 @@ func run(args []string) error {
 	catalogPath := fs.String("catalog", "docs/masvs-mapping.md", "path to the MASVS control catalog markdown")
 	outMarkdown := fs.String("out-md", "", "write the Markdown report to this path (default stdout)")
 	outJSON := fs.String("out-json", "", "write the JSON report to this path")
+	quiet := fs.Bool("quiet", false, "suppress the human-readable summary line on stderr")
+	showVersion := fs.Bool("version", false, "print the tool version and exit")
+	fs.Usage = func() {
+		_, _ = fmt.Fprintf(os.Stderr, "Usage: masvs-report -manifest <file> [flags]\n\n"+
+			"Generate a per-release MASVS evidence report by overlaying a kseal build-proof\n"+
+			"manifest onto the MASVS control catalog.\n\nFlags:\n")
+		fs.PrintDefaults()
+		_, _ = fmt.Fprintln(os.Stderr, "\nExamples:")
+		_, _ = fmt.Fprintln(os.Stderr, "  # Markdown report to stdout")
+		_, _ = fmt.Fprintln(os.Stderr, "  masvs-report -manifest build/kseal-manifest.json")
+		_, _ = fmt.Fprintln(os.Stderr, "")
+		_, _ = fmt.Fprintln(os.Stderr, "  # Both report formats for CI artifacts")
+		_, _ = fmt.Fprintln(os.Stderr, "  masvs-report -manifest m.json -out-md masvs.md -out-json masvs.json")
+	}
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *showVersion {
+		fmt.Fprintf(os.Stdout, "masvs-report %s\n", version)
+		return nil
 	}
 	if *manifestPath == "" {
 		return fmt.Errorf("missing required -manifest")
@@ -79,8 +100,10 @@ func run(args []string) error {
 		_, err = os.Stdout.Write(md)
 		return err
 	}
-	fmt.Fprintf(os.Stderr, "masvs-report: %d/%d controls evidenced for %s build %s\n",
-		rep.Summary.EvidencedControls, rep.Summary.TotalControls, manifest.Platform, shortID(manifest.BuildHash))
+	if !*quiet {
+		fmt.Fprintf(os.Stderr, "masvs-report: %d/%d controls evidenced for %s build %s\n",
+			rep.Summary.EvidencedControls, rep.Summary.TotalControls, manifest.Platform, shortID(manifest.BuildHash))
+	}
 	return nil
 }
 
