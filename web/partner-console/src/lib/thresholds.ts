@@ -20,7 +20,7 @@ export interface AlertThresholds {
   maxAttestationFailureRate?: number;
 }
 
-export const EMPTY_THRESHOLDS: AlertThresholds = {};
+export const EMPTY_THRESHOLDS: AlertThresholds = Object.freeze({});
 
 export interface ThresholdBreach {
   tenantId: string;

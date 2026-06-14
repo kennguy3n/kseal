@@ -174,7 +174,9 @@ export function saveViewState(state: FleetViewState): void {
 
 export function defaultViewState(): FleetViewState {
   return {
-    filter: { ...EMPTY_FILTER },
+    // Deep-copy bands so the returned working state never shares an array with
+    // the frozen EMPTY_FILTER constant.
+    filter: { ...EMPTY_FILTER, bands: [...EMPTY_FILTER.bands] },
     sort: { ...DEFAULT_SORT },
     thresholds: { ...EMPTY_THRESHOLDS },
   };

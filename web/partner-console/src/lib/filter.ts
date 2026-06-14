@@ -34,14 +34,16 @@ export interface FilterState {
   onlyBreaching: boolean;
 }
 
-export const DEFAULT_SORT: SortState = { key: "health", dir: "asc" };
+// Frozen so these shared module constants can't be mutated in place; callers
+// that need a working copy must spread them (and deep-copy the bands array).
+export const DEFAULT_SORT: SortState = Object.freeze({ key: "health", dir: "asc" });
 
-export const EMPTY_FILTER: FilterState = {
+export const EMPTY_FILTER: FilterState = Object.freeze({
   search: "",
   bands: [],
   region: "",
   onlyBreaching: false,
-};
+});
 
 /** True when `filter` would narrow the list (i.e. differs from EMPTY_FILTER). */
 export function isFilterActive(filter: FilterState): boolean {
