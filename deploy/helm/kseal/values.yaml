@@ -436,6 +436,13 @@ networkPolicy:
     # WS-Q data-plane backends (default-off). Enable each when routing telemetry
     # through Kafka/Redpanda and/or ClickHouse so the default-deny egress policy
     # permits the server to reach them.
+    #
+    # The 0.0.0.0/0 defaults follow the postgres/redis convention above and keep
+    # local/dev usable, but they let the server egress anywhere on that port. For
+    # production, narrow each cidr to the managed backend's actual address range
+    # (e.g. the MSK/ClickHouse-Cloud VPC-endpoint or PrivateLink subnet /32–/28)
+    # so a compromised pod cannot exfiltrate over the broker/store port. See the
+    # NetworkPolicy section of docs/data-plane-scale.md.
     kafka:
       enabled: false
       cidr: 0.0.0.0/0

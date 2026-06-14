@@ -186,8 +186,10 @@ func (s *ClickHouseAnalyticsStore) Close() error { return s.conn.Close() }
 
 // Write inserts a batch of events. The whole batch is sent in one columnar
 // INSERT (ClickHouse's efficient path); on any error the entire batch fails so
-// the at-least-once broker redelivers it (and the ReplacingMergeTree dedupes
-// the eventual retry by id).
+// the Writer retries it and the broker's durable position is not advanced
+// (offsets are committed only after a successful write), making the path
+// at-least-once. The ReplacingMergeTree dedupes the eventual retry/redelivery by
+// id, so the end-to-end result is effectively-once.
 func (s *ClickHouseAnalyticsStore) Write(ctx context.Context, events []StoredEvent) error {
 	if len(events) == 0 {
 		return nil

@@ -346,6 +346,95 @@ func TestKafkaBrokerAtLeastOnce(t *testing.T) {
 	}
 }
 
+// The broker must commit a record's offset only after the consumer Acks it
+// (i.e. after the Writer persists it), not at hand-off. Un-acked records must
+// therefore redeliver to a fresh consumer in the same group — the
+// at-least-once-through-persistence guarantee. (Before this contract, hand-off
+// committed every offset, so a fresh consumer would see nothing redelivered and
+// a ClickHouse-write failure would silently lose the batch.)
+func TestKafkaCommitsOnlyAfterAck(t *testing.T) {
+	brokers := requireRedpanda(t)
+	ctx := context.Background()
+	topic := createKafkaTopic(t, brokers, 4)
+
+	const n = 60
+	const ackFirst = 20
+
+	mk := func() *ingest.KafkaBroker {
+		b, err := ingest.NewKafkaBroker(ctx, ingest.KafkaConfig{
+			Brokers:        brokers,
+			Topic:          topic,
+			ConsumerGroup:  "kseal-test-ack",
+			CommitInterval: 200 * time.Millisecond,
+		})
+		if err != nil {
+			t.Fatalf("new kafka broker: %v", err)
+		}
+		return b
+	}
+
+	// Producer + first consumer.
+	b1 := mk()
+	for i := 0; i < n; i++ {
+		tenant := fmt.Sprintf("tenant-%d", i%4)
+		if err := b1.Publish(ctx, storedEvent(tenant, "app", fmt.Sprintf("evt-%d", i), int64(i))); err != nil {
+			t.Fatalf("publish %d: %v", i, err)
+		}
+	}
+
+	// Consume all n in hand-off order, but Ack only the first ackFirst. Acking
+	// in hand-off order pops the broker's pending FIFO in the same order, so the
+	// acked set is a per-partition contiguous prefix whose offsets get committed.
+	acked := map[string]bool{}
+	ch1 := b1.Consume()
+	deadline := time.After(30 * time.Second)
+	for got := 0; got < n; got++ {
+		select {
+		case e := <-ch1:
+			if got < ackFirst {
+				b1.Ack(1)
+				acked[e.ID] = true
+			}
+		case <-deadline:
+			t.Fatalf("only consumed %d/%d before timeout", got, n)
+		}
+	}
+	// Let auto-commit flush the marked (acked) offsets; Close also commits marks.
+	time.Sleep(500 * time.Millisecond)
+	b1.Close()
+
+	// A fresh consumer in the same group must redeliver every un-acked record
+	// (offsets for acked records were committed; the rest were not).
+	b2 := mk()
+	defer b2.Close()
+	redelivered := map[string]bool{}
+	ch2 := b2.Consume()
+	want := n - ackFirst
+	deadline2 := time.After(30 * time.Second)
+	for len(redelivered) < want {
+		select {
+		case e := <-ch2:
+			if !redelivered[e.ID] {
+				redelivered[e.ID] = true
+				b2.Ack(1)
+			}
+		case <-deadline2:
+			t.Fatalf("redelivered %d distinct records, want %d (un-acked records were lost — offsets committed before Ack)", len(redelivered), want)
+		}
+	}
+	// Every un-acked record must have come back; acked records must not (their
+	// offsets were committed before the restart).
+	for i := 0; i < n; i++ {
+		id := fmt.Sprintf("evt-%d", i)
+		if acked[id] && redelivered[id] {
+			t.Fatalf("acked record %s was redelivered (offset committed too early)", id)
+		}
+		if !acked[id] && !redelivered[id] {
+			t.Fatalf("un-acked record %s was lost (not redelivered)", id)
+		}
+	}
+}
+
 // End-to-end: the Kafka broker feeding the async writer into the ClickHouse
 // store must land every event, tenant-isolated, exactly as the in-memory path.
 func TestKafkaToClickHousePipeline(t *testing.T) {

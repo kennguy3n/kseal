@@ -167,15 +167,28 @@ TTL time_bucket + INTERVAL <retention> DAY;
   broker ack. A produce that fails after retries increments
   `kseal.broker.publish_errors` (alert on it); durability is then owned by the
   at-least-once + dedup path below, not by the accept count.
-- **At-least-once:** Kafka offsets are marked committed only after a record is
-  handed to the writer; an interrupted process redelivers rather than loses.
+- **At-least-once *through the store*:** a Kafka offset is committed only after
+  the writer has **persisted** that record to ClickHouse (the writer calls the
+  broker's `Ack` after a successful flush; the broker marks the offset only
+  then). So a crash **or a ClickHouse outage** redelivers rather than loses — the
+  durable read position never runs ahead of what is actually stored. A failing
+  flush is retried with capped backoff instead of being dropped; while it
+  retries the writer stops draining, which backpressures the broker (offsets
+  simply stay uncommitted, so Kafka holds the backlog up to its retention).
+  `kseal.analytics.write_errors > 0` therefore signals a *retrying* outage to
+  alert on, not silent data loss. The ClickHouse `ReplacingMergeTree` dedupes the
+  eventual redelivery by event id, making the end-to-end result effectively-once.
 - **Idempotent producer + `AllISR` acks:** retries never reorder or duplicate
   within a tenant partition.
 - **Graceful drain:** on shutdown the writer flushes the backlog on a detached
-  context so in-flight batches are persisted; the broker flushes outstanding
-  produces and commits offsets before closing.
+  context so in-flight batches are persisted; retries during drain are bounded
+  by a grace window so a down store cannot hang termination — any events still
+  un-persisted stay uncommitted and redeliver on the next start. The broker
+  flushes outstanding produces and commits only the persisted (acked) offsets
+  before closing.
 - **Poison records:** an undecodable Kafka record is counted and committed (not
-  retried forever).
+  retried forever) — it can never become valid, so it is excluded from the
+  persist-before-commit path.
 
 ### OTLP signals on the hot paths
 
@@ -237,6 +250,15 @@ externalSecrets:
 
 The default-deny NetworkPolicy only opens the Kafka/ClickHouse egress when those
 toggles are enabled.
+
+> **Narrow the egress CIDR in production.** `networkPolicy.egress.kafka.cidr` and
+> `clickhouse.cidr` default to `0.0.0.0/0` (matching the existing postgres/redis
+> entries) so local/dev works out of the box, but that allows egress to *any*
+> host on the broker/store port. For production, scope each CIDR to the managed
+> backend's real address range — the MSK or ClickHouse Cloud VPC-endpoint /
+> PrivateLink subnet (typically a `/28` or a per-endpoint `/32`) — so a
+> compromised server pod cannot exfiltrate over those ports. The Terraform
+> modules expose the endpoint addresses to feed these values.
 
 > **Align the egress ports with your backend.** The Helm egress defaults
 > (`kafka.port: 9092`, `clickhouse.port: 9000`) match a **plaintext, self-hosted**

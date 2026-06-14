@@ -109,10 +109,10 @@ func (c *KafkaConfig) validate() error {
 // partitioned by tenant id (so a tenant's events stay ordered and isolated to
 // its partitions), idempotent, and acked by all in-sync replicas — durable and
 // at-least-once. The consumer side runs a consumer group, decodes records onto
-// a bounded channel the Writer drains, and commits offsets only after each
-// record is handed off, so a crash redelivers rather than loses events. The
-// ClickHouse store dedupes by event id, making the end-to-end path
-// effectively-once.
+// a bounded channel the Writer drains, and commits a record's offset only after
+// the Writer reports it persisted (via Ack), so a crash — or a ClickHouse
+// outage — redelivers rather than loses events. The ClickHouse store dedupes by
+// event id, making the end-to-end path effectively-once.
 type KafkaBroker struct {
 	client *kgo.Client
 	cfg    KafkaConfig
@@ -122,6 +122,13 @@ type KafkaBroker struct {
 	cancel    context.CancelFunc
 	consumeWG sync.WaitGroup
 	closeOnce sync.Once
+
+	// pending holds records handed off to the Writer but not yet persisted, in
+	// hand-off (FIFO) order. Ack(n) pops the first n and marks their offsets
+	// committable; until then a crash redelivers them. Bounded by the consume
+	// channel buffer (a stalled Writer stops draining, which stops enqueues).
+	pendingMu sync.Mutex
+	pending   []*kgo.Record
 
 	inflight atomic.Int64
 
@@ -277,9 +284,36 @@ func (b *KafkaBroker) Publish(ctx context.Context, e StoredEvent) error {
 // Consume exposes the decoded-event channel the Writer drains.
 func (b *KafkaBroker) Consume() <-chan StoredEvent { return b.out }
 
+// Ack commits the durable position for the first n records handed off via
+// Consume (FIFO order) that the Writer has now persisted. It marks their
+// offsets committable; franz-go's periodic auto-commit (and Close) then commits
+// them. Offsets thus advance only after persistence, so an interrupted process
+// or a ClickHouse outage redelivers un-acked records rather than losing them.
+func (b *KafkaBroker) Ack(n int) {
+	if n <= 0 {
+		return
+	}
+	b.pendingMu.Lock()
+	if n > len(b.pending) {
+		n = len(b.pending)
+	}
+	recs := make([]*kgo.Record, n)
+	copy(recs, b.pending[:n])
+	// Rebuild the queue without the popped prefix so the backing array (and the
+	// committed records it referenced) can be released.
+	rest := make([]*kgo.Record, len(b.pending)-n)
+	copy(rest, b.pending[n:])
+	b.pending = rest
+	b.pendingMu.Unlock()
+	if len(recs) > 0 {
+		b.client.MarkCommitRecords(recs...)
+	}
+}
+
 // consume runs the consumer-group read loop: poll, decode, hand off (with
-// backpressure), and mark the record committed only after a successful hand-off
-// so an interrupted process redelivers rather than loses events.
+// backpressure), and enqueue the record for offset-commit only after the Writer
+// persists it (via Ack) — so an interrupted process or a downstream outage
+// redelivers rather than loses events.
 func (b *KafkaBroker) consume(ctx context.Context) {
 	defer b.consumeWG.Done()
 	for {
@@ -306,7 +340,12 @@ func (b *KafkaBroker) consume(ctx context.Context) {
 			select {
 			case b.out <- e:
 				b.consumed.Add(ctx, 1, metric.WithAttributes(attribute.String("tenant", e.TenantID)))
-				b.client.MarkCommitRecords(rec)
+				// Do NOT commit here: the offset advances only once the Writer
+				// has persisted this record and calls Ack. Until then it stays
+				// in pending so a crash/outage redelivers it.
+				b.pendingMu.Lock()
+				b.pending = append(b.pending, rec)
+				b.pendingMu.Unlock()
 			case <-ctx.Done():
 				return
 			}
@@ -315,8 +354,10 @@ func (b *KafkaBroker) consume(ctx context.Context) {
 }
 
 // Close stops the consumer, flushes outstanding produces and commits marked
-// offsets (best-effort), then closes the hand-off channel so the Writer drains
-// and exits. Idempotent.
+// (i.e. Writer-persisted) offsets best-effort, then closes the hand-off channel
+// so the Writer drains and exits. Records still in pending (handed off but not
+// yet persisted) are deliberately left uncommitted so they redeliver on the
+// next start rather than being lost. Idempotent.
 func (b *KafkaBroker) Close() {
 	b.closeOnce.Do(func() {
 		// Stop the consume loop first so nothing new is written to out.
