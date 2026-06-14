@@ -113,10 +113,25 @@ func runGenerate(_ opts: Args) {
 
     // Determine how the seed will be sourced so the manifest's reproducibility
     // posture is honest (mirrors PolymorphismSeed.resolve precedence).
+    //
+    // A seed that is *explicitly supplied but invalid* must fail loudly: silently
+    // falling back to a random seed would turn a build the operator pinned for
+    // reproducibility into a non-reproducible one without warning.
+    let cliSeed = opts.value("build-seed")
+    let envSeed = ProcessInfo.processInfo.environment["KSEAL_BUILD_SEED"]?
+        .trimmingCharacters(in: .whitespacesAndNewlines)
     let seedDerivation: String
-    if let h = opts.value("build-seed"), PolymorphismSeed(hex: h) != nil {
+    if let h = cliSeed {
+        guard PolymorphismSeed(hex: h) != nil else {
+            fail("--build-seed must be hex-encoded and decode to at least 16 bytes " +
+                 "(generate one with `openssl rand -hex 32`).")
+        }
         seedDerivation = "explicit"
-    } else if let h = ProcessInfo.processInfo.environment["KSEAL_BUILD_SEED"], PolymorphismSeed(hex: h) != nil {
+    } else if let h = envSeed, !h.isEmpty {
+        guard PolymorphismSeed(hex: h) != nil else {
+            fail("KSEAL_BUILD_SEED must be hex-encoded and decode to at least 16 bytes " +
+                 "(generate one with `openssl rand -hex 32`), or unset it for a random seed.")
+        }
         seedDerivation = "env"
     } else {
         seedDerivation = "random"

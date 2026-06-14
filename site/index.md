@@ -1,35 +1,111 @@
-# kseal documentation
+---
+hide:
+  - navigation
+  - toc
+---
 
-**kseal** is a multi-tenant mobile & desktop app-shielding platform: on-device
-RASP, server-authoritative API attestation / trust sessions, build-time
-hardening, and the operational surface (multi-region, BYOK/CMK, on-prem, SIEM,
-NoOps CLI, MSSP console) to run it for thousands of SME tenants.
+<div class="kseal-hero" markdown>
 
-This site organizes the repository's existing documentation into one navigable
-place. Every page is sourced directly from the canonical Markdown in the repo —
-nothing here is duplicated.
+# Ship apps attackers can't quietly break
 
-## Start here
+**kseal** is a multi-plane mobile & desktop app-security platform: build-time
+hardening, on-device RASP, and server-authoritative API attestation — operated
+NoOps for thousands of SME tenants.
 
-- **New to kseal?** Read the [project overview](project-overview.md), then the
-  [architecture](ARCHITECTURE.md).
-- **Integrating an app?** See the SDK guides for
-  [Android](docs/build-hardening-android.md), [iOS](docs/build-hardening-ios.md),
-  and [desktop](docs/desktop-sdk.md) — and the runnable
-  [`examples/`](https://github.com/kennguy3n/kseal/tree/main/examples) quickstarts.
-- **Running the platform?** See [deployment](docs/deployment.md),
-  [multi-region](docs/multi-region.md), [BYOK](docs/byok.md), and
-  [SIEM integration](docs/siem-integration.md).
-- **Evaluating maturity?** See the
-  [feature parity matrix](docs/feature-parity-matrix.md).
+[Secure your app in 4 steps :material-arrow-right:](secure-your-app.md){ .md-button .md-button--primary }
+[Read the architecture](ARCHITECTURE.md){ .md-button }
 
-## Sections
+</div>
 
-| Section | Contents |
+<div class="grid cards" markdown>
+
+-   :material-hammer-wrench:{ .lg .middle } &nbsp; **Build-time hardening**
+
+    ---
+
+    Harden inside your own CI — no source upload, no per-build cloud compute.
+    String/resource encryption, bytecode obfuscation, native posture
+    verification, and a reproducible **build proof**.
+
+    [:octicons-arrow-right-24: Android](docs/build-hardening-android.md) ·
+    [iOS](docs/build-hardening-ios.md)
+
+-   :material-shield-check:{ .lg .middle } &nbsp; **On-device RASP**
+
+    ---
+
+    Runtime self-protection: root/jailbreak, hook/debugger and tamper detection
+    with a polymorphic, per-build posture so a bypass crafted for one release
+    decays against the next.
+
+    [:octicons-arrow-right-24: Desktop SDK](docs/desktop-sdk.md)
+
+-   :material-server-network:{ .lg .middle } &nbsp; **API attestation & trust**
+
+    ---
+
+    Server-authoritative trust sessions bind each request to an attested,
+    untampered app instance — so your backend can refuse traffic from
+    compromised clients.
+
+    [:octicons-arrow-right-24: Threat model](docs/threat-model.md)
+
+-   :material-cloud-cog:{ .lg .middle } &nbsp; **NoOps operations**
+
+    ---
+
+    Multi-region, BYOK/CMK, on-prem, SIEM, signed kill-switch and canary
+    rollout — run security for 5,000+ tenants without an ops team.
+
+    [:octicons-arrow-right-24: Deployment](docs/deployment.md)
+
+</div>
+
+## A guided path to a more secure app
+
+You don't need to be a security engineer. The **[Secure your app](secure-your-app.md)**
+walkthrough takes you from zero to an attested, hardened release in four steps —
+with sensible defaults at every turn and copy that explains *why* each control
+matters.
+
+<div class="grid cards kseal-steps" markdown>
+
+-   **1 · Install the plugin**
+
+    Add the Gradle or Xcode plugin. One line, off-the-shelf defaults that are
+    safe to ship.
+
+-   **2 · Harden the build**
+
+    Encrypt strings, obfuscate bytecode, verify native mitigations — all inside
+    your existing build.
+
+-   **3 · Register the build proof**
+
+    Publish a tamper-evident manifest of exactly what was hardened to the
+    control plane.
+
+-   **4 · Verify at runtime**
+
+    The SDK attests the running app against its build proof, so your backend
+    trusts only genuine instances.
+
+</div>
+
+[Start the walkthrough :material-arrow-right:](secure-your-app.md){ .md-button .md-button--primary }
+
+## Find your way around
+
+| If you want to… | Go to |
 |---|---|
-| **Getting started** | Project overview, threat model |
-| **Architecture** | Four-plane architecture, design proposal |
-| **SDK guides** | Android / iOS / desktop hardening + integration, CLI |
-| **Server & ops** | Deployment, multi-region, BYOK, on-prem, SIEM, policy packs, MSSP console, cost model |
-| **Compliance** | MASVS mapping & evidence, app-store review notes |
-| **Parity matrix** | Honest capability comparison vs. incumbents |
+| Make an app more secure, fast | **[Secure your app](secure-your-app.md)** — the guided 4-step path |
+| Understand the design | [Architecture overview](ARCHITECTURE.md) · [Design proposal](PROPOSAL.md) |
+| Integrate build hardening | [Android (Gradle)](docs/build-hardening-android.md) · [iOS (Xcode)](docs/build-hardening-ios.md) |
+| Operate the platform | [Deployment](docs/deployment.md) · [Multi-region](docs/multi-region.md) · [BYOK](docs/byok.md) · [SIEM](docs/siem-integration.md) |
+| Produce compliance evidence | [MASVS mapping](docs/masvs-mapping.md) · [MASVS evidence report](docs/masvs-evidence.md) |
+| Judge maturity honestly | [Feature parity matrix](docs/feature-parity-matrix.md) |
+
+!!! info "Everything here is sourced from the repository"
+    This site is assembled directly from the canonical Markdown in the
+    [kseal repository](https://github.com/kennguy3n/kseal) — no doc body is
+    duplicated, so the docs you read are exactly the docs that ship.

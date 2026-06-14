@@ -6,6 +6,7 @@ import io.kseal.gradle.internal.Json
 import io.kseal.gradle.internal.ObfuscationStrength
 import java.io.File
 import org.gradle.api.DefaultTask
+import org.gradle.api.InvalidUserDataException
 import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.provider.ListProperty
@@ -62,7 +63,15 @@ abstract class ObfuscateBytecodeTask : DefaultTask() {
         outDir.mkdirs()
 
         val root = classesDir.get().asFile
-        val strengthLevel = ObfuscationStrength.parse(strength.getOrElse(ObfuscationStrength.LOW.name))
+        val configured = strength.getOrElse(ObfuscationStrength.LOW.name)
+        val strengthLevel = try {
+            ObfuscationStrength.parseStrict(configured)
+        } catch (e: IllegalArgumentException) {
+            throw InvalidUserDataException(
+                "kseal: invalid ksealHarden { obfuscation { strength } } — ${e.message}",
+                e,
+            )
+        }
 
         // Partition inputs: .class files are obfuscated, everything else copied through.
         val classFiles = LinkedHashMap<String, ByteArray>()

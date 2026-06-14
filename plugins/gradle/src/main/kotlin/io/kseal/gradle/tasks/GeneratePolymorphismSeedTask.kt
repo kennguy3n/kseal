@@ -7,6 +7,7 @@ import io.kseal.gradle.internal.SeedDeriver
 import java.nio.file.Files
 import java.nio.file.attribute.PosixFilePermission
 import org.gradle.api.DefaultTask
+import org.gradle.api.InvalidUserDataException
 import org.gradle.api.file.ConfigurableFileCollection
 import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.provider.Property
@@ -73,15 +74,22 @@ abstract class GeneratePolymorphismSeedTask : DefaultTask() {
             else -> "content"
         }
 
-        val seed = SeedDeriver.derive(
-            SeedDeriver.Inputs(
-                explicitSeedHex = explicit,
-                randomize = randomized,
-                masterKeyHex = master,
-                projectSalt = projectSalt.get(),
-                inputsDigestHex = inputsDigest,
-            ),
-        )
+        // A bad pinned seed is operator misconfiguration, not an internal error:
+        // surface it as InvalidUserDataException so Gradle prints the actionable
+        // message cleanly (matching ObfuscateBytecodeTask) instead of a raw stack.
+        val seed = try {
+            SeedDeriver.derive(
+                SeedDeriver.Inputs(
+                    explicitSeedHex = explicit,
+                    randomize = randomized,
+                    masterKeyHex = master,
+                    projectSalt = projectSalt.get(),
+                    inputsDigestHex = inputsDigest,
+                ),
+            )
+        } catch (e: IllegalArgumentException) {
+            throw InvalidUserDataException("kseal: ${e.message}", e)
+        }
 
         val seedHex = Crypto.hex(seed)
         val digestHex = Crypto.sha256Hex(seed)

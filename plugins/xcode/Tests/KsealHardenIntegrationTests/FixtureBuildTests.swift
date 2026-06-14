@@ -119,13 +119,19 @@ final class FixtureBuildTests: XCTestCase {
     }
 
     private func findFile(named name: String, under root: URL) throws -> URL {
-        guard let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil) else {
+        let keys: [URLResourceKey] = [.isRegularFileKey]
+        guard let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: keys) else {
             throw XCTSkip("could not enumerate \(root.path)")
         }
         for case let url as URL in enumerator where url.lastPathComponent == name {
-            return url
+            // SwiftPM's scratch tree also contains *directories* named after the
+            // product (e.g. `plugins/outputs/<pkg>/HardenedApp/`); only a regular
+            // file is a real artifact we can read, so skip everything else rather
+            // than returning a directory and failing later with "Is a directory".
+            let isRegularFile = (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile ?? false
+            if isRegularFile { return url }
         }
-        XCTFail("expected to find \(name) under \(root.path)")
+        XCTFail("expected to find file \(name) under \(root.path)")
         throw XCTSkip("\(name) not found")
     }
 }

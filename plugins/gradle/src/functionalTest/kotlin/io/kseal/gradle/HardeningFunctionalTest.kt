@@ -19,14 +19,18 @@ class HardeningFunctionalTest {
 
     private val explicitSeed = "aa".repeat(32)
 
-    private fun runner(vararg args: String): GradleRunner =
+    private fun runner(vararg args: String): GradleRunner = runnerIn(projectDir, *args)
+
+    private fun runnerIn(dir: File, vararg args: String): GradleRunner =
         GradleRunner.create()
-            .withProjectDir(projectDir)
+            .withProjectDir(dir)
             .withPluginClasspath()
             .withArguments(*args, "--stacktrace")
             .forwardOutput()
 
-    private fun writeFixture(registryBlock: String) {
+    private fun writeFixture(registryBlock: String) = writeFixtureInto(projectDir, registryBlock)
+
+    private fun writeFixtureInto(projectDir: File, registryBlock: String) {
         File(projectDir, "settings.gradle.kts").writeText(
             """
             rootProject.name = "fixture"
@@ -94,11 +98,17 @@ class HardeningFunctionalTest {
         return cw.toByteArray()
     }
 
-    private fun manifestText(): String {
-        val f = File(projectDir, "build/kseal/build-proof/manifest.json")
+    private fun manifestText(): String = manifestTextIn(projectDir)
+
+    private fun manifestTextIn(dir: File): String {
+        val f = File(dir, "build/kseal/build-proof/manifest.json")
         assertTrue(f.isFile, "manifest.json must be emitted")
         return f.readText()
     }
+
+    private fun jsonString(doc: String, key: String): String =
+        Regex("\"$key\"\\s*:\\s*\"([^\"]*)\"").find(doc)?.groupValues?.get(1)
+            ?: error("manifest missing string field '$key'")
 
     @Test
     fun `offline pipeline emits manifest, seals strings, keeps mapping intact`() {
@@ -175,5 +185,47 @@ class HardeningFunctionalTest {
         listOf(":ksealHardenResources", ":ksealStripDebugMetadata", ":ksealBuildProofManifest").forEach { task ->
             assertEquals(TaskOutcome.FROM_CACHE, cached.task(task)?.outcome, "$task should be FROM-CACHE")
         }
+    }
+
+    @Test
+    fun `two independent clean builds of the same inputs are byte-for-byte reproducible`(@TempDir other: File) {
+        // First build in the default project dir.
+        writeFixture("registry { offline.set(true) }")
+        runner("ksealHarden").build()
+        val first = manifestText()
+
+        // Second build in a *separate* project directory (no shared build dir or
+        // cache), pinned to the same explicit seed and identical inputs.
+        writeFixtureInto(other, "registry { offline.set(true) }")
+        runnerIn(other, "ksealHarden").build()
+        val second = manifestTextIn(other)
+
+        // The integrity-bearing fields must match across independent machines:
+        // the build hash, the seed digest, and the artifacts-root over all digests.
+        assertEquals(jsonString(first, "build_hash"), jsonString(second, "build_hash"), "build_hash must be reproducible")
+        assertEquals(jsonString(first, "artifacts_root"), jsonString(second, "artifacts_root"), "artifacts_root must be reproducible")
+        assertEquals(jsonString(first, "digest"), jsonString(second, "digest"), "seed digest must be reproducible")
+        assertTrue(first.contains("\"reproducible\": true"), "manifest must advertise reproducible posture")
+
+        // Sanity: the hardened artifacts themselves are identical, not just the manifest summary.
+        val sealedA = File(projectDir, "build/kseal/hardened/assets/kseal/strings.sealed").readBytes()
+        val sealedB = File(other, "build/kseal/hardened/assets/kseal/strings.sealed").readBytes()
+        assertTrue(sealedA.contentEquals(sealedB), "sealed string blob must be byte-identical for identical inputs")
+    }
+
+    @Test
+    fun `a misconfigured obfuscation strength fails with an actionable message`() {
+        writeFixture(
+            """
+            registry { offline.set(true) }
+            obfuscation { enabled.set(true); strength.set("maximum") }
+            """.trimIndent(),
+        )
+        val result = runner("ksealObfuscateBytecode").buildAndFail()
+        assertTrue(
+            result.output.contains("invalid ksealHarden { obfuscation { strength } }"),
+            "error must point at the offending DSL block",
+        )
+        assertTrue(result.output.contains("off, low, medium, high"), "error must list the valid values")
     }
 }

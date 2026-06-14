@@ -1,0 +1,88 @@
+/* kseal docs — light-touch polish on top of Material for MkDocs.
+   Uses Material's CSS custom properties so light/dark palettes both work and
+   contrast stays WCAG AA. No layout overrides that would break responsiveness. */
+
+:root {
+  --kseal-hero-grad-a: #5161ce;
+  --kseal-hero-grad-b: #7b3fe4;
+}
+
+/* ---- Landing hero ---------------------------------------------------------- */
+.kseal-hero {
+  margin: 1.2rem 0 2.4rem;
+  padding: 2.6rem 2rem 2.2rem;
+  border-radius: 1rem;
+  text-align: center;
+  color: #fff;
+  background: linear-gradient(120deg, var(--kseal-hero-grad-a), var(--kseal-hero-grad-b));
+  box-shadow: 0 12px 40px rgba(81, 97, 206, 0.28);
+}
+
+.kseal-hero h1 {
+  margin: 0 0 0.6rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  font-size: 2.2rem;
+  line-height: 1.15;
+  color: #fff;
+}
+
+.kseal-hero p {
+  max-width: 46rem;
+  margin: 0 auto 1.4rem;
+  font-size: 0.92rem;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+/* Buttons sit on a coloured hero, so invert them for contrast. */
+.kseal-hero .md-button {
+  margin: 0.3rem 0.35rem 0;
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.7);
+}
+
+.kseal-hero .md-button--primary {
+  background-color: #fff;
+  color: var(--kseal-hero-grad-a);
+  border-color: #fff;
+}
+
+.kseal-hero .md-button:focus,
+.kseal-hero .md-button:hover {
+  background-color: rgba(255, 255, 255, 0.92);
+  border-color: #fff;
+  color: var(--kseal-hero-grad-b);
+}
+
+@media screen and (min-width: 60em) {
+  .kseal-hero h1 { font-size: 2.7rem; }
+  .kseal-hero p { font-size: 1rem; }
+}
+
+/* ---- Numbered "guided path" step cards ------------------------------------- */
+/* The card title is the first paragraph's bold run; tint it with the brand. */
+.grid.cards.kseal-steps > ul > li > p:first-child > strong,
+.grid.cards.kseal-steps > :is(ul) > li > p:first-child > strong {
+  color: var(--md-primary-fg-color);
+}
+
+/* Make the four step cards feel like a sequence, not four unrelated tiles. */
+.grid.cards.kseal-steps > ul > li,
+.grid.cards.kseal-steps > :is(ul) > li {
+  border-top: 3px solid var(--md-primary-fg-color);
+}
+
+/* ---- Cards: gentle lift on hover (respects reduced-motion) ----------------- */
+.grid.cards > ul > li,
+.grid.cards > :is(ul) > li {
+  transition: box-shadow 120ms ease, transform 120ms ease;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .grid.cards > ul > li:hover,
+  .grid.cards > :is(ul) > li:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+  }
+}

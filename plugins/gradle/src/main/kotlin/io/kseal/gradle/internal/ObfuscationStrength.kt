@@ -42,8 +42,23 @@ internal enum class ObfuscationStrength {
     }
 
     companion object {
-        /** Parses a case-insensitive DSL value, falling back to [LOW] for unknown input. */
-        fun parse(value: String?): ObfuscationStrength =
-            values().firstOrNull { it.name.equals(value?.trim(), ignoreCase = true) } ?: LOW
+        /** Comma-separated list of the accepted DSL values, for error messages. */
+        val accepted: String
+            get() = values().joinToString(", ") { it.name.lowercase() }
+
+        /**
+         * Parses a case-insensitive, whitespace-tolerant DSL value.
+         *
+         * Throws [IllegalArgumentException] with the list of valid values on
+         * unrecognized input rather than silently downgrading to a weaker level —
+         * a typo'd `strength` must fail loudly, never quietly reduce protection.
+         */
+        fun parseStrict(value: String?): ObfuscationStrength {
+            val normalized = value?.trim()
+            return values().firstOrNull { it.name.equals(normalized, ignoreCase = true) }
+                ?: throw IllegalArgumentException(
+                    "unknown obfuscation strength '${value.orEmpty()}'. Valid values are: $accepted.",
+                )
+        }
     }
 }
