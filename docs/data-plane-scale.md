@@ -130,6 +130,12 @@ TTL time_bucket + INTERVAL <retention> DAY;
 - **Dedup:** `ReplacingMergeTree` keyed by the sort order collapses redelivered
   events (same `id`) — at-least-once delivery becomes effectively-once at query
   time. Counts use `count(DISTINCT id)` so they are correct even before a merge.
+  Row-returning reads (`Query`/`ListEvents`) use `FINAL` to collapse duplicates
+  on the fly. Because every read pins `tenant_id` (the leading sort key) and a
+  time range, `FINAL` only merges parts within one tenant's key range, not the
+  whole table — cheap in steady state. If read latency becomes a concern at very
+  high volume, migrate these paths to an `argMax` aggregation or a materialized
+  view (no `AnalyticsStore` interface change required).
 - **Partitioning:** monthly partitions keep retention drops and time-range scans
   cheap.
 - **Pagination:** keyset pagination orders recent-first by `(time_bucket, id)`
