@@ -58,12 +58,14 @@ describe("FleetOverviewPage", () => {
       expect(screen.getByText("Fleet overview")).toBeInTheDocument(),
     );
 
-    // Managed tenants = 2, apps = 5, events = 300, sessions = 100.
-    const tenants = screen.getByText("Managed tenants").closest(".card");
+    // Managed tenants = 2, apps = 5, events = 300, sessions = 100. Scope to the
+    // "Fleet totals" region since "Apps" also appears as a table column header.
+    const totals = within(screen.getByRole("region", { name: "Fleet totals" }));
+    const tenants = totals.getByText("Managed tenants").closest(".card");
     expect(within(tenants as HTMLElement).getByText("2")).toBeInTheDocument();
-    const apps = screen.getByText("Apps").closest(".card");
+    const apps = totals.getByText("Apps").closest(".card");
     expect(within(apps as HTMLElement).getByText("5")).toBeInTheDocument();
-    const events = screen.getByText("Events (24h)").closest(".card");
+    const events = totals.getByText("Events (24h)").closest(".card");
     expect(within(events as HTMLElement).getByText("300")).toBeInTheDocument();
 
     // High-risk session rate = (10+0)/100 = 10.0% (scoped to the rollup card,

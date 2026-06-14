@@ -2,7 +2,54 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Semantic design tokens. Every surface/text/border color in the console
+ * resolves through these RGB-triplet custom properties (consumed by the
+ * Tailwind `colors` map in tailwind.config.js, e.g. `bg-panel`, `text-content`),
+ * so light/dark is a single class swap on <html> rather than per-element
+ * `dark:` variants. Triplets (not hex) so Tailwind's `<alpha-value>` keeps
+ * working — `bg-panel/60` etc. The default (`:root`) is the light theme; `.dark`
+ * overrides it. index.html ships `class="dark"` so the first paint matches the
+ * historical dark look with no flash before the theme module runs.
+ */
 :root {
+  --c-page: 248 250 252; /* slate-50 */
+  --c-panel: 255 255 255; /* white */
+  --c-raised: 241 245 249; /* slate-100 */
+  --c-hover: 241 245 249; /* slate-100 */
+  --c-field: 255 255 255; /* white */
+  --c-heading: 15 23 42; /* slate-900 */
+  --c-content: 51 65 85; /* slate-700 */
+  --c-muted: 71 85 105; /* slate-600 */
+  --c-subtle: 100 116 139; /* slate-500 */
+  --c-line: 226 232 240; /* slate-200 */
+  --c-line-strong: 203 213 225; /* slate-300 */
+  --c-accent: 79 70 229; /* indigo-600 */
+  --c-accent-strong: 67 56 202; /* indigo-700 */
+  --c-accent-fg: 255 255 255;
+}
+
+.dark {
+  --c-page: 11 16 32; /* ink #0b1020 */
+  --c-panel: 17 24 43; /* panel #11182b */
+  --c-raised: 30 41 59; /* slate-800 */
+  --c-hover: 30 41 59; /* slate-800 */
+  --c-field: 15 23 42; /* slate-900 */
+  --c-heading: 248 250 252; /* slate-50 */
+  --c-content: 226 232 240; /* slate-200 */
+  --c-muted: 148 163 184; /* slate-400 */
+  --c-subtle: 100 116 139; /* slate-500 */
+  --c-line: 30 41 59; /* slate-800 */
+  --c-line-strong: 51 65 85; /* slate-700 */
+  --c-accent: 99 102 241; /* indigo-500 */
+  --c-accent-strong: 129 140 248; /* indigo-400 */
+  --c-accent-fg: 255 255 255;
+}
+
+:root {
+  color-scheme: light;
+}
+.dark {
   color-scheme: dark;
 }
 
@@ -14,41 +61,56 @@ body,
 
 body {
   margin: 0;
-  background-color: theme("colors.ink");
-  color: theme("colors.slate.200");
+  background-color: rgb(var(--c-page));
+  color: rgb(var(--c-content));
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
     Helvetica, Arial, sans-serif;
 }
 
+/* Honor reduced-motion for spinners/transitions. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
 @layer components {
   .card {
-    @apply rounded-xl border border-slate-800 bg-panel p-5 shadow-sm;
+    @apply rounded-xl border border-line bg-panel p-5 shadow-sm;
   }
   .btn {
     @apply inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50;
   }
   .btn-primary {
-    @apply btn bg-indigo-500 text-white hover:bg-indigo-400;
+    @apply btn bg-accent text-accent-fg hover:bg-accent-strong;
   }
   .btn-ghost {
-    @apply btn border border-slate-700 text-slate-200 hover:bg-slate-800;
+    @apply btn border border-line-strong text-content hover:bg-hover;
   }
   .btn-danger {
-    @apply btn border border-rose-700/60 text-rose-300 hover:bg-rose-900/30;
+    @apply btn border border-rose-500/60 text-rose-600 hover:bg-rose-500/10 dark:text-rose-300 dark:hover:bg-rose-900/30;
   }
   .input {
-    @apply w-full rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-500 focus:border-indigo-500;
+    @apply w-full rounded-lg border border-line-strong bg-field px-3 py-2 text-sm text-heading outline-none placeholder:text-subtle focus:border-accent;
   }
   .label {
-    @apply mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400;
+    @apply mb-1 block text-xs font-medium uppercase tracking-wide text-muted;
   }
   .badge {
     @apply inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium;
   }
   .th {
-    @apply px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-400;
+    @apply px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted;
   }
   .td {
-    @apply px-3 py-2 text-sm text-slate-200;
+    @apply px-3 py-2 text-sm text-content;
+  }
+  /* Visible keyboard focus ring for interactive elements (WCAG 2.4.7). */
+  .focus-ring {
+    @apply outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-page;
   }
 }

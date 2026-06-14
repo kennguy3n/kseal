@@ -1,8 +1,10 @@
 import { useCallback } from "react";
 import { useQueries, useQueryClient } from "@tanstack/react-query";
 import { ConnectError, type Client } from "@connectrpc/connect";
+import type { EventRecord } from "../gen/kseal/v1/query_pb";
 import type { QueryService } from "../gen/kseal/v1/query_service_pb";
 import { useClients, useSession } from "../state/useAuth";
+import type { SignalRecord } from "../lib/events";
 import {
   computeFleetRollup,
   toNum,
@@ -10,6 +12,18 @@ import {
   type TenantLoadStatus,
   type TenantSnapshot,
 } from "../lib/rollup";
+
+/** Projects a wire EventRecord onto the console's narrowed SignalRecord. */
+export function toSignalRecord(e: EventRecord): SignalRecord {
+  return {
+    id: e.id,
+    appId: e.appId,
+    eventType: e.eventType,
+    riskLevel: e.riskLevel,
+    region: e.countryOrRegion ?? "",
+    timestampMs: toNum(e.timestamp),
+  };
+}
 
 type QueryClient = Client<typeof QueryService>;
 
@@ -60,6 +74,7 @@ export async function fetchTenantSnapshot(
       webhookCount: toNum(ov.value.webhookCount),
       eventsLast24h: toNum(ov.value.eventsLast24h),
     };
+    snapshot.recentSignals = ov.value.recentEvents.map(toSignalRecord);
   } else {
     errors.push(`overview: ${errMessage(ov.reason)}`);
   }

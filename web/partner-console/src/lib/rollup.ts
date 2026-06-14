@@ -12,6 +12,12 @@
 // from the trust-level session distribution (high-risk and medium-risk shares)
 // and the attestation-failure rate, which ARE exposed. See docs/mssp-console.md.
 
+import {
+  observedRegions,
+  primaryRegion,
+  type SignalRecord,
+} from "./events";
+
 // Short TrustLevel keys as returned by GetTrustSessionStats.sessions_by_trust_level
 // (server trims the TRUST_LEVEL_ prefix).
 export const TRUST_LEVEL_KEYS = [
@@ -53,6 +59,10 @@ export interface TenantSnapshot {
   status: TenantLoadStatus;
   overview?: TenantOverviewData;
   trust?: TrustSessionData;
+  // Recent risk events for this tenant (from GetTenantOverview.recent_events).
+  // Powers the fleet → tenant → signal drill-down and the recent-activity
+  // sparkline without any extra RPC. Absent/empty when the read failed.
+  recentSignals?: readonly SignalRecord[];
   errors: readonly string[];
 }
 
@@ -70,6 +80,11 @@ export interface TenantHealth {
   mediumRiskRate: number;
   healthScore: number;
   band: HealthBand;
+  // Most-observed region across recent signals ("" when none observed) and the
+  // full sorted set, both derived client-side from recent_events.
+  primaryRegion: string;
+  regions: readonly string[];
+  recentSignals: readonly SignalRecord[];
   errors: readonly string[];
 }
 
@@ -78,6 +93,8 @@ export interface FleetRollup {
   tenantCount: number;
   healthyTenants: number;
   degradedTenants: number;
+  // Per-health-band tenant counts for the at-a-glance summary.
+  bandCounts: Record<HealthBand, number>;
   totalApps: number;
   totalBuilds: number;
   totalActivePolicies: number;
@@ -90,6 +107,9 @@ export interface FleetRollup {
   attestationFailureRate: number;
   highRiskSessionRate: number;
   mediumRiskSessionRate: number;
+  // All tenants' recent signals merged + sorted newest-first, for the
+  // fleet-wide recent-activity sparkline.
+  recentSignals: SignalRecord[];
   tenants: TenantHealth[];
 }
 
@@ -164,6 +184,8 @@ export function tenantHealthFromSnapshot(s: TenantSnapshot): TenantHealth {
     hasData,
   });
 
+  const recentSignals = s.recentSignals ?? [];
+
   return {
     tenantId: s.tenantId,
     status: s.status,
@@ -175,8 +197,15 @@ export function tenantHealthFromSnapshot(s: TenantSnapshot): TenantHealth {
     mediumRiskRate,
     healthScore,
     band,
+    primaryRegion: primaryRegion(recentSignals),
+    regions: observedRegions(recentSignals),
+    recentSignals,
     errors: s.errors,
   };
+}
+
+function emptyBandCounts(): Record<HealthBand, number> {
+  return { healthy: 0, watch: 0, "at-risk": 0, unknown: 0 };
 }
 
 function emptyTrustLevels(): Record<TrustLevelKey, number> {
@@ -203,6 +232,14 @@ export function computeFleetRollup(snapshots: TenantSnapshot[]): FleetRollup {
   let degradedTenants = 0;
 
   const tenants = snapshots.map(tenantHealthFromSnapshot);
+  const bandCounts = emptyBandCounts();
+  const recentSignals: SignalRecord[] = [];
+
+  for (const t of tenants) {
+    bandCounts[t.band] += 1;
+    for (const sig of t.recentSignals) recentSignals.push(sig);
+  }
+  recentSignals.sort((a, b) => b.timestampMs - a.timestampMs);
 
   for (const s of snapshots) {
     if (s.overview) {
@@ -237,6 +274,7 @@ export function computeFleetRollup(snapshots: TenantSnapshot[]): FleetRollup {
     tenantCount: snapshots.length,
     healthyTenants,
     degradedTenants,
+    bandCounts,
     totalApps,
     totalBuilds,
     totalActivePolicies,
@@ -249,6 +287,7 @@ export function computeFleetRollup(snapshots: TenantSnapshot[]): FleetRollup {
     attestationFailureRate: safeRate(totalAttestationsFailed, totalTokensIssued),
     highRiskSessionRate: safeRate(highRisk, totalSessions),
     mediumRiskSessionRate: safeRate(mediumRisk, totalSessions),
+    recentSignals,
     tenants,
   };
 }
