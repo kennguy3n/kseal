@@ -161,7 +161,12 @@ TTL time_bucket + INTERVAL <retention> DAY;
 ## Durability & backpressure
 
 - **Non-blocking accept:** `Publish` sheds (`ErrBrokerFull`) instead of blocking
-  the request path; per-tenant quota + isolation are preserved upstream.
+  the request path; per-tenant quota + isolation are preserved upstream. Under
+  the Kafka backend "accepted" means *admitted to the pipeline* (handed to the
+  async producer), not *durably committed*: the request path never blocks on the
+  broker ack. A produce that fails after retries increments
+  `kseal.broker.publish_errors` (alert on it); durability is then owned by the
+  at-least-once + dedup path below, not by the accept count.
 - **At-least-once:** Kafka offsets are marked committed only after a record is
   handed to the writer; an interrupted process redelivers rather than loses.
 - **Idempotent producer + `AllISR` acks:** retries never reorder or duplicate
