@@ -139,7 +139,9 @@ internal class NativeTrustCore private constructor(
     override fun computeRiskLevel(riskBits: Long): TrustLevel = coreLock.read {
         check(!closed) { "core is closed" }
         val code = NativeBridge.nativeComputeRiskLevel(handle, riskBits)
-        if (code < 0) throw TrustCoreException("computeRiskLevel failed: status=$code")
+        if (code < 0) {
+            throw TrustCoreException(KsealErrorCode.fromStatus(code), "computeRiskLevel failed: status=$code")
+        }
         TrustLevel.fromCode(code)
     }
 
