@@ -1,6 +1,7 @@
 import { useEffect, useId, useState } from "react";
 import type { HealthBand, FleetRollup } from "../lib/rollup";
 import { isFilterActive, type FilterState } from "../lib/filter";
+import { hasActiveThresholds } from "../lib/thresholds";
 import { healthBandLabel, healthBandTone } from "../lib/health";
 import type { SavedView } from "../lib/views";
 import type { UseFleetViewResult } from "../hooks/useFleetView";
@@ -24,7 +25,10 @@ export function FleetControls({
   const { filter, thresholds, setFilter, setThresholds } = view;
   const searchId = useId();
   const regionId = useId();
-  const active = isFilterActive(filter) || view.breachCount > 0;
+  // Show Reset whenever there is non-default state to clear: an active filter,
+  // or any threshold set (even with zero current breaches, so the operator can
+  // always clear thresholds they configured).
+  const active = isFilterActive(filter) || hasActiveThresholds(thresholds);
 
   const patch = (p: Partial<FilterState>) => setFilter({ ...filter, ...p });
 
