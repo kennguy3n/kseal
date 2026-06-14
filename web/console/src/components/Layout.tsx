@@ -142,6 +142,16 @@ export function Layout() {
     document.body.style.overflow = "hidden";
     closeButtonRef.current?.focus();
 
+    // If the viewport grows to desktop while the drawer is open, the overlay
+    // is hidden by `lg:hidden` CSS but the JS scroll-lock would otherwise
+    // linger until the next navigation. Close proactively so the cleanup
+    // restores body scroll right away (1024px === Tailwind `lg`).
+    const desktop = window.matchMedia("(min-width: 1024px)");
+    function onDesktop(e: MediaQueryListEvent) {
+      if (e.matches) setMobileOpen(false);
+    }
+    desktop.addEventListener("change", onDesktop);
+
     function focusableItems(): HTMLElement[] {
       const root = drawerRef.current;
       if (!root) return [];
@@ -179,6 +189,7 @@ export function Layout() {
     return () => {
       document.body.style.overflow = previousOverflow;
       document.removeEventListener("keydown", onKey);
+      desktop.removeEventListener("change", onDesktop);
       // Return focus to the trigger when the drawer's focused element is torn
       // down (focus falls back to <body>), so keyboard users land back on the
       // hamburger rather than being stranded. Guarded so we never steal focus

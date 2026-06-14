@@ -34,8 +34,14 @@ export function defaultApiBaseUrl(): string {
   return normalize(chosen);
 }
 
-// Public documentation tree (GitHub). Operators can override at deploy time via
-// window.__KSEAL_ENV__.docsBaseUrl without rebuilding the image.
+// Public documentation tree (GitHub). Resolved with the same precedence as
+// defaultApiBaseUrl so both follow one contract:
+//
+//   1. window.__KSEAL_ENV__.docsBaseUrl — injected at container start (NoOps)
+//      so an operator can point at their own docs mirror without a rebuild.
+//   2. import.meta.env.VITE_KSEAL_DOCS_BASE_URL — Vite-inlined at build time
+//      (e.g. a local docs server during development).
+//   3. the public GitHub docs tree — universal default.
 const DEFAULT_DOCS_BASE_URL =
   "https://github.com/kennguy3n/kseal/blob/main/docs";
 
@@ -44,5 +50,6 @@ export function docsBaseUrl(): string {
     typeof window !== "undefined"
       ? window.__KSEAL_ENV__?.docsBaseUrl
       : undefined;
-  return normalize(runtime || DEFAULT_DOCS_BASE_URL);
+  const inlined = import.meta.env.VITE_KSEAL_DOCS_BASE_URL;
+  return normalize(runtime || inlined || DEFAULT_DOCS_BASE_URL);
 }
