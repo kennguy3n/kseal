@@ -38,9 +38,13 @@ export interface FilterState {
 // that need a working copy must spread them (and deep-copy the bands array).
 export const DEFAULT_SORT: SortState = Object.freeze({ key: "health", dir: "asc" });
 
+// Deep-frozen: the bands array is frozen too so even an in-place push/splice on
+// EMPTY_FILTER.bands throws rather than silently corrupting the shared constant.
+const EMPTY_BANDS: HealthBand[] = Object.freeze([]) as unknown as HealthBand[];
+
 export const EMPTY_FILTER: FilterState = Object.freeze({
   search: "",
-  bands: [],
+  bands: EMPTY_BANDS,
   region: "",
   onlyBreaching: false,
 });
