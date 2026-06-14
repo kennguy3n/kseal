@@ -119,6 +119,7 @@ export function Layout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const drawerRef = useRef<HTMLDivElement>(null);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
 
   function onLogout() {
     logout();
@@ -136,6 +137,8 @@ export function Layout() {
   useEffect(() => {
     if (!mobileOpen) return;
     const previousOverflow = document.body.style.overflow;
+    // The trigger persists in the mobile header, so capturing it now is stable.
+    const trigger = menuButtonRef.current;
     document.body.style.overflow = "hidden";
     closeButtonRef.current?.focus();
 
@@ -176,6 +179,13 @@ export function Layout() {
     return () => {
       document.body.style.overflow = previousOverflow;
       document.removeEventListener("keydown", onKey);
+      // Return focus to the trigger when the drawer's focused element is torn
+      // down (focus falls back to <body>), so keyboard users land back on the
+      // hamburger rather than being stranded. Guarded so we never steal focus
+      // from something else the user moved to.
+      if (document.activeElement === document.body) {
+        trigger?.focus();
+      }
     };
   }, [mobileOpen]);
 
@@ -223,6 +233,7 @@ export function Layout() {
           <div className="flex items-center gap-2">
             <ThemeToggle />
             <button
+              ref={menuButtonRef}
               type="button"
               onClick={() => setMobileOpen(true)}
               aria-label="Open navigation menu"

@@ -62,6 +62,47 @@ describe("theme", () => {
     expect(localStorage.getItem(STORAGE_KEY)).toBe("dark");
   });
 
+  it("does not lock in an OS-inferred theme until the user chooses", () => {
+    stubMatchMedia(true); // system = dark, nothing stored
+    const { result } = renderHook(() => useTheme(), { wrapper });
+
+    // OS preference is applied but NOT persisted — the fallback stays live.
+    expect(result.current.theme).toBe("dark");
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
+
+    // An explicit toggle is what persists the choice.
+    act(() => result.current.toggleTheme());
+    expect(result.current.theme).toBe("light");
+    expect(localStorage.getItem(STORAGE_KEY)).toBe("light");
+  });
+
+  it("follows OS preference changes until an explicit choice is made", () => {
+    let handler: ((e: MediaQueryListEvent) => void) | null = null;
+    const mql = {
+      matches: false,
+      media: "(prefers-color-scheme: dark)",
+      addEventListener: (_type: string, h: (e: MediaQueryListEvent) => void) => {
+        handler = h;
+      },
+      removeEventListener: vi.fn(),
+    };
+    vi.stubGlobal("matchMedia", vi.fn().mockReturnValue(mql));
+
+    const { result } = renderHook(() => useTheme(), { wrapper });
+    expect(result.current.theme).toBe("light");
+
+    // OS flips to dark while no explicit choice exists → adopt it, don't persist.
+    act(() => handler?.({ matches: true } as MediaQueryListEvent));
+    expect(result.current.theme).toBe("dark");
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
+
+    // Once the user chooses, the choice is persisted and OS tracking stops.
+    act(() => result.current.toggleTheme());
+    expect(result.current.theme).toBe("light");
+    expect(localStorage.getItem(STORAGE_KEY)).toBe("light");
+  });
+
   it("syncs the theme across tabs via the storage event", () => {
     stubMatchMedia(false);
     const { result } = renderHook(() => useTheme(), { wrapper });

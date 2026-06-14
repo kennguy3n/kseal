@@ -304,7 +304,7 @@ export function InfoHint({
         type="button"
         aria-label={label}
         aria-expanded={open}
-        aria-controls={panelId}
+        aria-controls={open ? panelId : undefined}
         onClick={() => setOpen((v) => !v)}
         onKeyDown={(e) => {
           if (e.key === "Escape") setOpen(false);

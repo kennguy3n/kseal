@@ -19,6 +19,22 @@ function systemPrefersDark(): boolean {
   );
 }
 
+// True when the user has made an explicit, persisted theme choice. Until then
+// the app follows the OS preference dynamically rather than locking it in.
+export function hasStoredThemeChoice(): boolean {
+  try {
+    const stored = localStorage.getItem(THEME_STORAGE_KEY);
+    return stored === "light" || stored === "dark";
+  } catch {
+    return false;
+  }
+}
+
+// The current OS color-scheme preference as a Theme.
+export function systemTheme(): Theme {
+  return systemPrefersDark() ? "dark" : "light";
+}
+
 // Resolve the initial theme: an explicit stored choice wins, otherwise fall
 // back to the OS preference (and finally light).
 export function resolveInitialTheme(): Theme {
@@ -28,7 +44,7 @@ export function resolveInitialTheme(): Theme {
   } catch {
     /* localStorage unavailable (private mode, SSR) — fall through. */
   }
-  return systemPrefersDark() ? "dark" : "light";
+  return systemTheme();
 }
 
 export function applyTheme(theme: Theme): void {
