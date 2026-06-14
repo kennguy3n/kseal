@@ -67,17 +67,22 @@ export function useAuditEvents(args: AuditQueryArgs) {
 // tenant alongside the event list. A broken chain surfaces a warning banner.
 //
 // Verification recomputes the entire tenant hash chain server-side, so it can
-// be costly for large audit trails. `enabled` lets callers that only need the
-// result conditionally (e.g. the onboarding checklist) skip the work when the
-// result isn't on screen, rather than paying it on every render.
-export function useVerifyAuditChain(options?: { enabled?: boolean }) {
+// be costly for large audit trails. The result changes only when a new audited
+// mutation lands (which we already invalidate on, e.g. kill-switch issuance), so
+// a long staleTime de-duplicates the recompute across navigations and repeated
+// dashboard visits instead of paying it on every mount. We keep the query
+// always enabled so consumers like the onboarding checklist can still evaluate
+// chain-derived state (e.g. "has audit activity") accurately.
+const AUDIT_CHAIN_STALE_MS = 5 * 60_000;
+
+export function useVerifyAuditChain() {
   const clients = useClients();
   const { tenantId } = useSession();
   return useQuery({
     queryKey: complianceKeys.auditChain(tenantId),
     queryFn: () => clients.compliance.verifyAuditChain({ tenantId }),
     retry: retryUnlessUnavailable,
-    enabled: options?.enabled ?? true,
+    staleTime: AUDIT_CHAIN_STALE_MS,
   });
 }
 

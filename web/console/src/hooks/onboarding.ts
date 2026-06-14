@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSession } from "../state/useAuth";
 import {
-  useActivePolicy,
+  usePolicies,
   useTenantOverview,
   useTrustSessionStats,
 } from "./queries";
@@ -62,13 +62,12 @@ export function useOnboarding(): OnboardingState {
 
   const overview = useTenantOverview();
   const trust = useTrustSessionStats();
-  const tenantPolicy = useActivePolicy("");
-  // Chain verification recomputes the whole tenant hash chain server-side, so
-  // it only runs while the onboarding card is actually on screen. Dismissed /
-  // steady-state users don't pay that cost on every dashboard load; the last
-  // step resolves from cache when present and self-heals the moment the user
-  // resumes (which re-enables the query).
-  const chain = useVerifyAuditChain({ enabled: !dismissed });
+  // List every policy for the tenant (appId "" returns all scopes) so the
+  // "turn on a policy" step is satisfied by any active policy — tenant-wide OR
+  // app-scoped. GetActivePolicy("") would only match tenant-wide rows and miss
+  // a developer who only activated an app-scoped policy.
+  const policies = usePolicies("");
+  const chain = useVerifyAuditChain();
 
   const persist = useCallback(
     (value: boolean) => {
@@ -88,7 +87,7 @@ export function useOnboarding(): OnboardingState {
   const appCount = overview.data?.appCount ?? 0;
   const tokensIssued = trust.data?.tokensIssued ?? 0n;
   const totalSessions = trust.data?.totalSessions ?? 0n;
-  const hasPolicy = tenantPolicy.data != null;
+  const hasPolicy = (policies.data ?? []).some((p) => p.isActive);
   const auditEntries = chain.data?.verifiedCount ?? 0n;
 
   const steps: OnboardingStep[] = [
@@ -142,7 +141,7 @@ export function useOnboarding(): OnboardingState {
   const loading =
     overview.isLoading ||
     trust.isLoading ||
-    tenantPolicy.isLoading ||
+    policies.isLoading ||
     chain.isLoading;
 
   return {

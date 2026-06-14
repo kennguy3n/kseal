@@ -9,7 +9,7 @@ import {
 } from "../gen/kseal/v1/query_pb";
 import { QueryService } from "../gen/kseal/v1/query_service_pb";
 import {
-  GetActivePolicyResponseSchema,
+  ListPoliciesResponseSchema,
   PolicySchema,
 } from "../gen/kseal/v1/registry_pb";
 import { RegistryService } from "../gen/kseal/v1/registry_service_pb";
@@ -40,11 +40,19 @@ function buildTransport(opts: {
         }),
     });
     router.service(RegistryService, {
-      getActivePolicy: () =>
-        create(GetActivePolicyResponseSchema, {
-          policy: opts.hasPolicy
-            ? create(PolicySchema, { id: "pol-1", name: "Default" })
-            : undefined,
+      listPolicies: () =>
+        create(ListPoliciesResponseSchema, {
+          // The onboarding step is satisfied by any active policy across the
+          // tenant (tenant-wide or app-scoped), so an active row marks it done.
+          policies: opts.hasPolicy
+            ? [
+                create(PolicySchema, {
+                  id: "pol-1",
+                  name: "Default",
+                  isActive: true,
+                }),
+              ]
+            : [],
         }),
     });
     router.service(ComplianceService, {
