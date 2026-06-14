@@ -4,7 +4,12 @@ import { BrowserRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider } from "./state/AuthContext";
 import { App } from "./App";
+import { initTheme } from "./lib/theme";
 import "./index.css";
+
+// Reconcile <html> to the stored/system theme before first render so the
+// initial `class="dark"` from index.html flips to light when appropriate.
+initTheme();
 
 const queryClient = new QueryClient({
   defaultOptions: {

@@ -5,6 +5,7 @@ import { Layout } from "./components/Layout";
 import { LoginPage } from "./pages/Login";
 import { FleetOverviewPage } from "./pages/FleetOverview";
 import { TenantsPage } from "./pages/Tenants";
+import { TenantDetailPage } from "./pages/TenantDetail";
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { session } = useAuth();
@@ -28,6 +29,7 @@ export function App() {
       >
         <Route index element={<FleetOverviewPage />} />
         <Route path="tenants" element={<TenantsPage />} />
+        <Route path="tenants/:tenantId" element={<TenantDetailPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

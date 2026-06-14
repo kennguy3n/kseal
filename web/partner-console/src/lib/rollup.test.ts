@@ -87,6 +87,21 @@ describe("tenantHealthFromSnapshot", () => {
     expect(h.highRiskRate).toBeCloseTo(0.2); // (15+5)/100
     expect(h.mediumRiskRate).toBeCloseTo(0.2);
     expect(h.attestationFailureRate).toBeCloseTo(0.1); // 8/80
+    expect(h.band).toBe("healthy"); // penalty 0.17 -> score 83
+  });
+
+  it("bands a tenant with apps but no trust signal as unknown, not healthy", () => {
+    // Reads succeeded, but there are zero sessions and zero tokens: there is no
+    // basis to score health, so it must surface as unknown rather than 100.
+    const h = tenantHealthFromSnapshot(
+      snapshot({
+        tenantId: "fresh",
+        overview: { appCount: 3, buildCount: 40, activePolicyCount: 2, webhookCount: 0, eventsLast24h: 0 },
+        trust: { totalSessions: 0, tokensIssued: 0, attestationsFailed: 0, sessionsByTrustLevel: {} },
+      }),
+    );
+    expect(h.healthScore).toBe(0);
+    expect(h.band).toBe("unknown");
   });
 });
 

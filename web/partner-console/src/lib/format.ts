@@ -52,17 +52,17 @@ export const confidenceLabels: Record<Confidence, string> = {
 export function riskLevelTone(level: TrustLevel): string {
   switch (level) {
     case TrustLevel.TRUSTED:
-      return "bg-emerald-500/15 text-emerald-300 border-emerald-500/30";
+      return "bg-emerald-500/10 text-emerald-700 border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-300";
     case TrustLevel.LOW_RISK:
-      return "bg-sky-500/15 text-sky-300 border-sky-500/30";
+      return "bg-sky-500/10 text-sky-700 border-sky-500/30 dark:bg-sky-500/15 dark:text-sky-300";
     case TrustLevel.MEDIUM_RISK:
-      return "bg-amber-500/15 text-amber-300 border-amber-500/30";
+      return "bg-amber-500/10 text-amber-700 border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-300";
     case TrustLevel.HIGH_RISK:
-      return "bg-orange-500/15 text-orange-300 border-orange-500/30";
+      return "bg-orange-500/10 text-orange-700 border-orange-500/30 dark:bg-orange-500/15 dark:text-orange-300";
     case TrustLevel.CRITICAL:
-      return "bg-rose-500/15 text-rose-300 border-rose-500/30";
+      return "bg-rose-500/10 text-rose-700 border-rose-500/30 dark:bg-rose-500/15 dark:text-rose-300";
     default:
-      return "bg-slate-500/15 text-slate-300 border-slate-500/30";
+      return "bg-slate-500/10 text-slate-600 border-slate-500/30 dark:bg-slate-500/15 dark:text-slate-300";
   }
 }
 
