@@ -11,6 +11,6 @@ Integrates with [App Attest + DeviceCheck](../../ARCHITECTURE.md#ios--app-attest
 ## Get secure fast
 
 New here? Follow [QUICKSTART.md](QUICKSTART.md) to integrate in ~5 minutes, and
-clone the runnable sample in [`examples/ios`](../../examples/ios). See
+clone the runnable sample in [`examples/ios-quickstart`](../../examples/ios-quickstart). See
 [CHANGELOG.md](CHANGELOG.md) for versions and the typed error taxonomy
 ([`KsealErrorKind`](Sources/KsealSDK/TrustCore.swift)).

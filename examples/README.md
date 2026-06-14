@@ -11,7 +11,7 @@ GetNonce → VerifyAttestation → ValidateRequestProof  (ALLOW / STEP_UP / DENY
 |---|---|---|---|
 | [`backend-quickstart`](backend-quickstart) | Go: registry + trust + query services, plus a `curl` script | `go run .` / `go test ./...` / `./curl-quickstart.sh` | Google Play Integrity JWKS (swapped for a local key, the documented test path) |
 | [`android`](android) | Android SDK (Kotlin) | `./gradlew :app:installDebug` | External Play Integrity provider |
-| [`ios`](ios) | iOS SDK (Swift) | `swift run kseal-ios-quickstart` | External App Attest / DeviceCheck provider |
+| [`ios-quickstart`](ios-quickstart) | iOS SDK (Swift) | `swift run kseal-ios-quickstart` | External App Attest / DeviceCheck provider |
 | [`desktop-macos`](desktop-macos) | macOS desktop SDK (Swift) | `swift run kseal-desktop-quickstart` | External code-signing notary |
 
 ## Common principle

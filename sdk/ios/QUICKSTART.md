@@ -5,7 +5,8 @@ on-device signals and produces per-request proofs; the **server** makes the
 trust decision (ALLOW / STEP_UP / DENY) — never the client. The SDK uses **no
 private/undocumented APIs**, so it stays App Review safe.
 
-> A complete, runnable version lives in [`examples/ios`](../../examples/ios)
+> A complete, runnable version lives in
+> [`examples/ios-quickstart`](../../examples/ios-quickstart)
 > (`swift run kseal-ios-quickstart`).
 
 ## Requirements
