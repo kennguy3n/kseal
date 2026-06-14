@@ -25,6 +25,7 @@ type globalFlags struct {
 	tenant     string
 	output     string
 	dryRun     bool
+	debug      bool
 	timeout    time.Duration
 }
 
@@ -35,10 +36,9 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	root.SetArgs(args)
 	root.SetOut(stdout)
 	root.SetErr(stderr)
-	_ = gf
 	err := root.ExecuteContext(ctx)
 	if err != nil {
-		fmt.Fprintln(stderr, "error:", err)
+		renderError(stderr, err, gf.debug)
 		return ExitCode(err)
 	}
 	return ExitOK
@@ -46,16 +46,27 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 
 func newRootCmd(stdout, stderr io.Writer) (*cobra.Command, *globalFlags) {
 	gf := &globalFlags{}
-	c := &CLI{out: stdout, errOut: stderr}
+	c := &CLI{out: stdout, errOut: stderr, in: os.Stdin}
 
 	root := &cobra.Command{
-		Use:   "kseal-cli",
+		Use:   "kseal",
 		Short: "Scriptable operator CLI for the kseal continuous app-trust platform",
-		Long: "kseal-cli manages tenants, apps, builds, policies, protection profiles, " +
+		Long: "kseal manages tenants, apps, builds, policies, protection profiles, " +
 			"webhooks, and event queries over the kseal Connect APIs.\n\n" +
 			"It is built for NoOps/self-service: every mutating command supports --dry-run, " +
-			"results render as --output table|json, exit codes are stable for CI, and the API " +
-			"key is read from the environment or a secret file (never stored or printed).",
+			"results render as --output table|json|yaml, exit codes are stable for CI, and the " +
+			"API key is read from the environment or a secret file (never stored or printed).\n\n" +
+			"New here? Run `kseal init` for a guided setup, then `kseal doctor` to check that " +
+			"your app is wired up and protected.",
+		Example: "  # Guided first-run setup, then verify your setup\n" +
+			"  kseal init\n" +
+			"  kseal doctor\n\n" +
+			"  # Register an app and apply a curated baseline policy\n" +
+			"  kseal app create --name \"Acme Wallet\" --platform android --package-id com.acme.wallet\n" +
+			"  kseal policy pack apply fintech --app-id <app-id> --activate\n\n" +
+			"  # Script-friendly machine output\n" +
+			"  kseal tenant list --output json | jq '.tenants[].id'\n" +
+			"  kseal app list --output yaml",
 		Version:       version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -68,14 +79,22 @@ func newRootCmd(stdout, stderr io.Writer) (*cobra.Command, *globalFlags) {
 
 	pf := root.PersistentFlags()
 	pf.StringVar(&gf.configPath, "config", "", "config file path (default: $KSEAL_CONFIG or ~/.config/kseal/config.json)")
-	pf.StringVar(&gf.profile, "profile", "", "connection profile to use (default: current profile)")
-	pf.StringVar(&gf.endpoint, "endpoint", "", "server base URL (overrides the profile endpoint)")
-	pf.StringVar(&gf.tenant, "tenant", "", "tenant id scope (overrides the profile tenant)")
-	pf.StringVarP(&gf.output, "output", "o", "table", "output format: table|json")
+	pf.StringVar(&gf.profile, "profile", "", "connection profile to use (flag > $KSEAL_PROFILE > current profile)")
+	pf.StringVar(&gf.endpoint, "endpoint", "", "server base URL (flag > $KSEAL_ENDPOINT > profile endpoint)")
+	pf.StringVar(&gf.tenant, "tenant", "", "tenant id scope (flag > $KSEAL_TENANT > profile tenant)")
+	pf.StringVarP(&gf.output, "output", "o", "", "output format: table|json|yaml (flag > $KSEAL_OUTPUT > table)")
 	pf.BoolVar(&gf.dryRun, "dry-run", false, "print the request that would be sent without performing any mutation")
+	pf.BoolVar(&gf.debug, "debug", false, "print verbose diagnostics (full error chain, exit code) to stderr")
 	pf.DurationVar(&gf.timeout, "timeout", 30*time.Second, "per-request timeout (0 = no timeout)")
 
+	// Offer the supported formats as shell-completion candidates for --output.
+	_ = root.RegisterFlagCompletionFunc("output", func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
+		return outputFormats, cobra.ShellCompDirectiveNoFileComp
+	})
+
 	root.AddCommand(
+		newInitCmd(c, gf),
+		newDoctorCmd(c),
 		newConfigCmd(c),
 		newTenantCmd(c),
 		newAppCmd(c),
@@ -85,6 +104,7 @@ func newRootCmd(stdout, stderr io.Writer) (*cobra.Command, *globalFlags) {
 		newWebhookCmd(c),
 		newEventsCmd(c),
 		newComplianceCmd(c),
+		newManCmd(c),
 	)
 	return root, gf
 }
@@ -106,35 +126,40 @@ func (c *CLI) init(gf *globalFlags, cmd *cobra.Command) error {
 	c.cfg = cfg
 	c.configPathResolved = path
 
-	name, prof, err := cfg.ResolveProfile(gf.profile)
+	// Profile selection precedence: --profile flag > $KSEAL_PROFILE > config
+	// CurrentProfile > synthesized "default".
+	profileName := firstNonEmpty(gf.profile, os.Getenv(profileEnvVar))
+	name, prof, err := cfg.ResolveProfile(profileName)
 	if err != nil {
 		return err
 	}
 	c.profileName = name
 	c.profile = prof
 
-	c.endpoint = prof.Endpoint
-	if gf.endpoint != "" {
-		c.endpoint = gf.endpoint
-	}
-	c.tenant = prof.Tenant
-	if gf.tenant != "" {
-		c.tenant = gf.tenant
-	}
+	// Per-setting precedence: flag > environment > profile. Keeping the chain
+	// explicit (rather than a generic lookup) documents the contract and lets
+	// each setting fall back independently.
+	c.endpoint = firstNonEmpty(gf.endpoint, os.Getenv(endpointEnvVar), prof.Endpoint)
+	c.tenant = firstNonEmpty(gf.tenant, os.Getenv(tenantEnvVar), prof.Tenant)
 
-	out, err := parseOutputFormat(gf.output)
+	out, err := parseOutputFormat(firstNonEmpty(gf.output, os.Getenv(outputEnvVar)))
 	if err != nil {
 		return newUsageError("%v", err)
 	}
 	c.output = out
 	c.dryRun = gf.dryRun
+	c.debug = gf.debug
 	c.timeout = gf.timeout
 
 	// Commands that talk to the server need an endpoint + API key. Config
 	// management commands ("config ...") do not, so skip resolution for them.
 	if commandNeedsServer(cmd) {
 		if c.endpoint == "" {
-			return newUsageError("no endpoint configured: set one on the profile or pass --endpoint")
+			return withHint(
+				newUsageError("no endpoint configured"),
+				"pass --endpoint <url>, set $%s, or run `kseal init` to create a profile.",
+				endpointEnvVar,
+			)
 		}
 		key, err := c.profile.resolveAPIKey()
 		if err != nil {
@@ -165,8 +190,25 @@ func commandNeedsServer(cmd *cobra.Command) bool {
 		if c.Annotations[annotationLocalOnly] == "true" {
 			return false
 		}
+		// Cobra's built-in helpers (shell completion, hidden __complete*, and
+		// help) are offline by definition; they must run without credentials.
+		if isLocalBuiltin(c) {
+			return false
+		}
 	}
 	return true
+}
+
+// isLocalBuiltin reports whether cmd is one of cobra's generated, credential-free
+// helper commands (the `completion` subtree, dynamic `__complete*` shells, or
+// `help`). These never contact the server.
+func isLocalBuiltin(cmd *cobra.Command) bool {
+	switch cmd.Name() {
+	case "completion", "help",
+		cobra.ShellCompRequestCmd, cobra.ShellCompNoDescRequestCmd:
+		return true
+	}
+	return false
 }
 
 // dryRunNotice prints a standard dry-run banner to stderr.

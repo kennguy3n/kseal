@@ -3,9 +3,13 @@
 `kseal-cli` is a scriptable command-line client for the kseal control- and
 data-plane Connect APIs. It makes the tenant → app → build → policy lifecycle
 self-service and reproducible (NoOps): every mutating command supports
-`--dry-run`, results render as `--output table|json`, exit codes are stable for
-CI, and the API key is read from the environment or a secret file (it is never
-stored in config or printed to output/logs).
+`--dry-run`, results render as `--output table|json|yaml`, exit codes are stable
+for CI, and the API key is read from the environment or a secret file (it is
+never stored in config or printed to output/logs).
+
+New to kseal? Run `kseal init` for a guided setup, then `kseal doctor` to check
+your auth, app registration, protection policy, and build proof and get told
+exactly what to do next.
 
 The CLI lives in its own Go module under `cmd/kseal-cli/` and imports the
 generated server Connect clients and shared risk helpers read-only.
@@ -32,25 +36,35 @@ The key is sent as `Authorization: Bearer <key>`. Control-plane procedures
 require a valid key; the server rejects an invalid/absent key with
 `Unauthenticated`, which the CLI surfaces as exit code `3`.
 
-Connection settings are supplied by flags or a named profile:
+Connection settings are supplied by flags, environment variables, or a named
+profile. Precedence is always **flag > environment variable > profile**:
 
-| Setting   | Flag         | Env / profile fallback                        |
-|-----------|--------------|-----------------------------------------------|
-| Endpoint  | `--endpoint` | profile `endpoint` (default `http://localhost:8080`) |
-| Tenant    | `--tenant`   | profile `tenant`                              |
-| API key   | (never a flag) | `KSEAL_API_KEY` env or profile `api_key_file` |
+| Setting   | Flag         | Env var          | Profile fallback                |
+|-----------|--------------|------------------|---------------------------------|
+| Profile   | `--profile`  | `KSEAL_PROFILE`  | current profile                 |
+| Endpoint  | `--endpoint` | `KSEAL_ENDPOINT` | profile `endpoint` (default `http://localhost:8080`) |
+| Tenant    | `--tenant`   | `KSEAL_TENANT`   | profile `tenant`                |
+| Output    | `-o/--output`| `KSEAL_OUTPUT`   | `table`                         |
+| API key   | (never a flag) | `KSEAL_API_KEY` | profile `api_key_file`         |
 
 ### Global flags
 
 | Flag | Description |
 |------|-------------|
 | `--config` | config file path (default `$KSEAL_CONFIG` or `~/.config/kseal/config.json`) |
-| `--profile` | connection profile to use (default: current profile) |
-| `--endpoint` | server base URL (overrides the profile endpoint) |
-| `--tenant` | tenant id scope (overrides the profile tenant) |
-| `-o, --output` | output format: `table` (default) or `json` |
+| `--profile` | connection profile to use (flag > `$KSEAL_PROFILE` > current profile) |
+| `--endpoint` | server base URL (flag > `$KSEAL_ENDPOINT` > profile endpoint) |
+| `--tenant` | tenant id scope (flag > `$KSEAL_TENANT` > profile tenant) |
+| `-o, --output` | output format: `table` (default), `json`, or `yaml` |
 | `--dry-run` | print the request that would be sent without performing any mutation |
+| `--debug` | print verbose diagnostics (full error chain, exit code) to stderr |
 | `--timeout` | per-request timeout (`0` = no timeout; default `30s`) |
+
+Machine-readable output (`json`/`yaml`) is stable and safe to parse in scripts;
+the `yaml` projection carries the same fields as `json`. On failure the CLI
+prints a single `error:` line (plus an actionable `hint:` where one applies) and
+never a raw stack trace; add `--debug` to see the full cause chain and exit
+code.
 
 ### Exit codes
 
@@ -98,7 +112,42 @@ export KSEAL_API_KEY=...      # value lives only in your shell/secret store
 kseal app list
 ```
 
+## Getting started (guided)
+
+`kseal init` writes a connection profile and prints an ordered "get secure fast"
+path. It is fully scriptable (`--non-interactive`) and never reads or writes the
+API key value — it only records the *name of the env var* to read it from.
+
+```bash
+# Interactive: prompts for endpoint/tenant, then prints the next steps.
+kseal init
+
+# Non-interactive (CI/bootstrap): write a profile and exit 0.
+kseal init --name prod --endpoint https://api.kseal.example.com \
+  --tenant-id ten_abc123 --api-key-env KSEAL_API_KEY --non-interactive
+```
+
+`kseal doctor` checks the whole onboarding path in dependency order —
+configuration → credentials → connectivity → tenant scope → app registration →
+protection policy → build proof — and prints, for each gap, *why it matters* and
+the exact command to fix it.
+
+```bash
+kseal doctor              # human-readable report + verdict
+kseal doctor -o json      # machine-readable checks for CI
+kseal doctor --strict     # treat setup gaps (warnings) as failures (exit 3)
+```
+
+Setup gaps are reported as warnings and exit `0`; only a broken connection or
+rejected key is fatal. `--strict` promotes warnings to failures so a pipeline
+can block until the app is fully secured.
+
 ## Commands
+
+### init / doctor
+
+See [Getting started (guided)](#getting-started-guided) above. `init` and
+`doctor` are the recommended entry points for a new app.
 
 ### tenant
 
@@ -275,6 +324,29 @@ Preview any mutation without performing it:
 ```bash
 kseal policy activate "$POLICY_ID" --dry-run
 ```
+
+## Discoverability
+
+Shell completions are generated for bash, zsh, fish, and PowerShell:
+
+```bash
+# bash (current shell)
+source <(kseal completion bash)
+# zsh (persist)
+kseal completion zsh > "${fpath[1]}/_kseal"
+# fish
+kseal completion fish > ~/.config/fish/completions/kseal.fish
+```
+
+Generate troff man pages for the whole command tree (no server needed):
+
+```bash
+kseal man --dir ./man    # writes kseal.1, kseal-init.1, kseal-doctor.1, …
+man ./man/kseal-doctor.1
+```
+
+Every command documents flags and copy/paste examples in `kseal <command>
+--help`.
 
 ## Testing
 

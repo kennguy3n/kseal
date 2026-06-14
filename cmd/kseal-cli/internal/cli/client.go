@@ -24,6 +24,7 @@ type CLI struct {
 	tenant   string
 	output   outputFormat
 	dryRun   bool
+	debug    bool
 	timeout  time.Duration
 
 	// apiKey is resolved from env/file. It is held in memory only and is never
@@ -33,6 +34,10 @@ type CLI struct {
 	httpClient connect.HTTPClient
 	out        io.Writer
 	errOut     io.Writer
+	// in is the input stream used by guided/interactive prompts (`kseal init`).
+	// It defaults to os.Stdin and is overridable in tests. Nil means no input
+	// is available, so interactive prompting is skipped.
+	in io.Reader
 
 	// Connect clients are built lazily and cached for the lifetime of the
 	// invocation. A CLI is used by a single goroutine (commands run
@@ -120,5 +125,10 @@ func (c *CLI) requireTenant() (string, error) {
 	if c.tenant != "" {
 		return c.tenant, nil
 	}
-	return "", newUsageError("no tenant scope: pass --tenant or set one on the active profile (%q)", c.profileName)
+	return "", withHint(
+		newUsageError("no tenant scope: this command operates on a single tenant but none is set"),
+		"pass --tenant <id>, set $%s, or bake it into the active profile (%q) with "+
+			"`kseal config set-profile --name %s --tenant-id <id>`. New here? Run `kseal init`.",
+		tenantEnvVar, c.profileName, c.profileName,
+	)
 }

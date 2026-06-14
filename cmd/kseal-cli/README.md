@@ -9,4 +9,7 @@ CLI tool for build-time protection and tenant management.
 - Generate build proofs and MASVS evidence reports.
 - Emit CI release-gate verdicts.
 
-**Status:** scaffold — see [PROGRESS.md](../../PROGRESS.md) (Phase 3).
+New users should start with `kseal init` (guided setup) and `kseal doctor`
+(checks auth, app registration, protection policy, and build proof, then tells
+you exactly what to do next). Full reference, including output formats,
+profiles, completions, and man pages, is in [docs/cli.md](../../docs/cli.md).
