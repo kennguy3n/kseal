@@ -290,7 +290,7 @@ export function InfoHint({
 }) {
   const [open, setOpen] = useState(false);
   const panelId = useId();
-  const ref = useRef<HTMLDivElement>(null);
+  const ref = useRef<HTMLSpanElement>(null);
 
   return (
     <span
