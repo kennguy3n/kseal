@@ -4,6 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Transport } from "@connectrpc/connect";
 import { AuthProvider } from "../state/AuthContext";
+import { ThemeProvider } from "../lib/ThemeProvider";
 
 export const TEST_SESSION = {
   apiBaseUrl: "http://test.local",
@@ -28,11 +29,13 @@ export function renderWithProviders(
   function Wrapper({ children }: { children: ReactNode }) {
     return (
       <QueryClientProvider client={queryClient}>
-        <AuthProvider transport={options.transport}>
-          <MemoryRouter initialEntries={[options.route ?? "/"]}>
-            {children}
-          </MemoryRouter>
-        </AuthProvider>
+        <ThemeProvider>
+          <AuthProvider transport={options.transport}>
+            <MemoryRouter initialEntries={[options.route ?? "/"]}>
+              {children}
+            </MemoryRouter>
+          </AuthProvider>
+        </ThemeProvider>
       </QueryClientProvider>
     );
   }

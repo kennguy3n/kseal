@@ -8,6 +8,10 @@
 
 export interface KsealRuntimeEnv {
   apiBaseUrl?: string;
+  // Optional base URL for product documentation (quickstart, SDK integration,
+  // compliance guides) linked from the console. Deploy-time configurable so an
+  // operator can point at their own docs mirror; falls back to the public docs.
+  docsBaseUrl?: string;
 }
 
 declare global {
@@ -28,4 +32,24 @@ export function defaultApiBaseUrl(): string {
   const inlined = import.meta.env.VITE_KSEAL_API_BASE_URL;
   const chosen = runtime || inlined || DEFAULT_API_BASE_URL;
   return normalize(chosen);
+}
+
+// Public documentation tree (GitHub). Resolved with the same precedence as
+// defaultApiBaseUrl so both follow one contract:
+//
+//   1. window.__KSEAL_ENV__.docsBaseUrl — injected at container start (NoOps)
+//      so an operator can point at their own docs mirror without a rebuild.
+//   2. import.meta.env.VITE_KSEAL_DOCS_BASE_URL — Vite-inlined at build time
+//      (e.g. a local docs server during development).
+//   3. the public GitHub docs tree — universal default.
+const DEFAULT_DOCS_BASE_URL =
+  "https://github.com/kennguy3n/kseal/blob/main/docs";
+
+export function docsBaseUrl(): string {
+  const runtime =
+    typeof window !== "undefined"
+      ? window.__KSEAL_ENV__?.docsBaseUrl
+      : undefined;
+  const inlined = import.meta.env.VITE_KSEAL_DOCS_BASE_URL;
+  return normalize(runtime || inlined || DEFAULT_DOCS_BASE_URL);
 }

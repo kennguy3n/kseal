@@ -5,35 +5,53 @@ import {
   EmptyState,
   ErrorNotice,
   LoadMore,
-  Spinner,
+  PageHeader,
+  SkeletonRows,
   Badge,
 } from "../components/ui";
 import { platformLabels } from "../lib/format";
+import { docs } from "../lib/links";
 
 export function AppsListPage() {
   const apps = useApps();
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-xl font-semibold text-slate-50">Apps</h1>
-        <p className="text-sm text-slate-400">
-          Registered applications for this tenant.
-        </p>
-      </header>
+      <PageHeader
+        title="Apps"
+        description="Applications registered to this tenant. Each app binds the SDK and CLI to its own signing keys."
+      />
 
       <Card>
         {apps.isLoading ? (
-          <Spinner />
+          <SkeletonRows rows={4} />
         ) : apps.isError ? (
-          <ErrorNotice error={apps.error} />
+          <ErrorNotice
+            error={apps.error}
+            onRetry={() => void apps.refetch()}
+          />
         ) : !apps.data || apps.data.length === 0 ? (
-          <EmptyState>No apps registered yet.</EmptyState>
+          <EmptyState
+            title="No apps registered yet"
+            action={
+              <a
+                href={docs.quickstart()}
+                target="_blank"
+                rel="noreferrer"
+                className="btn-primary"
+              >
+                Open the quickstart
+              </a>
+            }
+          >
+            Register your first app with the kseal CLI to get its app ID and
+            signing keys, then integrate the SDK.
+          </EmptyState>
         ) : (
           <>
             <table className="w-full">
             <thead>
-              <tr className="border-b border-slate-800">
+              <tr className="border-b border-line">
                 <th className="th">Name</th>
                 <th className="th">Platform</th>
                 <th className="th">Package ID</th>
@@ -44,18 +62,18 @@ export function AppsListPage() {
               {apps.data.map((app) => (
                 <tr
                   key={app.id}
-                  className="border-b border-slate-800/60 hover:bg-slate-800/30"
+                  className="border-b border-line/60 hover:bg-elevated/40"
                 >
                   <td className="td">
                     <Link
                       to={`/apps/${app.id}`}
-                      className="font-medium text-indigo-300 hover:underline"
+                      className="font-medium text-accent hover:underline"
                     >
                       {app.name}
                     </Link>
                   </td>
                   <td className="td">{platformLabels[app.platform]}</td>
-                  <td className="td font-mono text-xs text-slate-400">
+                  <td className="td font-mono text-xs text-fg-muted">
                     {app.packageId}
                   </td>
                   <td className="td">

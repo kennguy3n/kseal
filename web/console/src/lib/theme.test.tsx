@@ -1,0 +1,122 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { act, renderHook } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { applyTheme, resolveInitialTheme, useTheme } from "./theme";
+import { ThemeProvider } from "./ThemeProvider";
+
+function wrapper({ children }: { children: ReactNode }) {
+  return <ThemeProvider>{children}</ThemeProvider>;
+}
+
+const STORAGE_KEY = "kseal.console.theme";
+
+afterEach(() => {
+  document.documentElement.classList.remove("dark");
+  vi.unstubAllGlobals();
+});
+
+// jsdom has no real matchMedia; stub it so the system-preference branch is
+// deterministic.
+function stubMatchMedia(matches: boolean) {
+  vi.stubGlobal(
+    "matchMedia",
+    vi.fn().mockReturnValue({
+      matches,
+      media: "(prefers-color-scheme: dark)",
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }),
+  );
+}
+
+describe("theme", () => {
+  it("prefers an explicit stored choice over the system preference", () => {
+    stubMatchMedia(true); // system = dark
+    localStorage.setItem(STORAGE_KEY, "light");
+    expect(resolveInitialTheme()).toBe("light");
+  });
+
+  it("falls back to the system preference when nothing is stored", () => {
+    stubMatchMedia(true);
+    expect(resolveInitialTheme()).toBe("dark");
+    stubMatchMedia(false);
+    expect(resolveInitialTheme()).toBe("light");
+  });
+
+  it("applyTheme toggles the .dark class on <html>", () => {
+    applyTheme("dark");
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
+    applyTheme("light");
+    expect(document.documentElement.classList.contains("dark")).toBe(false);
+  });
+
+  it("useTheme persists the toggled value and updates the DOM", () => {
+    stubMatchMedia(false);
+    const { result } = renderHook(() => useTheme(), { wrapper });
+    expect(result.current.theme).toBe("light");
+
+    act(() => result.current.toggleTheme());
+
+    expect(result.current.theme).toBe("dark");
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
+    expect(localStorage.getItem(STORAGE_KEY)).toBe("dark");
+  });
+
+  it("does not lock in an OS-inferred theme until the user chooses", () => {
+    stubMatchMedia(true); // system = dark, nothing stored
+    const { result } = renderHook(() => useTheme(), { wrapper });
+
+    // OS preference is applied but NOT persisted — the fallback stays live.
+    expect(result.current.theme).toBe("dark");
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
+
+    // An explicit toggle is what persists the choice.
+    act(() => result.current.toggleTheme());
+    expect(result.current.theme).toBe("light");
+    expect(localStorage.getItem(STORAGE_KEY)).toBe("light");
+  });
+
+  it("follows OS preference changes until an explicit choice is made", () => {
+    let handler: ((e: MediaQueryListEvent) => void) | null = null;
+    const mql = {
+      matches: false,
+      media: "(prefers-color-scheme: dark)",
+      addEventListener: (_type: string, h: (e: MediaQueryListEvent) => void) => {
+        handler = h;
+      },
+      removeEventListener: vi.fn(),
+    };
+    vi.stubGlobal("matchMedia", vi.fn().mockReturnValue(mql));
+
+    const { result } = renderHook(() => useTheme(), { wrapper });
+    expect(result.current.theme).toBe("light");
+
+    // OS flips to dark while no explicit choice exists → adopt it, don't persist.
+    act(() => handler?.({ matches: true } as MediaQueryListEvent));
+    expect(result.current.theme).toBe("dark");
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
+
+    // Once the user chooses, the choice is persisted and OS tracking stops.
+    act(() => result.current.toggleTheme());
+    expect(result.current.theme).toBe("light");
+    expect(localStorage.getItem(STORAGE_KEY)).toBe("light");
+  });
+
+  it("syncs the theme across tabs via the storage event", () => {
+    stubMatchMedia(false);
+    const { result } = renderHook(() => useTheme(), { wrapper });
+    expect(result.current.theme).toBe("light");
+
+    // Simulate another tab writing "dark" to localStorage.
+    act(() => {
+      localStorage.setItem(STORAGE_KEY, "dark");
+      window.dispatchEvent(
+        new StorageEvent("storage", { key: STORAGE_KEY, newValue: "dark" }),
+      );
+    });
+
+    expect(result.current.theme).toBe("dark");
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
+  });
+});

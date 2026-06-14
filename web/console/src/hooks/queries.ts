@@ -261,10 +261,15 @@ export function useCreatePolicy() {
         riskThresholds: input.riskThresholds,
         modulesEnabled: input.modulesEnabled,
       }),
-    onSuccess: (_res, input) => {
-      void qc.invalidateQueries({
-        queryKey: queryKeys.policies(tenantId, input.appId),
-      });
+    onSuccess: () => {
+      // Invalidate every policy-list scope for the tenant, not just this app's.
+      // queryKeys.policies(tenant, appId) is ["policies", tenant, appId]; the
+      // onboarding "turn on a policy" step lists all scopes via usePolicies("")
+      // → ["policies", tenant, ""]. A specific-app invalidation would not
+      // prefix-match that key, so the checklist would stay stale until
+      // staleTime. The ["policies", tenant] prefix matches every app scope
+      // (including the all-scopes "" list).
+      void qc.invalidateQueries({ queryKey: ["policies", tenantId] });
     },
   });
 }
@@ -280,9 +285,9 @@ export function useActivatePolicy() {
     mutationFn: (input: { policyId: string; appId: string }) =>
       clients.registry.activatePolicy({ tenantId, id: input.policyId }),
     onSuccess: (_res, input) => {
-      void qc.invalidateQueries({
-        queryKey: queryKeys.policies(tenantId, input.appId),
-      });
+      // Tenant-wide policy-list invalidation (see useCreatePolicy) so the
+      // onboarding all-scopes list and any per-app list both refresh.
+      void qc.invalidateQueries({ queryKey: ["policies", tenantId] });
       void qc.invalidateQueries({
         queryKey: queryKeys.activePolicy(tenantId, input.appId),
       });

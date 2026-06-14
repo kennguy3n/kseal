@@ -3,7 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="dark light" />
+    <!-- Order matches the CSS default (:root { color-scheme: light } in
+         src/index.css): light first so the browser paints native UI (form
+         controls, scrollbars, canvas background) in light before CSS loads,
+         avoiding a dark flash for light-mode users. The inline script below
+         flips to .dark up-front when the resolved theme is dark. -->
+    <meta name="color-scheme" content="light dark" />
     <title>kseal console</title>
     <!--
       Runtime config injection (NoOps): a prebuilt image renders /env.js at
@@ -12,6 +17,36 @@
       VITE_KSEAL_API_BASE_URL. Loaded before the bundle so window config exists.
     -->
     <script src="/env.js"></script>
+    <!--
+      Apply the persisted (or OS-preferred) color theme before first paint to
+      avoid a light/dark flash. Mirrors resolveInitialTheme() in
+      src/lib/theme.ts: an explicit "light"/"dark" choice wins, any other
+      value (or a localStorage error) falls through to the OS preference.
+    -->
+    <script>
+      (function () {
+        function systemPrefersDark() {
+          return (
+            window.matchMedia &&
+            window.matchMedia("(prefers-color-scheme: dark)").matches
+          );
+        }
+        var dark;
+        try {
+          var stored = localStorage.getItem("kseal.console.theme");
+          if (stored === "light" || stored === "dark") {
+            dark = stored === "dark";
+          } else {
+            dark = systemPrefersDark();
+          }
+        } catch (e) {
+          /* localStorage unavailable — fall back to OS preference, matching
+             resolveInitialTheme() so there's no light->dark flash. */
+          dark = systemPrefersDark();
+        }
+        document.documentElement.classList.toggle("dark", dark);
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -4,7 +4,14 @@ import {
   useRegisterSiemConnector,
   useSiemConnectors,
 } from "../hooks/queries";
-import { Card, EmptyState, ErrorNotice, Spinner, Badge } from "../components/ui";
+import {
+  Card,
+  EmptyState,
+  ErrorNotice,
+  PageHeader,
+  SkeletonRows,
+  Badge,
+} from "../components/ui";
 import { SiemKind } from "../gen/kseal/v1/siem_pb";
 import { formatTimestamp } from "../lib/format";
 
@@ -124,20 +131,20 @@ export function SiemConnectorsPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-xl font-semibold text-slate-50">SIEM connectors</h1>
-        <p className="text-sm text-slate-400">
-          Stream privacy-minimized trust/risk events to Splunk HEC, Microsoft
-          Sentinel, or Elastic. Secrets are sealed server-side and never shown.
-        </p>
-      </header>
+      <PageHeader
+        title="SIEM connectors"
+        description="Stream privacy-minimized trust/risk events to Splunk HEC, Microsoft Sentinel, or Elastic. Secrets are sealed server-side and never shown."
+      />
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card title="Registered connectors">
           {connectors.isLoading ? (
-            <Spinner />
+            <SkeletonRows rows={3} />
           ) : connectors.isError ? (
-            <ErrorNotice error={connectors.error} />
+            <ErrorNotice
+              error={connectors.error}
+              onRetry={() => void connectors.refetch()}
+            />
           ) : !connectors.data || connectors.data.length === 0 ? (
             <EmptyState>No SIEM connectors registered.</EmptyState>
           ) : (
@@ -145,20 +152,20 @@ export function SiemConnectorsPage() {
               {connectors.data.map((c) => (
                 <li
                   key={c.id}
-                  className="rounded-lg border border-slate-800 p-3"
+                  className="rounded-lg border border-line p-3"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
                         <Badge>{kindLabels[c.kind]}</Badge>
-                        <span className="text-xs text-slate-500">
+                        <span className="text-xs text-fg-subtle">
                           {c.isActive ? "active" : "inactive"}
                         </span>
                       </div>
-                      <div className="mt-1 truncate font-mono text-sm text-slate-100">
+                      <div className="mt-1 truncate font-mono text-sm text-fg-strong">
                         {c.endpoint}
                       </div>
-                      <div className="mt-1 text-xs text-slate-500">
+                      <div className="mt-1 text-xs text-fg-subtle">
                         secret: <span className="font-mono">{c.authSecretRef}</span>
                       </div>
                       <div className="mt-1 flex flex-wrap gap-1">
@@ -166,7 +173,7 @@ export function SiemConnectorsPage() {
                           <Badge key={f}>{f}</Badge>
                         ))}
                       </div>
-                      <div className="mt-1 text-xs text-slate-500">
+                      <div className="mt-1 text-xs text-fg-subtle">
                         {formatTimestamp(c.createdAt * 1000n)}
                       </div>
                     </div>
@@ -313,7 +320,7 @@ export function SiemConnectorsPage() {
             <div>
               <div className="label">
                 Field allow-list{" "}
-                <span className="text-slate-500">
+                <span className="text-fg-subtle">
                   (none selected = full minimized contract)
                 </span>
               </div>
@@ -328,8 +335,8 @@ export function SiemConnectorsPage() {
                       onClick={() => toggleField(f)}
                       className={`badge ${
                         active
-                          ? "border-indigo-500/40 bg-indigo-500/20 text-indigo-200"
-                          : "border-slate-700 text-slate-300"
+                          ? "border-accent-strong/40 bg-accent-strong/15 text-accent"
+                          : "border-line-strong text-fg"
                       }`}
                     >
                       {f}
@@ -340,7 +347,7 @@ export function SiemConnectorsPage() {
             </div>
 
             {error && (
-              <div role="alert" className="text-sm text-rose-300">
+              <div role="alert" className="text-sm text-rose-600 dark:text-rose-300">
                 {error}
               </div>
             )}

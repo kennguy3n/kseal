@@ -4,7 +4,14 @@ import {
   useRegisterWebhook,
   useWebhooks,
 } from "../hooks/queries";
-import { Card, EmptyState, ErrorNotice, Spinner, Badge } from "../components/ui";
+import {
+  Card,
+  EmptyState,
+  ErrorNotice,
+  PageHeader,
+  SkeletonRows,
+  Badge,
+} from "../components/ui";
 import { EventType } from "../gen/kseal/v1/common_pb";
 import { eventTypeLabels, formatTimestamp } from "../lib/format";
 
@@ -64,19 +71,20 @@ export function WebhooksPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-xl font-semibold text-slate-50">Webhooks</h1>
-        <p className="text-sm text-slate-400">
-          Fan out signed events to your endpoints.
-        </p>
-      </header>
+      <PageHeader
+        title="Webhooks"
+        description="Fan out signed event deliveries to your endpoints. Each payload is signed so you can verify it came from kseal."
+      />
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card title="Registered webhooks">
           {webhooks.isLoading ? (
-            <Spinner />
+            <SkeletonRows rows={3} />
           ) : webhooks.isError ? (
-            <ErrorNotice error={webhooks.error} />
+            <ErrorNotice
+              error={webhooks.error}
+              onRetry={() => void webhooks.refetch()}
+            />
           ) : !webhooks.data || webhooks.data.length === 0 ? (
             <EmptyState>No webhooks registered.</EmptyState>
           ) : (
@@ -84,11 +92,11 @@ export function WebhooksPage() {
               {webhooks.data.map((w) => (
                 <li
                   key={w.id}
-                  className="rounded-lg border border-slate-800 p-3"
+                  className="rounded-lg border border-line p-3"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <div className="truncate font-mono text-sm text-slate-100">
+                      <div className="truncate font-mono text-sm text-fg-strong">
                         {w.url}
                       </div>
                       <div className="mt-1 flex flex-wrap gap-1">
@@ -96,7 +104,7 @@ export function WebhooksPage() {
                           <Badge key={t}>{eventTypeLabels[t]}</Badge>
                         ))}
                       </div>
-                      <div className="mt-1 text-xs text-slate-500">
+                      <div className="mt-1 text-xs text-fg-subtle">
                         {w.isActive ? "active" : "inactive"} ·{" "}
                         {formatTimestamp(w.createdAt)}
                       </div>
@@ -148,8 +156,8 @@ export function WebhooksPage() {
                       onClick={() => toggle(t)}
                       className={`badge ${
                         active
-                          ? "border-indigo-500/40 bg-indigo-500/20 text-indigo-200"
-                          : "border-slate-700 text-slate-300"
+                          ? "border-accent-strong/40 bg-accent-strong/15 text-accent"
+                          : "border-line-strong text-fg"
                       }`}
                     >
                       {eventTypeLabels[t]}
@@ -160,7 +168,7 @@ export function WebhooksPage() {
             </div>
 
             {error && (
-              <div role="alert" className="text-sm text-rose-300">
+              <div role="alert" className="text-sm text-rose-600 dark:text-rose-300">
                 {error}
               </div>
             )}

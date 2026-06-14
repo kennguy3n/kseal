@@ -4,7 +4,8 @@ import {
   Badge,
   Card,
   ErrorNotice,
-  Spinner,
+  InfoHint,
+  SkeletonRows,
   UnavailableNotice,
 } from "../components/ui";
 import { AppSelect } from "../components/AppSelect";
@@ -56,13 +57,26 @@ export function KillSwitchPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-xl font-semibold text-slate-50">Kill switch</h1>
-        <p className="text-sm text-slate-400">
-          View and issue a signed enable/disable of protection enforcement.
-          Signing and authority are server-side; the console only requests the
-          change.
-        </p>
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5">
+            <h1 className="text-xl font-semibold text-fg-strong">
+              Kill switch
+            </h1>
+            <InfoHint label="About the kill switch">
+              The kill switch is a signed, tenant- or app-scoped command that
+              turns protection enforcement on or off. Commands are signed
+              (Ed25519) and authorized server-side and recorded in the audit
+              trail — the console only requests the change, it never signs in
+              the browser.
+            </InfoHint>
+          </div>
+          <p className="mt-1 max-w-2xl text-sm text-fg-muted">
+            View and issue a signed enable/disable of protection enforcement.
+            Signing and authority are server-side; the console only requests
+            the change.
+          </p>
+        </div>
       </header>
 
       <Card title="Scope">
@@ -80,18 +94,21 @@ export function KillSwitchPage() {
 
       <Card title="Current state">
         {state.isLoading ? (
-          <Spinner />
+          <SkeletonRows rows={2} />
         ) : state.isError && isUnavailableError(state.error) ? (
           <UnavailableNotice feature="The kill switch" />
         ) : state.isError ? (
-          <ErrorNotice error={state.error} />
+          <ErrorNotice
+            error={state.error}
+            onRetry={() => void state.refetch()}
+          />
         ) : (
           <div className="space-y-4">
             <div className="flex items-center gap-3">
               <Badge tone={killSwitchCommandTone(effective)}>
                 {killSwitchCommandLabels[effective]}
               </Badge>
-              <span className="text-sm text-slate-400">
+              <span className="text-sm text-fg-muted">
                 {isArmed
                   ? "Protection is enforcing normally."
                   : "Protection enforcement is disabled (observe-only)."}
@@ -101,29 +118,29 @@ export function KillSwitchPage() {
               <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
                 <div>
                   <dt className="label">Issued</dt>
-                  <dd className="font-mono text-xs text-slate-400">
+                  <dd className="font-mono text-xs text-fg-muted">
                     {formatTimestamp(active.issuedAt)}
                   </dd>
                 </div>
                 <div>
                   <dt className="label">Version</dt>
-                  <dd className="font-mono text-xs text-slate-400">
+                  <dd className="font-mono text-xs text-fg-muted">
                     {active.version.toString()}
                   </dd>
                 </div>
                 <div>
                   <dt className="label">Signing key</dt>
-                  <dd className="font-mono text-xs text-slate-400">
+                  <dd className="font-mono text-xs text-fg-muted">
                     {active.keyId || "—"}
                   </dd>
                 </div>
                 <div>
                   <dt className="label">Reason</dt>
-                  <dd className="text-slate-300">{active.reason || "—"}</dd>
+                  <dd className="text-fg">{active.reason || "—"}</dd>
                 </div>
               </dl>
             ) : (
-              <p className="text-sm text-slate-400">
+              <p className="text-sm text-fg-muted">
                 No signed command in effect for this scope (armed by default).
               </p>
             )}
@@ -146,7 +163,7 @@ export function KillSwitchPage() {
           )}
           {pending === null ? (
             <div className="space-y-3">
-              <p className="text-sm text-slate-400">
+              <p className="text-sm text-fg-muted">
                 {target === KillSwitchCommand.DISABLE
                   ? "Issues a signed kill switch that disables enforcement for this scope. Use only for incident response."
                   : "Issues a signed command that re-arms enforcement for this scope."}

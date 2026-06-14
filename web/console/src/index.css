@@ -2,8 +2,52 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Semantic theme tokens. The light palette is the default (:root); adding the
+ * `.dark` class to <html> swaps in the dark palette. Values are space-separated
+ * RGB channels so Tailwind's `rgb(var(--token) / <alpha-value>)` color syntax
+ * can apply opacity (e.g. bg-surface/60) on top of them.
+ */
 :root {
+  color-scheme: light;
+
+  --c-canvas: 248 250 252; /* slate-50  */
+  --c-surface: 255 255 255;
+  --c-elevated: 241 245 249; /* slate-100 */
+  --c-field: 255 255 255;
+
+  --c-line: 226 232 240; /* slate-200 */
+  --c-line-strong: 203 213 225; /* slate-300 */
+
+  --c-fg: 30 41 59; /* slate-800 */
+  --c-fg-strong: 15 23 42; /* slate-900 */
+  --c-fg-muted: 71 85 105; /* slate-600 */
+  --c-fg-subtle: 100 116 139; /* slate-500 */
+
+  --c-accent: 67 56 202; /* indigo-700 — AA on light surfaces */
+  --c-accent-strong: 79 70 229; /* indigo-600 */
+  --c-accent-contrast: 255 255 255;
+}
+
+.dark {
   color-scheme: dark;
+
+  --c-canvas: 11 16 32; /* #0b1020 (ink)   */
+  --c-surface: 17 24 43; /* #11182b (panel) */
+  --c-elevated: 30 41 59; /* slate-800 */
+  --c-field: 15 23 42; /* slate-900 */
+
+  --c-line: 30 41 59; /* slate-800 */
+  --c-line-strong: 51 65 85; /* slate-700 */
+
+  --c-fg: 226 232 240; /* slate-200 */
+  --c-fg-strong: 248 250 252; /* slate-50  */
+  --c-fg-muted: 148 163 184; /* slate-400 */
+  --c-fg-subtle: 100 116 139; /* slate-500 */
+
+  --c-accent: 165 180 252; /* indigo-300 — AA on dark surfaces */
+  --c-accent-strong: 99 102 241; /* indigo-500 */
+  --c-accent-contrast: 255 255 255;
 }
 
 html,
@@ -14,41 +58,94 @@ body,
 
 body {
   margin: 0;
-  background-color: theme("colors.ink");
-  color: theme("colors.slate.200");
+  background-color: rgb(var(--c-canvas));
+  color: rgb(var(--c-fg));
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
     Helvetica, Arial, sans-serif;
+  transition: background-color 150ms ease, color 150ms ease;
+}
+
+@layer base {
+  /* A single, consistent keyboard focus ring across every interactive element.
+     Mouse clicks don't trigger :focus-visible, so this is keyboard-only. */
+  :focus-visible {
+    outline: 2px solid rgb(var(--c-accent));
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
 }
 
 @layer components {
   .card {
-    @apply rounded-xl border border-slate-800 bg-panel p-5 shadow-sm;
+    @apply rounded-xl border border-line bg-surface p-5 shadow-sm;
   }
   .btn {
     @apply inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50;
   }
   .btn-primary {
-    @apply btn bg-indigo-500 text-white hover:bg-indigo-400;
+    @apply btn bg-accent-strong text-white hover:opacity-90;
   }
   .btn-ghost {
-    @apply btn border border-slate-700 text-slate-200 hover:bg-slate-800;
+    @apply btn border border-line-strong text-fg hover:bg-elevated;
   }
   .btn-danger {
-    @apply btn border border-rose-700/60 text-rose-300 hover:bg-rose-900/30;
+    @apply btn border border-rose-500/60 text-rose-600 hover:bg-rose-500/10 dark:text-rose-300 dark:hover:bg-rose-900/30;
   }
   .input {
-    @apply w-full rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-500 focus:border-indigo-500;
+    @apply w-full rounded-lg border border-line-strong bg-field px-3 py-2 text-sm text-fg-strong outline-none placeholder:text-fg-subtle focus:border-accent-strong;
   }
   .label {
-    @apply mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400;
+    @apply mb-1 block text-xs font-medium uppercase tracking-wide text-fg-muted;
   }
   .badge {
     @apply inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium;
   }
   .th {
-    @apply px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-400;
+    @apply px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-fg-muted;
   }
   .td {
-    @apply px-3 py-2 text-sm text-slate-200;
+    @apply px-3 py-2 text-sm text-fg;
+  }
+  /* Skeleton placeholder used by loading states. The shimmer is disabled under
+     prefers-reduced-motion (see below) so it degrades to a static block. */
+  .skeleton {
+    @apply rounded-md bg-elevated;
+    position: relative;
+    overflow: hidden;
+  }
+  .skeleton::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background-image: linear-gradient(
+      90deg,
+      transparent,
+      rgb(var(--c-fg-subtle) / 0.12),
+      transparent
+    );
+    animation: skeleton-shimmer 1.4s ease-in-out infinite;
+  }
+}
+
+@keyframes skeleton-shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* Honor the OS "reduce motion" preference everywhere: kill the skeleton
+   shimmer, spinner rotation, and any transitions/animations. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+  .skeleton::after {
+    display: none;
   }
 }
