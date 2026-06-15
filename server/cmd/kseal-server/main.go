@@ -401,6 +401,7 @@ func (s webhookSink) Emit(e ingest.StoredEvent) {
 		TenantID    string   `json:"tenant_id"`
 		AppID       string   `json:"app_id"`
 		EventType   string   `json:"event_type"`
+		RiskLevel   string   `json:"risk_level"`
 		RiskBits    uint64   `json:"risk_bits"`
 		RiskSignals []string `json:"risk_signals"`
 		Confidence  string   `json:"confidence"`
@@ -411,6 +412,7 @@ func (s webhookSink) Emit(e ingest.StoredEvent) {
 		TenantID:    e.TenantID,
 		AppID:       e.AppID,
 		EventType:   e.EventType.String(),
+		RiskLevel:   e.RiskLevel.String(),
 		RiskBits:    serverBits,
 		RiskSignals: signals,
 		Confidence:  e.Confidence.String(),

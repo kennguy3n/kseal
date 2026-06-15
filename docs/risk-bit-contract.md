@@ -94,6 +94,16 @@ both normalize via `NormalizeStored` before scoring or surfacing bits.
   **v1** records (in flight during a rolling upgrade); a v1 record decodes with
   `RiskBitsLayout == LayoutUnknown`. Any version newer than this build is
   rejected so a forward record is never silently misread.
+  - **Rollout ordering (Kafka/Redpanda):** the v2 *decoder* is fully
+    backward-compatible (reads v1), but a still-running **v1 decoder cannot read
+    a v2 record** — it treats it as a poison record, commits past it, and drops
+    it (`broker_kafka.go` decode-error path). So the broker tier must be upgraded
+    **consumers-before-producers**, or as a single consumer group that rolls
+    atomically (old pod stops, new pod resumes from the committed offset). A
+    deployment that runs old + new consumers concurrently on the same group can
+    lose the v2 records the old pods happen to fetch. This only affects the
+    short broker hop; ingest produces and consumes the same internal format, so
+    a standard rolling deploy of the ingest fleet is safe.
 
 The live trust decision is unaffected — it always translates the incoming device
 bitset per request and never reads stored bits.
