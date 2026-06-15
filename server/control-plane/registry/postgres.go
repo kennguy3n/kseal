@@ -74,6 +74,17 @@ func clampPageSize(n int) int {
 	}
 }
 
+// optionalUUID returns a query parameter for an optional uuid filter: nil for an
+// empty id (so a `$N::uuid IS NULL` guard matches all rows) and the id string
+// otherwise. Comparing a uuid column directly to an empty string would coerce
+// the parameter to text and fail with `operator does not exist: uuid = text`.
+func optionalUUID(id string) any {
+	if id == "" {
+		return nil
+	}
+	return id
+}
+
 // likeReplacer escapes the LIKE wildcards (`%`, `_`) and the escape character
 // (`\`) itself so a user-supplied search string is matched literally. A
 // strings.Replacer is safe for concurrent use, so it is built once rather than
@@ -346,9 +357,9 @@ func (s *PostgresStore) ListBuilds(ctx context.Context, tenantID, appID string, 
 		rows, err := tx.Query(ctx, `
 			SELECT id, tenant_id, app_id, build_hash, version_name, version_code, protection_profile_id, manifest,
 			       EXTRACT(EPOCH FROM created_at)::bigint
-			FROM builds WHERE tenant_id = $1 AND ($2 = '' OR app_id = $2)
+			FROM builds WHERE tenant_id = $1 AND ($2::uuid IS NULL OR app_id = $2::uuid)
 			ORDER BY created_at, id
-			LIMIT $3 OFFSET $4`, tenantID, appID, size+1, offset)
+			LIMIT $3 OFFSET $4`, tenantID, optionalUUID(appID), size+1, offset)
 		if err != nil {
 			return err
 		}

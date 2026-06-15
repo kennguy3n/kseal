@@ -13,7 +13,7 @@ import {
   Badge,
 } from "../components/ui";
 import { EventType } from "../gen/kseal/v1/common_pb";
-import { eventTypeLabels, formatTimestamp } from "../lib/format";
+import { eventTypeLabels, formatEpochSeconds } from "../lib/format";
 
 const eventTypeChoices: EventType[] = [
   EventType.RUNTIME_TAMPER,
@@ -106,7 +106,7 @@ export function WebhooksPage() {
                       </div>
                       <div className="mt-1 text-xs text-fg-subtle">
                         {w.isActive ? "active" : "inactive"} ·{" "}
-                        {formatTimestamp(w.createdAt)}
+                        {formatEpochSeconds(w.createdAt)}
                       </div>
                     </div>
                     <button

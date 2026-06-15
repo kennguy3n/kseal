@@ -13,7 +13,7 @@ import {
   Badge,
 } from "../components/ui";
 import { SiemKind } from "../gen/kseal/v1/siem_pb";
-import { formatTimestamp } from "../lib/format";
+import { formatEpochSeconds } from "../lib/format";
 
 const kindLabels: Record<SiemKind, string> = {
   [SiemKind.UNSPECIFIED]: "Unspecified",
@@ -174,7 +174,7 @@ export function SiemConnectorsPage() {
                         ))}
                       </div>
                       <div className="mt-1 text-xs text-fg-subtle">
-                        {formatTimestamp(c.createdAt * 1000n)}
+                        {formatEpochSeconds(c.createdAt)}
                       </div>
                     </div>
                     <button

@@ -9,7 +9,7 @@ import {
   LoadMore,
   SkeletonRows,
 } from "../components/ui";
-import { formatTimestamp } from "../lib/format";
+import { formatEpochSeconds } from "../lib/format";
 import { buildMasvsReport } from "../lib/masvs";
 
 export function MasvsEvidencePage() {
@@ -146,7 +146,7 @@ export function MasvsEvidencePage() {
                 {report.buildHash || "—"}
               </div>
               <div className="mt-1 text-xs text-fg-subtle">
-                registered {formatTimestamp(selectedBuild.createdAt)}
+                registered {formatEpochSeconds(selectedBuild.createdAt)}
               </div>
             </Card>
           </div>

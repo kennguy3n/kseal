@@ -60,6 +60,41 @@ func runStoreSuite(t *testing.T, store Store) {
 		}
 	})
 
+	t.Run("builds list filtered by app", func(t *testing.T) {
+		a := mustTenant(t, store)
+		appA, err := store.CreateApp(ctx, CreateAppInput{TenantID: a.Id, Name: "BuildsA", PackageID: "com.builds.a", Platform: ksealv1.Platform_PLATFORM_ANDROID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		appB, err := store.CreateApp(ctx, CreateAppInput{TenantID: a.Id, Name: "BuildsB", PackageID: "com.builds.b", Platform: ksealv1.Platform_PLATFORM_ANDROID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.CreateBuild(ctx, CreateBuildInput{TenantID: a.Id, AppID: appA.Id, BuildHash: "hash-a-1", VersionName: "1.0.0"}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.CreateBuild(ctx, CreateBuildInput{TenantID: a.Id, AppID: appB.Id, BuildHash: "hash-b-1", VersionName: "2.0.0"}); err != nil {
+			t.Fatal(err)
+		}
+		// Filtering by a concrete app id must not raise `uuid = text` on
+		// Postgres (builds.app_id is uuid); it should return only that app.
+		byApp, _, err := store.ListBuilds(ctx, a.Id, appA.Id, Page{Size: 50})
+		if err != nil {
+			t.Fatalf("list builds by app: %v", err)
+		}
+		if len(byApp) != 1 || byApp[0].GetAppId() != appA.Id {
+			t.Fatalf("expected 1 build for appA, got %d: %+v", len(byApp), byApp)
+		}
+		// Empty app id lists every build for the tenant.
+		all, _, err := store.ListBuilds(ctx, a.Id, "", Page{Size: 50})
+		if err != nil {
+			t.Fatalf("list builds tenant-wide: %v", err)
+		}
+		if len(all) != 2 {
+			t.Fatalf("expected 2 builds tenant-wide, got %d", len(all))
+		}
+	})
+
 	t.Run("app unique per platform+package", func(t *testing.T) {
 		a := mustTenant(t, store)
 		in := CreateAppInput{TenantID: a.Id, Name: "X", PackageID: "com.dup", Platform: ksealv1.Platform_PLATFORM_IOS}

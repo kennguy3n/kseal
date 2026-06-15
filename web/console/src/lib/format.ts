@@ -126,3 +126,13 @@ export function formatTimestamp(ms: bigint | number): string {
   // regardless of sub-second timestamp components.
   return new Date(n).toISOString().replace("T", " ").replace(/\.\d{3}Z$/, "Z");
 }
+
+// Renders a unix-seconds timestamp (the control-plane registry emits
+// `EXTRACT(EPOCH ...)` seconds for created_at/updated_at on apps, builds,
+// webhooks, SIEM connectors, etc.). Telemetry events and compliance records use
+// millis — use formatTimestamp for those. Returns "—" for zero/empty values.
+export function formatEpochSeconds(seconds: bigint | number): string {
+  const n = typeof seconds === "bigint" ? Number(seconds) : seconds;
+  if (!Number.isFinite(n) || n <= 0) return "—";
+  return formatTimestamp(n * 1000);
+}
