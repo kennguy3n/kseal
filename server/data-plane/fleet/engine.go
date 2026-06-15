@@ -529,9 +529,13 @@ func (e *Engine) Snapshot() []ScopeAnomaly {
 	}
 	// Slow path: serialize recomputation so a stale/missing cache triggers a
 	// single shard scan; late arrivals re-check the cache after the lock
-	// (another goroutine may have just refreshed it).
+	// (another goroutine may have just refreshed it). Re-read the clock here:
+	// the now captured before blocking on snapMu may predate the refresh another
+	// goroutine just published, which would make snapshotFresh spuriously reject
+	// a perfectly fresh cache and force a redundant scan.
 	e.snapMu.Lock()
 	defer e.snapMu.Unlock()
+	now = e.now()
 	if c := e.snap.Load(); c != nil && snapshotFresh(c, now, e.snapTTL) {
 		return c.val
 	}

@@ -1,6 +1,7 @@
 package risk
 
 import (
+	"math"
 	"testing"
 
 	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
@@ -21,6 +22,18 @@ func TestScoreDefaultAndWeights(t *testing.T) {
 	weighted := Score(BitRootJailbreak, map[uint32]uint32{0: 999})
 	if weighted != 999 {
 		t.Fatalf("weighted score = %d, want 999", weighted)
+	}
+}
+
+func TestScoreSaturatesOnOverflow(t *testing.T) {
+	// Two bits each weighted near uint32 max must clamp at MaxUint32 rather
+	// than wrap, matching the Rust core's saturating_add.
+	got := Score(BitRootJailbreak|BitEmulator, map[uint32]uint32{
+		0: math.MaxUint32 - 1,
+		2: 100,
+	})
+	if got != math.MaxUint32 {
+		t.Fatalf("saturating score = %d, want %d", got, uint32(math.MaxUint32))
 	}
 }
 

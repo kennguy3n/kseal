@@ -13,6 +13,8 @@
 package risk
 
 import (
+	"math"
+
 	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
 )
 
@@ -145,7 +147,9 @@ func Fuse(reported, attestation uint64) uint64 {
 
 // Score computes a weighted severity score for the set bits. weights maps a bit
 // index (0..63) to a weight; bits absent from the map fall back to the default
-// severity table.
+// severity table. Addition saturates at uint32 max so a hostile policy (or a
+// future large signal set) can never overflow the score and wrap to a low,
+// misleading value — matching the Rust core's saturating weighted_score.
 func Score(bits uint64, weights map[uint32]uint32) uint32 {
 	var total uint32
 	for i := uint32(0); i < 64; i++ {
@@ -153,15 +157,24 @@ func Score(bits uint64, weights map[uint32]uint32) uint32 {
 		if bits&bit == 0 {
 			continue
 		}
+		w := defaultWeights[bit]
 		if weights != nil {
-			if w, ok := weights[i]; ok {
-				total += w
-				continue
+			if pw, ok := weights[i]; ok {
+				w = pw
 			}
 		}
-		total += defaultWeights[bit]
+		total = addSat(total, w)
 	}
 	return total
+}
+
+// addSat returns a + b clamped to math.MaxUint32 instead of wrapping on
+// overflow, mirroring Rust's u32::saturating_add.
+func addSat(a, b uint32) uint32 {
+	if a > math.MaxUint32-b {
+		return math.MaxUint32
+	}
+	return a + b
 }
 
 // defaultThresholds map a TrustLevel to the minimum score that reaches it.
