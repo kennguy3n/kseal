@@ -16,6 +16,7 @@ import {
 import {
   enforcementModeLabels,
   eventTypeLabels,
+  formatEpochSeconds,
   formatTimestamp,
   platformLabels,
   riskLevelTone,
@@ -136,7 +137,7 @@ export function AppDetailPage() {
                       {b.buildHash.slice(0, 16)}…
                     </td>
                     <td className="td font-mono text-xs text-fg-subtle">
-                      {formatTimestamp(b.createdAt)}
+                      {formatEpochSeconds(b.createdAt)}
                     </td>
                   </tr>
                 ))}
