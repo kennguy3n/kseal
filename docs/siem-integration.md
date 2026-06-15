@@ -51,6 +51,17 @@ Enforcement is layered:
 No raw timestamps, IPs, device identifiers, or user identifiers are ever
 emitted.
 
+> **Adding a new field to existing connectors.** Because a connector's
+> `field_allow_list` *narrows* the canonical set, a newly-added canonical field
+> (e.g. `risk_signals`) is **opt-in for connectors that persisted an explicit
+> allow-list**: they keep emitting only their stored fields until updated.
+> Connectors with an empty allow-list (the default, which falls back to
+> `DefaultAllowList()`) pick up the new field automatically. To enable
+> `risk_signals` on a connector that pinned an explicit list, re-register it (or
+> update its `field_allow_list` to include `risk_signals`). This narrows-only
+> rule is intentional — it guarantees a config change can never *widen* egress
+> beyond what an operator explicitly approved.
+
 ## Reliability
 
 The exporter is asynchronous and **backpressured** so a slow or unavailable SIEM
