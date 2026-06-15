@@ -24,6 +24,7 @@ import (
 	"github.com/kennguy3n/kseal/server/shared/crypto"
 	"github.com/kennguy3n/kseal/server/shared/db"
 	"github.com/kennguy3n/kseal/server/shared/middleware"
+	"github.com/kennguy3n/kseal/server/shared/risk"
 	"github.com/kennguy3n/kseal/server/shared/telemetry"
 
 	"github.com/kennguy3n/kseal/server/control-plane/compliance"
@@ -389,24 +390,35 @@ func buildTenantSealer(cfg *cfgpkg.Config, platform *crypto.Encryptor, database 
 type webhookSink struct{ d *webhook.Dispatcher }
 
 func (s webhookSink) Emit(e ingest.StoredEvent) {
+	// Project to the server layout so both the raw integer and the named
+	// signals are in one namespace regardless of how the row was stored.
+	serverBits := risk.NormalizeStored(e.RiskBits, e.RiskBitsLayout)
+	signals := risk.SignalNames(serverBits)
+	if signals == nil {
+		signals = []string{}
+	}
 	payload, err := json.Marshal(struct {
-		TenantID   string `json:"tenant_id"`
-		AppID      string `json:"app_id"`
-		EventType  string `json:"event_type"`
-		RiskBits   uint64 `json:"risk_bits"`
-		Confidence string `json:"confidence"`
-		PolicyHash string `json:"policy_hash"`
-		Platform   string `json:"platform"`
-		TimeBucket int64  `json:"time_bucket"`
+		TenantID    string   `json:"tenant_id"`
+		AppID       string   `json:"app_id"`
+		EventType   string   `json:"event_type"`
+		RiskLevel   string   `json:"risk_level"`
+		RiskBits    uint64   `json:"risk_bits"`
+		RiskSignals []string `json:"risk_signals"`
+		Confidence  string   `json:"confidence"`
+		PolicyHash  string   `json:"policy_hash"`
+		Platform    string   `json:"platform"`
+		TimeBucket  int64    `json:"time_bucket"`
 	}{
-		TenantID:   e.TenantID,
-		AppID:      e.AppID,
-		EventType:  e.EventType.String(),
-		RiskBits:   e.RiskBits,
-		Confidence: e.Confidence.String(),
-		PolicyHash: e.PolicyHash,
-		Platform:   e.Platform.String(),
-		TimeBucket: e.TimeBucket,
+		TenantID:    e.TenantID,
+		AppID:       e.AppID,
+		EventType:   e.EventType.String(),
+		RiskLevel:   e.RiskLevel.String(),
+		RiskBits:    serverBits,
+		RiskSignals: signals,
+		Confidence:  e.Confidence.String(),
+		PolicyHash:  e.PolicyHash,
+		Platform:    e.Platform.String(),
+		TimeBucket:  e.TimeBucket,
 	})
 	if err != nil {
 		return
@@ -437,11 +449,13 @@ type siemSink struct{ ex *siem.Exporter }
 
 func (s siemSink) Emit(e ingest.StoredEvent) {
 	s.ex.Submit(siem.Event{
-		TenantID:         e.TenantID,
-		AppID:            e.AppID,
-		EventType:        e.EventType,
-		RiskLevel:        e.RiskLevel,
-		RiskBits:         e.RiskBits,
+		TenantID:  e.TenantID,
+		AppID:     e.AppID,
+		EventType: e.EventType,
+		RiskLevel: e.RiskLevel,
+		// Normalize to the server layout so the exporter's raw risk_bits and
+		// the derived risk_signals are consistent for any stored layout.
+		RiskBits:         risk.NormalizeStored(e.RiskBits, e.RiskBitsLayout),
 		Confidence:       e.Confidence,
 		BuildHash:        e.BuildHash,
 		PolicyHash:       e.PolicyHash,

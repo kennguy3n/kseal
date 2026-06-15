@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
+	"github.com/kennguy3n/kseal/server/shared/risk"
 )
 
 func sampleEvent() StoredEvent {
@@ -16,6 +17,7 @@ func sampleEvent() StoredEvent {
 		EventType:      ksealv1.EventType_EVENT_TYPE_ROOT_RISK,
 		RiskLevel:      ksealv1.TrustLevel_TRUST_LEVEL_HIGH_RISK,
 		RiskBits:       0xDEADBEEFCAFE,
+		RiskBitsLayout: risk.LayoutServer,
 		Confidence:     ksealv1.Confidence_CONFIDENCE_HIGH,
 		BuildHash:      "sha256:abc123",
 		PolicyHash:     "sha256:def456",
@@ -63,6 +65,47 @@ func TestEncodeIsDeterministic(t *testing.T) {
 func TestDecodeRejectsEmpty(t *testing.T) {
 	if _, err := decodeStoredEvent(nil); err != errTruncatedEvent {
 		t.Fatalf("want errTruncatedEvent, got %v", err)
+	}
+}
+
+// encodeStoredEventV1 reproduces the pre-layout (v1) on-the-wire format so the
+// decoder's backward compatibility can be tested: a v1 record has no
+// RiskBitsLayout byte and must decode as risk.LayoutUnknown.
+func encodeStoredEventV1(e StoredEvent) []byte {
+	buf := []byte{eventCodecVersionV1}
+	buf = appendString(buf, e.ID)
+	buf = appendString(buf, e.TenantID)
+	buf = appendString(buf, e.AppID)
+	buf = binary.AppendVarint(buf, int64(e.EventType))
+	buf = binary.AppendVarint(buf, int64(e.RiskLevel))
+	buf = binary.AppendUvarint(buf, e.RiskBits)
+	buf = binary.AppendVarint(buf, int64(e.Confidence))
+	buf = appendString(buf, e.BuildHash)
+	buf = appendString(buf, e.PolicyHash)
+	buf = appendString(buf, e.InstallKeyHash)
+	buf = binary.AppendVarint(buf, e.TimeBucket)
+	buf = appendString(buf, e.Country)
+	buf = binary.AppendVarint(buf, int64(e.Platform))
+	buf = binary.AppendVarint(buf, e.ReceivedAt)
+	return buf
+}
+
+// TestDecodeV1RecordDefaultsLayoutUnknown asserts a v1 record (no layout byte)
+// still decodes during a rolling upgrade and the missing field defaults to
+// LayoutUnknown — which NormalizeStored treats as the server layout.
+func TestDecodeV1RecordDefaultsLayoutUnknown(t *testing.T) {
+	in := sampleEvent()
+	out, err := decodeStoredEvent(encodeStoredEventV1(in))
+	if err != nil {
+		t.Fatalf("decode v1: %v", err)
+	}
+	if out.RiskBitsLayout != risk.LayoutUnknown {
+		t.Fatalf("v1 layout = %d, want LayoutUnknown(%d)", out.RiskBitsLayout, risk.LayoutUnknown)
+	}
+	want := in
+	want.RiskBitsLayout = risk.LayoutUnknown
+	if out != want {
+		t.Fatalf("v1 round-trip mismatch:\n got %+v\nwant %+v", out, want)
 	}
 }
 

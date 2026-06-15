@@ -13,6 +13,7 @@ import (
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
+	"github.com/kennguy3n/kseal/server/shared/risk"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -212,6 +213,7 @@ func (s *ClickHouseAnalyticsStore) Write(ctx context.Context, events []StoredEve
 			int32(e.EventType),
 			int32(e.RiskLevel),
 			e.RiskBits,
+			uint8(e.RiskBitsLayout),
 			int32(e.Confidence),
 			e.BuildHash,
 			e.PolicyHash,
@@ -239,7 +241,7 @@ func (s *ClickHouseAnalyticsStore) Write(ctx context.Context, events []StoredEve
 }
 
 // selectColumns is the canonical projection, ordered to match scanRow.
-const selectColumns = "tenant_id, app_id, id, event_type, risk_level, risk_bits, confidence, build_hash, policy_hash, install_key_hash, country, platform, time_bucket, received_at"
+const selectColumns = "tenant_id, app_id, id, event_type, risk_level, risk_bits, risk_bits_layout, confidence, build_hash, policy_hash, install_key_hash, country, platform, time_bucket, received_at"
 
 // Query returns matching events ordered by time bucket ascending, mirroring the
 // in-memory store. FINAL collapses any ReplacingMergeTree duplicates so a
@@ -439,6 +441,7 @@ func scanRow(rows driver.Rows) (StoredEvent, error) {
 		e          StoredEvent
 		eventType  int32
 		riskLevel  int32
+		layout     uint8
 		confidence int32
 		platform   int32
 		timeBucket time.Time
@@ -451,6 +454,7 @@ func scanRow(rows driver.Rows) (StoredEvent, error) {
 		&eventType,
 		&riskLevel,
 		&e.RiskBits,
+		&layout,
 		&confidence,
 		&e.BuildHash,
 		&e.PolicyHash,
@@ -464,6 +468,7 @@ func scanRow(rows driver.Rows) (StoredEvent, error) {
 	}
 	e.EventType = ksealv1.EventType(eventType)
 	e.RiskLevel = ksealv1.TrustLevel(riskLevel)
+	e.RiskBitsLayout = risk.Layout(layout)
 	e.Confidence = ksealv1.Confidence(confidence)
 	e.Platform = ksealv1.Platform(platform)
 	e.TimeBucket = timeBucket.Unix()

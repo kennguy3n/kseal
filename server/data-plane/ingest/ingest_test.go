@@ -14,6 +14,7 @@ import (
 
 	"github.com/kennguy3n/kseal/server/control-plane/registry"
 	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
+	"github.com/kennguy3n/kseal/server/shared/risk"
 )
 
 func newRedis(t *testing.T) *redis.Client {
@@ -247,6 +248,41 @@ func TestNormalizeTimeBucketSec(t *testing.T) {
 				t.Fatalf("normalizeTimeBucketSec(%d, %d) = %d, want %d", c.in, now, got, c.want)
 			}
 		})
+	}
+}
+
+// TestSubmitTelemetryTranslatesWireBitsAndTagsLayout proves ingest translates
+// the device/wire bitset into the server layout before storing AND tags the
+// row risk.LayoutServer, so the stored bits are self-describing. A wire
+// DEBUGGER (bit 4) must become server DEBUGGER, not server APP_TAMPER (bit 4).
+func TestSubmitTelemetryTranslatesWireBitsAndTagsLayout(t *testing.T) {
+	svc, _, tn, app, broker := setupIngest(t, 1000)
+	const wireDebugger = uint64(1) << 4
+	batch, _ := proto.Marshal(&ksealv1.TelemetryBatch{
+		Platform: ksealv1.Platform_PLATFORM_ANDROID,
+		Events: []*ksealv1.TelemetryEvent{
+			{EventType: ksealv1.EventType_EVENT_TYPE_DEBUGGER, RiskBits: wireDebugger, CoarseTimeBucket: 100},
+		},
+	})
+	resp, err := svc.SubmitTelemetry(context.Background(), connect.NewRequest(&ksealv1.SubmitTelemetryRequest{
+		TenantId: tn.Id, AppId: app.Id, Compression: ksealv1.Compression_COMPRESSION_NONE, CompressedBatch: batch,
+	}))
+	if err != nil || resp.Msg.Accepted != 1 {
+		t.Fatalf("submit: err=%v accepted=%d", err, resp.Msg.Accepted)
+	}
+	select {
+	case e := <-broker.Consume():
+		if e.RiskBits != risk.BitDebugger {
+			t.Fatalf("stored RiskBits = %#x, want server BitDebugger %#x", e.RiskBits, risk.BitDebugger)
+		}
+		if e.RiskBits&risk.BitAppTamper != 0 {
+			t.Fatal("wire DEBUGGER must not store as server APP_TAMPER")
+		}
+		if e.RiskBitsLayout != risk.LayoutServer {
+			t.Fatalf("RiskBitsLayout = %d, want LayoutServer %d", e.RiskBitsLayout, risk.LayoutServer)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no event published to broker")
 	}
 }
 

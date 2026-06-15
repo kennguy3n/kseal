@@ -85,6 +85,40 @@ func TestMinimizedOmitsEmptyCountry(t *testing.T) {
 	}
 }
 
+// TestMinimizedEmitsNamedRiskSignals asserts the name-based view of the risk
+// bits is emitted alongside the raw integer, so a consumer can correlate on
+// stable signal names instead of numeric bit positions. sampleEvent has bits
+// 0b1011 == root_jailbreak | debugger | hooking.
+func TestMinimizedEmitsNamedRiskSignals(t *testing.T) {
+	m := sampleEvent().minimized(allowSet(DefaultAllowList()))
+	got, ok := m[FieldRiskSignals].([]string)
+	if !ok {
+		t.Fatalf("risk_signals missing or wrong type: %T", m[FieldRiskSignals])
+	}
+	want := []string{"root_jailbreak", "debugger", "hooking"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("risk_signals = %v, want %v", got, want)
+	}
+	// The raw integer stays for backward compatibility.
+	if _, ok := m[FieldRiskBits].(uint64); !ok {
+		t.Fatalf("risk_bits integer must remain present, got %T", m[FieldRiskBits])
+	}
+}
+
+// TestMinimizedRiskSignalsEmptyIsArray asserts a clean event emits an empty
+// JSON array (not null) so consumers can always treat the field as a list.
+func TestMinimizedRiskSignalsEmptyIsArray(t *testing.T) {
+	ev := sampleEvent()
+	ev.RiskBits = 0
+	got, ok := ev.minimized(allowSet(DefaultAllowList()))[FieldRiskSignals].([]string)
+	if !ok || got == nil {
+		t.Fatalf("risk_signals must be a non-nil slice, got %#v", got)
+	}
+	if len(got) != 0 {
+		t.Fatalf("clean event must have no signals, got %v", got)
+	}
+}
+
 func sampleEvent() Event {
 	return Event{
 		TenantID:         "t-1",

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
+	"github.com/kennguy3n/kseal/server/shared/risk"
 )
 
 var errBadCursor = errors.New("invalid page cursor")
@@ -32,8 +33,15 @@ type StoredEvent struct {
 	EventType ksealv1.EventType
 	// RiskLevel is the fused trust classification derived from RiskBits at
 	// ingest, so reads need no policy lookup to render risk.
-	RiskLevel      ksealv1.TrustLevel
-	RiskBits       uint64
+	RiskLevel ksealv1.TrustLevel
+	RiskBits  uint64
+	// RiskBitsLayout records which namespace RiskBits is expressed in, making
+	// the row self-describing. Ingest applies risk.FromWire before storing, so
+	// rows it writes are tagged risk.LayoutServer; rows predating this field
+	// decode as risk.LayoutUnknown (assumed server). Readers that score the
+	// bits pass them through risk.NormalizeStored, so a future layout change
+	// stays unambiguous instead of silently mis-scoring historical rows.
+	RiskBitsLayout risk.Layout
 	Confidence     ksealv1.Confidence
 	BuildHash      string
 	PolicyHash     string

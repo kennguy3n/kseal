@@ -241,6 +241,7 @@ func (s *Service) SubmitTelemetry(ctx context.Context, req *connect.Request[ksea
 			EventType:      ev.EventType,
 			RiskLevel:      risk.Level(risk.Score(serverBits, nil), nil),
 			RiskBits:       serverBits,
+			RiskBitsLayout: risk.LayoutServer,
 			Confidence:     ev.Confidence,
 			BuildHash:      ev.AppBuildHash,
 			PolicyHash:     ev.PolicyHash,

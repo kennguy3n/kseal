@@ -55,43 +55,85 @@ meaning and are dropped (not scored against an unrelated bit). `BitFleetAnomaly`
 sits at bit 32, well clear of the wire range, so a device can never forge it and
 it never collides with a translated bit.
 
-## Historical telemetry written before this contract
+## Self-describing storage layout (`risk_bits_layout`)
 
-`IngestService` now stores `risk.FromWire(ev.RiskBits)`, so every event written
-**after** this change carries server-layout bits and is scored correctly by the
-simulator and analytics. Events written **before** it carry the old wire-layout
-bits in their `risk_bits` column, so the simulator (which scores stored bits with
-server weights) mis-scores those rows for any signal whose meaning differs by
-position (bit ≥ ~4).
+A stored `risk_bits` value is meaningless without knowing which layout it is in.
+Rather than rely on deploy timing to disambiguate, every stored event now carries
+its layout explicitly via `StoredEvent.RiskBitsLayout` (`server/shared/risk`):
 
-No destructive backfill is run, by design:
+| `Layout` | value | meaning |
+|---|---|---|
+| `LayoutUnknown` | 0 | layout not recorded (pre-marker row / older codec) |
+| `LayoutWire`    | 1 | raw device/wire bits, **not** yet translated |
+| `LayoutServer`  | 2 | already translated to the server layout |
 
-- There is **no per-row layout/version marker**, so a blind re-translation would
-  double-apply `FromWire` to already-correct post-fix rows and corrupt them. A
-  one-time, timestamp-cutoff backfill (`received_at < deploy_time`) is the only
-  safe form and is intentionally left as an opt-in operator action rather than an
-  automatic migration, to keep the NoOps default safe.
-- The discontinuity is **bounded and self-healing**: raw events age out of each
-  tenant's retention window (`server/data-plane/ingest/retention.go`), so once a
-  full window has elapsed past the deploy, every remaining row is server-layout.
-  Only tenants configured to *retain indefinitely* (`days <= 0`) keep pre-fix
-  rows; such a tenant can run the cutoff backfill above if exact historical
-  simulation over that range is required.
+`IngestService` applies `risk.FromWire` before storing and tags the row
+`LayoutServer`, so every event written after this change is unambiguous. Readers
+never assume a layout — they call `risk.NormalizeStored(bits, layout)`, which:
+
+- `LayoutWire` → applies `FromWire` (translate to server layout),
+- `LayoutServer` → returns the bits unchanged,
+- `LayoutUnknown` → treats the bits as server layout (the safe default that
+  matches behaviour before the column existed; pre-marker rows were already
+  stored post-`FromWire`).
+
+This makes double-translation **structurally impossible**: a row is translated
+exactly when its marker says it still needs to be, so the simulator, the query
+read model, and any future backfill can run repeatedly without corrupting data.
+The simulator (`simulator/service.go`) and query projection (`query/service.go`)
+both normalize via `NormalizeStored` before scoring or surfacing bits.
+
+### Persistence and codec compatibility
+
+- **ClickHouse** — the `events` table gains `risk_bits_layout UInt8 DEFAULT 0`
+  (added idempotently via `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`). Existing
+  rows materialize `0` = `LayoutUnknown`, i.e. read as server layout — exactly
+  the pre-column behaviour, so the column is additive and safe to deploy live.
+- **Broker codec** — the internal `StoredEvent` encoding is bumped to **v2**,
+  which appends the layout byte after `risk_bits`. The decoder still accepts
+  **v1** records (in flight during a rolling upgrade); a v1 record decodes with
+  `RiskBitsLayout == LayoutUnknown`. Any version newer than this build is
+  rejected so a forward record is never silently misread.
+  - **Rollout ordering (Kafka/Redpanda):** the v2 *decoder* is fully
+    backward-compatible (reads v1), but a still-running **v1 decoder cannot read
+    a v2 record** — it treats it as a poison record, commits past it, and drops
+    it (`broker_kafka.go` decode-error path). So the broker tier must be upgraded
+    **consumers-before-producers**, or as a single consumer group that rolls
+    atomically (old pod stops, new pod resumes from the committed offset). A
+    deployment that runs old + new consumers concurrently on the same group can
+    lose the v2 records the old pods happen to fetch. This only affects the
+    short broker hop; ingest produces and consumes the same internal format, so
+    a standard rolling deploy of the ingest fleet is safe.
 
 The live trust decision is unaffected — it always translates the incoming device
 bitset per request and never reads stored bits.
 
 ### Consumers of stored `risk_bits` (webhooks / SIEM)
 
-The webhook sink and the SIEM exporter emit the stored `risk_bits` integer
-verbatim (they do not expand it into per-bit named fields). Because ingest now
-stores server-layout bits, those egress fields are **server layout** going
-forward, where before this change they carried the raw device/wire layout. This
-is the correct behaviour — wire bits should never have leaked to consumers, and
-the server-side SIEM field names already describe the server layout — but any
-external integration or SIEM correlation rule written against the old wire
-positions (e.g. treating bit 4 as `DEBUGGER`) must be updated to the server
-layout (bit 4 = `APP_TAMPER`; see the mapping table above). Call this out in the
+External consumers should key on **signal names, not numeric bit positions**.
+Bit numbers are an internal detail that can be renumbered; the names are the
+stable external contract. Both egress paths therefore emit a named view
+alongside the raw integer:
+
+- **Webhook** payloads carry `risk_signals` (a JSON array of names such as
+  `["debugger","app_tamper"]`) next to the existing `risk_bits` integer, plus
+  `risk_level` (the fused trust level, for parity with the SIEM export). These
+  are additive fields — a lenient JSON consumer ignores them, but a subscriber
+  that deserializes *strictly* (rejecting unknown fields) must be updated. The
+  webhook's `risk_bits` integer has the **same server-layout semantics change**
+  as SIEM described below.
+- **SIEM** exports add the `risk_signals` field to the minimized privacy
+  contract (`server/data-plane/siem/allowlist.go`); the Splunk / Sentinel /
+  Elastic onboarding templates map it (multivalue / `dynamic` / `keyword`).
+
+Both paths first call `risk.NormalizeStored`, so the integer **and** the names
+are always server layout regardless of how the row was stored. `risk_bits` is
+retained unchanged for backward compatibility, but because ingest now stores
+server-layout bits, its meaning is server layout going forward (where before this
+contract it leaked raw wire bits). Any rule written against the old wire
+positions (e.g. treating bit 4 as `DEBUGGER`) must move to the server layout
+(bit 4 = `APP_TAMPER`; see the mapping table) — or, preferably, switch to
+`risk_signals` and stop depending on positions entirely. Call this out in the
 release notes for operators with custom `risk_bits` parsing.
 
 ## Pinned on both ends
@@ -104,5 +146,11 @@ Any silent renumber must break CI deliberately:
   `TestServerBitLayoutContract`, `TestFleetAnomalyBitClearOfWireRange`).
 - **Rust** — `risk::tests::bit_positions_are_stable` pins all 16 wire bit
   positions and `MAX_SIGNAL_BIT`.
+- **Egress names + layout** — `server/shared/risk/contract_test.go` pins the
+  stable `risk_signals` names (`TestSignalNamesContract`), proves every weighted
+  bit has a name (`TestSignalNamesCoversEveryWeightedBit`), and pins the
+  `NormalizeStored` layout handling (`TestNormalizeStoredLayouts`).
 
-When changing the layout, update both ends and this table together.
+When changing the layout, update both ends and this table together. Renaming a
+`risk_signals` value is a breaking change for external consumers even if no bit
+moves — treat the names as the external contract.

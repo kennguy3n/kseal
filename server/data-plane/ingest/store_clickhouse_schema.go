@@ -45,6 +45,7 @@ func (s *ClickHouseAnalyticsStore) ensureSchema(ctx context.Context) error {
 	event_type       Int32,
 	risk_level       Int32,
 	risk_bits        UInt64,
+	risk_bits_layout UInt8 DEFAULT 0,
 	confidence       Int32,
 	build_hash       String,
 	policy_hash      String,
@@ -62,5 +63,42 @@ SETTINGS index_granularity = 8192`, s.table, onCluster, engine, ttl)
 	if err := s.conn.Exec(ctx, ddl); err != nil {
 		return fmt.Errorf("clickhouse: ensure schema: %w", err)
 	}
+
+	// Add risk_bits_layout to clusters created before the column existed.
+	// Existing rows materialize the DEFAULT 0 (risk.LayoutUnknown), which
+	// readers treat as the server layout — matching their pre-column behavior,
+	// so the migration is a pure no-op for already-correct rows.
+	//
+	// We gate the ALTER on a cheap, node-local system.columns lookup instead of
+	// issuing it unconditionally. ALTER ... ADD COLUMN IF NOT EXISTS is
+	// idempotent, but on an ON CLUSTER deployment it enqueues a distributed DDL
+	// task on every node on every server boot; with many pods restarting that is
+	// needless chatter in the distributed-DDL queue. The existence probe is a
+	// plain SELECT (no DDL), so once the column is present the common path issues
+	// no DDL at all.
+	exists, err := s.columnExists(ctx, "risk_bits_layout")
+	if err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+	alter := fmt.Sprintf("ALTER TABLE %s%s ADD COLUMN IF NOT EXISTS risk_bits_layout UInt8 DEFAULT 0 AFTER risk_bits", s.table, onCluster)
+	if err := s.conn.Exec(ctx, alter); err != nil {
+		return fmt.Errorf("clickhouse: add risk_bits_layout column: %w", err)
+	}
 	return nil
+}
+
+// columnExists reports whether the events table already has the named column,
+// using a node-local system.columns lookup (no distributed DDL). table is a
+// validated safe identifier living in the connection's current database, so it
+// is matched as a bound parameter against currentDatabase().
+func (s *ClickHouseAnalyticsStore) columnExists(ctx context.Context, column string) (bool, error) {
+	var n uint64
+	const q = "SELECT count() FROM system.columns WHERE database = currentDatabase() AND table = ? AND name = ?"
+	if err := s.conn.QueryRow(ctx, q, s.table, column).Scan(&n); err != nil {
+		return false, fmt.Errorf("clickhouse: check column %q: %w", column, err)
+	}
+	return n > 0, nil
 }

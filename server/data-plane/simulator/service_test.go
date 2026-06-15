@@ -53,6 +53,34 @@ func TestSimulateDiff(t *testing.T) {
 	}
 }
 
+// TestSimulateTranslatesWireLayoutRow asserts a row stored in the wire layout
+// is scored in the server layout. Wire bit 4 (DEBUGGER) would, if scored raw,
+// hit server bit 4 (APP_TAMPER, weight 60) and trip a low CRITICAL threshold;
+// translated it is server DEBUGGER (weight 25) and stays below it.
+func TestSimulateTranslatesWireLayoutRow(t *testing.T) {
+	store := ingest.NewInMemoryAnalyticsStore()
+	const wireDebugger = uint64(1) << 4
+	if err := store.Write(context.Background(), []ingest.StoredEvent{
+		{TenantID: "t1", AppID: "a1", RiskBits: wireDebugger, RiskBitsLayout: risk.LayoutWire, TimeBucket: 1},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sim := New(store)
+	// Threshold sits between server DEBUGGER (25) and APP_TAMPER (60): a raw
+	// mis-score as APP_TAMPER would deny; the correct translation must not.
+	candidate := PolicySpec{
+		Mode:       ksealv1.EnforcementMode_ENFORCEMENT_MODE_BLOCK,
+		Thresholds: map[string]uint32{"CRITICAL": 40},
+	}
+	report, err := sim.Simulate(context.Background(), "t1", "a1", 0, 0, PolicySpec{}, candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.NewlyBlocked != 0 {
+		t.Fatalf("wire DEBUGGER must score as server DEBUGGER (not APP_TAMPER); newly blocked = %d, want 0", report.NewlyBlocked)
+	}
+}
+
 func TestSimulateEmptyRange(t *testing.T) {
 	sim := New(ingest.NewInMemoryAnalyticsStore())
 	report, err := sim.Simulate(context.Background(), "t1", "a1", 0, 0, PolicySpec{}, PolicySpec{})

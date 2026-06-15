@@ -6,12 +6,19 @@ import (
 	"math"
 
 	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
+	"github.com/kennguy3n/kseal/server/shared/risk"
 )
 
 // eventCodecVersion is the wire version of the broker-internal StoredEvent
-// encoding. It is bumped only on a breaking layout change; decoders reject
-// unknown versions so a rolling upgrade never silently misreads records.
-const eventCodecVersion byte = 1
+// encoding written by this build. v2 appends the RiskBitsLayout byte after
+// RiskBits. The decoder still accepts v1 (older in-flight records during a
+// rolling upgrade decode with RiskBitsLayout == risk.LayoutUnknown); any
+// version newer than this build is rejected so a forward record is never
+// silently misread.
+const (
+	eventCodecVersion   byte = 2
+	eventCodecVersionV1 byte = 1
+)
 
 // maxEncodedStringLen guards the decoder against a corrupt/forged length prefix
 // claiming a multi-gigabyte string. No legitimate StoredEvent field approaches
@@ -40,6 +47,7 @@ func encodeStoredEvent(e StoredEvent) []byte {
 	buf = binary.AppendVarint(buf, int64(e.EventType))
 	buf = binary.AppendVarint(buf, int64(e.RiskLevel))
 	buf = binary.AppendUvarint(buf, e.RiskBits)
+	buf = binary.AppendUvarint(buf, uint64(e.RiskBitsLayout)) // v2+
 	buf = binary.AppendVarint(buf, int64(e.Confidence))
 	buf = appendString(buf, e.BuildHash)
 	buf = appendString(buf, e.PolicyHash)
@@ -60,7 +68,8 @@ func decodeStoredEvent(b []byte) (StoredEvent, error) {
 	if len(b) == 0 {
 		return e, errTruncatedEvent
 	}
-	if b[0] != eventCodecVersion {
+	ver := b[0]
+	if ver != eventCodecVersion && ver != eventCodecVersionV1 {
 		return e, errBadEventVersion
 	}
 	d := decoder{b: b[1:]}
@@ -71,6 +80,11 @@ func decodeStoredEvent(b []byte) (StoredEvent, error) {
 	e.EventType = ksealv1.EventType(d.varint())
 	e.RiskLevel = ksealv1.TrustLevel(d.varint())
 	e.RiskBits = d.uvarint()
+	// v1 records predate the layout byte; they decode as LayoutUnknown, which
+	// NormalizeStored treats as the (steady-state) server layout.
+	if ver >= eventCodecVersion {
+		e.RiskBitsLayout = risk.Layout(d.uvarint())
+	}
 	e.Confidence = ksealv1.Confidence(d.varint())
 	e.BuildHash = d.string()
 	e.PolicyHash = d.string()
