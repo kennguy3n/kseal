@@ -116,7 +116,12 @@ stable external contract. Both egress paths therefore emit a named view
 alongside the raw integer:
 
 - **Webhook** payloads carry `risk_signals` (a JSON array of names such as
-  `["debugger","app_tamper"]`) next to the existing `risk_bits` integer.
+  `["debugger","app_tamper"]`) next to the existing `risk_bits` integer, plus
+  `risk_level` (the fused trust level, for parity with the SIEM export). These
+  are additive fields — a lenient JSON consumer ignores them, but a subscriber
+  that deserializes *strictly* (rejecting unknown fields) must be updated. The
+  webhook's `risk_bits` integer has the **same server-layout semantics change**
+  as SIEM described below.
 - **SIEM** exports add the `risk_signals` field to the minimized privacy
   contract (`server/data-plane/siem/allowlist.go`); the Splunk / Sentinel /
   Elastic onboarding templates map it (multivalue / `dynamic` / `keyword`).

@@ -216,6 +216,11 @@ func toEventRecord(e ingest.StoredEvent) *ksealv1.EventRecord {
 		TenantId:  e.TenantID,
 		AppId:     e.AppID,
 		EventType: e.EventType,
+		// RiskLevel is served as stored (not re-scored). Invariant: ingest scores
+		// and stores RiskLevel from FromWire-translated bits and tags the row
+		// LayoutServer, so the stored level is always consistent with the
+		// server-layout bits below. (v1/unknown rows are read as server layout
+		// too, so the level still matches.)
 		RiskLevel: e.RiskLevel,
 		// Project in the server layout so the dashboard always interprets the
 		// bits under one namespace, even for a row stored in another layout.
