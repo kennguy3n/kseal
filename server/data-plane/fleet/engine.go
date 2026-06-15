@@ -38,6 +38,7 @@ import (
 	"hash/fnv"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kennguy3n/kseal/server/shared/risk"
@@ -134,11 +135,20 @@ type Engine struct {
 
 	// snap caches the full anomaly scan for cfg.SnapshotTTL; the read path
 	// (dashboard + metrics sampler) shares it so concurrent reads do not each
-	// lock every shard. snapVal is treated as immutable once published.
+	// lock every shard. It is published as an immutable *cachedSnapshot through
+	// an atomic pointer so a fresh cache hit serves lock-free (concurrent
+	// dashboard reads never serialize); snapMu only serializes recomputation so
+	// at most one goroutine scans the shards per TTL (single-flight).
 	snapTTL time.Duration
 	snapMu  sync.Mutex
-	snapAt  time.Time
-	snapVal []ScopeAnomaly
+	snap    atomic.Pointer[cachedSnapshot]
+}
+
+// cachedSnapshot is an immutable published anomaly scan plus the clock reading
+// it was computed at. Once stored in Engine.snap it is never mutated.
+type cachedSnapshot struct {
+	at  time.Time
+	val []ScopeAnomaly
 }
 
 type shard struct {
@@ -477,17 +487,33 @@ type ScopeAnomaly struct {
 // read-only.
 func (e *Engine) Snapshot() []ScopeAnomaly {
 	now := e.now()
+	if e.snapTTL <= 0 {
+		// Caching disabled: always recompute, no shared state to guard.
+		return e.computeSnapshot(now)
+	}
+	// Lock-free fast path: a fresh published scan is served without taking any
+	// lock, so a burst of concurrent dashboard reads never contends.
+	if c := e.snap.Load(); c != nil && snapshotFresh(c, now, e.snapTTL) {
+		return c.val
+	}
+	// Slow path: serialize recomputation so a stale/missing cache triggers a
+	// single shard scan; late arrivals re-check the cache after the lock
+	// (another goroutine may have just refreshed it).
 	e.snapMu.Lock()
 	defer e.snapMu.Unlock()
-	// Serve the cached scan when still fresh; recompute on a backwards clock
-	// (e.g. a new test with a reset clock) or when the TTL has elapsed.
-	if e.snapTTL > 0 && e.snapVal != nil && !now.Before(e.snapAt) && now.Sub(e.snapAt) < e.snapTTL {
-		return e.snapVal
+	if c := e.snap.Load(); c != nil && snapshotFresh(c, now, e.snapTTL) {
+		return c.val
 	}
 	out := e.computeSnapshot(now)
-	e.snapVal = out
-	e.snapAt = now
+	e.snap.Store(&cachedSnapshot{at: now, val: out})
 	return out
+}
+
+// snapshotFresh reports whether a cached scan is still usable at now: within ttl
+// and not from a future clock reading (a backwards clock, e.g. a new test with a
+// reset clock, forces a recompute).
+func snapshotFresh(c *cachedSnapshot, now time.Time, ttl time.Duration) bool {
+	return !now.Before(c.at) && now.Sub(c.at) < ttl
 }
 
 // computeSnapshot scans every shard and returns the anomalous cohorts sorted by
