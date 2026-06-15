@@ -230,13 +230,17 @@ func (s *Service) SubmitTelemetry(ctx context.Context, req *connect.Request[ksea
 			rejected++
 			continue
 		}
+		// Translate the device-reported wire bitset into the server bit layout
+		// so stored bits and the derived risk level speak the same namespace as
+		// the trust path, the simulator, and policy weights.
+		serverBits := risk.FromWire(ev.RiskBits)
 		stored := StoredEvent{
 			ID:             uuid.NewString(),
 			TenantID:       m.TenantId,
 			AppID:          m.AppId,
 			EventType:      ev.EventType,
-			RiskLevel:      risk.Level(risk.Score(ev.RiskBits, nil), nil),
-			RiskBits:       ev.RiskBits,
+			RiskLevel:      risk.Level(risk.Score(serverBits, nil), nil),
+			RiskBits:       serverBits,
 			Confidence:     ev.Confidence,
 			BuildHash:      ev.AppBuildHash,
 			PolicyHash:     ev.PolicyHash,

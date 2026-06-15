@@ -16,6 +16,7 @@ import (
 	"github.com/kennguy3n/kseal/server/data-plane/attestation"
 	"github.com/kennguy3n/kseal/server/data-plane/trust"
 	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
+	appconfig "github.com/kennguy3n/kseal/server/shared/config"
 	kcrypto "github.com/kennguy3n/kseal/server/shared/crypto"
 )
 
@@ -92,7 +93,7 @@ func TestE2ETrustFlow(t *testing.T) {
 	play := attestation.NewPlayIntegrityVerifier(staticKeySource{keyID: keyID, pub: priv.Public()})
 	verifier := attestation.NewVerifier(play, nil)
 	nonces := trust.NewNonceStore(newRedis(t), time.Minute)
-	svc := trust.NewService(store, nonces, verifier, 15*time.Minute)
+	svc := trust.NewService(store, nonces, verifier, 15*time.Minute, appconfig.FeatureFlags{})
 
 	// runFlow drives GetNonce -> sign verdict -> VerifyAttestation and returns
 	// the accepted response (or the rejection).

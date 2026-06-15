@@ -33,6 +33,7 @@ import (
 	"github.com/kennguy3n/kseal/server/data-plane/attestation"
 	"github.com/kennguy3n/kseal/server/data-plane/canary"
 	cfgsvc "github.com/kennguy3n/kseal/server/data-plane/config"
+	"github.com/kennguy3n/kseal/server/data-plane/fleet"
 	"github.com/kennguy3n/kseal/server/data-plane/guardrails"
 	"github.com/kennguy3n/kseal/server/data-plane/ingest"
 	"github.com/kennguy3n/kseal/server/data-plane/query"
@@ -115,7 +116,7 @@ func run() error {
 
 	nonceStore := trust.NewNonceStore(rdb, cfg.NonceTTL)
 	verifier := attestation.NewProductionVerifier()
-	trustSvc := trust.NewService(store, nonceStore, verifier, cfg.TrustTokenTTL)
+	trustSvc := trust.NewService(store, nonceStore, verifier, cfg.TrustTokenTTL, cfg.FeatureFlags)
 
 	configSvc := cfgsvc.NewService(store, cfgsvc.NewSigner(store), cfg.ConfigTTL)
 
@@ -131,7 +132,15 @@ func run() error {
 	// selection + kill-switch delivery in config, and the canary health feed in
 	// trust. Disabled per tenant unless the matching feature flag is on.
 	configSvc.AttachCompliance(canaryReg, complianceStore, cfg.FeatureFlags)
-	trustSvc.AttachCanaryHealth(detector, canaryReg, cfg.FeatureFlags)
+	trustSvc.AttachCanaryHealth(detector, canaryReg)
+
+	// Population-level fleet-anomaly detection: learns each app's baseline
+	// prevalence of coordinated-abuse signals and fuses a server-derived
+	// FLEET_ANOMALY risk bit during a surge. In-process, O(1)/attestation,
+	// bounded memory. Flag-gated per tenant (compliance.FlagFleetAnomaly,
+	// default off), so the per-instance decision is unchanged on main.
+	fleetEngine := fleet.New(fleet.ConfigFromEnv())
+	trustSvc.AttachFleetGuard(fleetEngine, fleet.TrustEdgeRegionFromEnv())
 
 	dispatcher := webhook.NewDispatcher(store, webhook.DispatcherConfig{}, tel.Metrics)
 	defer dispatcher.Stop()
@@ -201,6 +210,7 @@ func run() error {
 	}
 
 	querySvc := query.NewService(store, analytics)
+	querySvc.AttachFleetGuard(fleetEngine, cfg.FeatureFlags)
 
 	// Raw-telemetry retention: purge per-tenant raw events past their window
 	// (platform default KSEAL_RAW_RETENTION_DAYS), retaining aggregates. Tracked
@@ -223,6 +233,15 @@ func run() error {
 	go func() {
 		defer bg.Done()
 		canaryCtl.Run(rootCtx)
+	}()
+
+	// Fleet-anomaly metrics sampler: periodically reflects the engine's active
+	// anomalies into the kseal_fleet_anomaly_active gauge. Cheap (reads bounded
+	// in-memory state); tracked in bg so it stops cleanly on shutdown.
+	bg.Add(1)
+	go func() {
+		defer bg.Done()
+		runFleetMetricsSampler(rootCtx, fleetEngine, tel.Metrics, 15*time.Second)
 	}()
 
 	// Interceptors.
@@ -288,6 +307,48 @@ func run() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return srv.Shutdown(shutdownCtx)
+}
+
+// runFleetMetricsSampler periodically reflects the fleet engine's currently
+// anomalous (tenant, app, build, region) cohorts into the FleetAnomaly gauge,
+// clearing cohorts that have recovered. It returns when ctx is cancelled.
+//
+// It updates the gauge by diffing against the previous tick's active set rather
+// than calling Reset(): active series are re-set to 1 (idempotent) and only the
+// cohorts that have recovered are deleted. Reset() would briefly drop every
+// series to absent, so a scrape landing mid-tick could see zero anomalies and
+// flap a "no longer under attack" alert; the diff keeps each active series
+// continuously present.
+func runFleetMetricsSampler(ctx context.Context, engine *fleet.Engine, m *telemetry.Metrics, interval time.Duration) {
+	if engine == nil || m == nil {
+		return
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	// cohortLabels is the gauge's label tuple in declaration order.
+	type cohortLabels = [4]string
+	active := map[cohortLabels]struct{}{}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			next := make(map[cohortLabels]struct{}, len(active))
+			for _, a := range engine.Snapshot() {
+				lv := cohortLabels{a.TenantID, a.AppID, a.BuildHash, a.Region}
+				m.FleetAnomaly.WithLabelValues(lv[:]...).Set(1)
+				next[lv] = struct{}{}
+			}
+			// Delete only cohorts that were active last tick but recovered now,
+			// so still-anomalous cohorts never momentarily read absent/zero.
+			for lv := range active {
+				if _, ok := next[lv]; !ok {
+					m.FleetAnomaly.DeleteLabelValues(lv[:]...)
+				}
+			}
+			active = next
+		}
+	}
 }
 
 // buildTenantSealer selects how tenant secret material is sealed at rest. When

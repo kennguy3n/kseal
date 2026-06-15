@@ -32,6 +32,8 @@ export function DashboardPage() {
     [overview.data],
   );
 
+  const fleetAnomalies = overview.data?.activeFleetAnomalies ?? [];
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -67,6 +69,56 @@ export function DashboardPage() {
           hint="Devices that completed attestation and were issued a trust token."
         />
       </div>
+
+      {fleetAnomalies.length > 0 && (
+        <Card title="Fleet anomalies">
+          <p className="mb-3 text-xs text-fg-muted">
+            Cohorts whose population is currently showing a coordinated
+            abuse-signal surge or a volume spike above its learned baseline. New
+            attestations from these cohorts are stepped up automatically.
+          </p>
+          <ul className="divide-y divide-line">
+            {fleetAnomalies.map((a, i) => (
+              <li
+                key={`${a.appId}-${a.buildHash}-${a.region}-${i}`}
+                className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm"
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge tone="bg-amber-500/10 text-amber-700 border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-300">
+                    Surge
+                  </Badge>
+                  <span className="font-mono text-xs text-fg">{a.appId}</span>
+                  {a.buildHash && (
+                    <span className="font-mono text-xs text-fg-subtle">
+                      build {a.buildHash.slice(0, 12)}
+                    </span>
+                  )}
+                  {a.region && (
+                    <span className="text-xs text-fg-subtle">{a.region}</span>
+                  )}
+                  {a.signals.map((s) => (
+                    <Badge key={s}>{s}</Badge>
+                  ))}
+                  {a.velocitySurge && (
+                    <Badge tone="bg-rose-500/10 text-rose-700 border-rose-500/30 dark:bg-rose-500/15 dark:text-rose-300">
+                      velocity{" "}
+                      {a.velocityRatio > 0
+                        ? `${a.velocityRatio.toFixed(1)}×`
+                        : "spike"}
+                    </Badge>
+                  )}
+                </div>
+                <span className="font-mono text-xs text-fg-subtle">
+                  {a.maxSurgeRatio > 0
+                    ? `${a.maxSurgeRatio.toFixed(1)}× baseline · `
+                    : ""}
+                  {Number(a.observed)} obs
+                </span>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card title="Recent events">

@@ -150,6 +150,9 @@ upload.
 | Server-side authoritative enforcement | has | partial | partial | partial | partial | partial |
 | Replay/repack detectable server-side | has | partial | partial | partial | partial | partial |
 | Policy simulator (replay traffic vs policy) | has | missing | partial | missing | missing | partial |
+| Population/fleet-level anomaly detection (cohort baselines) | has | missing | partial | missing | missing | partial |
+| Volume-velocity / coordinated-flood detection | has | missing | partial | missing | missing | partial |
+| Per build/region cohort attack attribution | has | missing | missing | missing | missing | missing |
 | No launch-time network call (perf budget) | has | n/a | n/a | n/a | n/a | n/a |
 
 **Implemented in:** `server/data-plane/attestation/` (`play_integrity.go`,
@@ -168,6 +171,16 @@ incumbent set does not productize — most stop at "run platform attestation and
 read the verdict." Replay is caught by single-use nonces; repackaging is caught by
 the build-hash binding in the proof preimage. That gap is the
 [Strategic Position](../PROPOSAL.md#strategic-position) kseal is built on.
+
+Population-level abuse detection — the per-cohort baselines + volume-velocity
+signal that Approov/Castle/Arkose monetize — ships in
+`server/data-plane/fleet/` (**Fleet Anomaly Guard**): per-`(tenant, app, build,
+region)` cohort baselines fuse a server-derived `FLEET_ANOMALY` bit into newly
+joining clients on a surge, so the trust decision is no longer purely
+per-instance and stateless (see [fleet-anomaly.md](fleet-anomaly.md)). The
+device/wire and server risk-bit namespaces are unified by a single `risk.FromWire`
+translation applied before fusion/scoring, pinned by Go + Rust contract tests
+(see [risk-bit-contract.md](risk-bit-contract.md)).
 
 ---
 
@@ -346,6 +359,7 @@ A candid summary for planning:
 | **Open-standard evidence** | **Wins** | MASVS anchoring + auto-generated evidence report (`GenerateMasvsReportTask`, `kseal masvs`) |
 | **NoOps + enterprise isolation together** | **Wins** | Self-service CLI *and* CMK / private-link / on-prem / multi-region in one product |
 | **Lightweight footprint / unit cost** | **Wins (by design)** | < 40 ms startup, no launch network, compact telemetry, local-CI builds |
+| **Population-level abuse detection** | **Matches (NoOps edge)** | Fleet Anomaly Guard adds per-cohort baselines + volume-velocity to the server trust decision (`server/data-plane/fleet`); zero-config and flag-gated, where Castle/Arkose sell it as a tuned premium tier |
 | **Classic RASP detections (1–6)** | **Matches** | Detections now ship on Android, iOS and desktop; advantage is server-side fusion, not the detections themselves |
 | **Build-time obfuscation depth** | **Trails Guardsquare** | kseal ships string/symbol/native hardening + polymorphism but avoids heavy VM / source-IR obfuscation on purpose; competes on polymorphism + decay, not raw obfuscation strength |
 | **MTD breadth / threat intel** | **Trails Zimperium** | kseal is app-trust-focused, not a mobile-threat-defense suite |

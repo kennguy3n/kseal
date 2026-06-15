@@ -14,6 +14,7 @@ import (
 	"github.com/kennguy3n/kseal/server/control-plane/registry"
 	"github.com/kennguy3n/kseal/server/data-plane/attestation"
 	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
+	appconfig "github.com/kennguy3n/kseal/server/shared/config"
 	"github.com/kennguy3n/kseal/server/shared/crypto"
 )
 
@@ -93,6 +94,10 @@ func TestNonceSingleUse(t *testing.T) {
 }
 
 func setupService(t *testing.T, res *attestation.Result) (*Service, registry.Store, *ksealv1.Tenant, *ksealv1.App) {
+	return setupServiceWithFlags(t, res, appconfig.FeatureFlags{})
+}
+
+func setupServiceWithFlags(t *testing.T, res *attestation.Result, flags appconfig.FeatureFlags) (*Service, registry.Store, *ksealv1.Tenant, *ksealv1.App) {
 	t.Helper()
 	store := registry.NewMemStore()
 	ctx := context.Background()
@@ -105,7 +110,7 @@ func setupService(t *testing.T, res *attestation.Result) (*Service, registry.Sto
 		t.Fatal(err)
 	}
 	verifier := attestation.NewVerifier(stubVerifier{res}, stubVerifier{res})
-	svc := NewService(store, NewNonceStore(newRedis(t), time.Minute), verifier, time.Minute)
+	svc := NewService(store, NewNonceStore(newRedis(t), time.Minute), verifier, time.Minute, flags)
 	return svc, store, tn, app
 }
 
@@ -182,7 +187,7 @@ func (failingSessionStore) GetTrustSession(context.Context, string) (*registry.T
 // never reached.
 func TestValidateRequestProofMalformedTokenIDFailsClosed(t *testing.T) {
 	verifier := attestation.NewVerifier(stubVerifier{nil}, stubVerifier{nil})
-	svc := NewService(failingSessionStore{registry.NewMemStore()}, NewNonceStore(newRedis(t), time.Minute), verifier, time.Minute)
+	svc := NewService(failingSessionStore{registry.NewMemStore()}, NewNonceStore(newRedis(t), time.Minute), verifier, time.Minute, appconfig.FeatureFlags{})
 	ctx := context.Background()
 
 	res, err := svc.ValidateRequestProof(ctx, connect.NewRequest(&ksealv1.RequestProof{

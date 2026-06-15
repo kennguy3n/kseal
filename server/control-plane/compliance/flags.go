@@ -16,4 +16,9 @@ const (
 	FlagCanaryRollout = "canary_rollout"
 	// FlagDedicatedTier gates the dedicated-isolation key domain for a tenant.
 	FlagDedicatedTier = "dedicated_tier"
+	// FlagFleetAnomaly gates population-level fleet-anomaly detection in the
+	// trust path: observing attestations into the fleet engine and fusing the
+	// server-derived FLEET_ANOMALY risk bit during a surge. Default off, so the
+	// per-instance decision is unchanged on main.
+	FlagFleetAnomaly = "fleet_anomaly"
 )

@@ -5,7 +5,9 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"connectrpc.com/connect"
@@ -19,6 +21,7 @@ import (
 	"github.com/kennguy3n/kseal/server/control-plane/registry"
 	"github.com/kennguy3n/kseal/server/data-plane/attestation"
 	"github.com/kennguy3n/kseal/server/data-plane/canary"
+	"github.com/kennguy3n/kseal/server/data-plane/fleet"
 	"github.com/kennguy3n/kseal/server/data-plane/guardrails"
 	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
 	"github.com/kennguy3n/kseal/server/gen/kseal/v1/ksealv1connect"
@@ -41,10 +44,24 @@ type Service struct {
 	detector *guardrails.Detector
 	canary   *canary.Registry
 	flags    appconfig.FeatureFlags
+
+	// Optional population-level fleet-anomaly engine; nil disables it.
+	fleet *fleet.Engine
+	// trustEdgeRegion gates whether CDN-injected country headers are read as the
+	// fleet cohort's region dimension. Off by default: these headers are
+	// client-spoofable when the server is not behind a CDN that sets and
+	// sanitizes them, so trusting them blindly would let an attacker fragment
+	// their traffic across fabricated region cohorts (each staying under
+	// MinSamples/VelocityMinVolume) to evade detection. Operators behind such a
+	// trusted edge opt in explicitly.
+	trustEdgeRegion bool
 }
 
-// NewService builds a TrustService.
-func NewService(store registry.Store, nonces *NonceStore, verifier *attestation.Verifier, tokenTTL time.Duration) *Service {
+// NewService builds a TrustService. flags carries the per-tenant feature toggles
+// that gate the optional subsystems (canary health, fleet anomaly); it is owned
+// by the service for its lifetime, so the Attach* wirings never mutate it. The
+// zero value disables every flag.
+func NewService(store registry.Store, nonces *NonceStore, verifier *attestation.Verifier, tokenTTL time.Duration, flags appconfig.FeatureFlags) *Service {
 	if tokenTTL <= 0 {
 		tokenTTL = 15 * time.Minute
 	}
@@ -54,18 +71,29 @@ func NewService(store registry.Store, nonces *NonceStore, verifier *attestation.
 		verifier: verifier,
 		tokenTTL: tokenTTL,
 		tracer:   otel.Tracer("github.com/kennguy3n/kseal/server/data-plane/trust"),
+		flags:    flags,
 	}
 }
 
 // AttachCanaryHealth wires the guardrail health feed for canary auto-rollback.
 // Each validated request's allow/deny outcome is recorded against the cohort's
 // policy id (candidate or stable), so the controller can detect a candidate that
-// degrades. Flag-gated per tenant (compliance.FlagCanaryRollout); a nil detector
-// or registry disables it entirely.
-func (s *Service) AttachCanaryHealth(detector *guardrails.Detector, reg *canary.Registry, flags appconfig.FeatureFlags) {
+// degrades. Flag-gated per tenant (compliance.FlagCanaryRollout, supplied to
+// NewService); a nil detector or registry disables it entirely.
+func (s *Service) AttachCanaryHealth(detector *guardrails.Detector, reg *canary.Registry) {
 	s.detector = detector
 	s.canary = reg
-	s.flags = flags
+}
+
+// AttachFleetGuard wires the population-level fleet-anomaly engine. Each accepted
+// attestation is observed into the engine, and when the (tenant, app, build,
+// region) cohort is surging, a server-derived FLEET_ANOMALY risk bit is fused
+// into the newly minted session's risk before scoring. Flag-gated per tenant
+// (compliance.FlagFleetAnomaly, supplied to NewService); a nil engine disables
+// it entirely.
+func (s *Service) AttachFleetGuard(engine *fleet.Engine, trustEdgeRegionHeaders bool) {
+	s.fleet = engine
+	s.trustEdgeRegion = trustEdgeRegionHeaders
 }
 
 // recordCanaryHealth attributes one decision to the instance's canary cohort.
@@ -83,6 +111,67 @@ func (s *Service) recordCanaryHealth(tenantID, appID, instanceID string, decisio
 		return
 	}
 	s.detector.RecordDecision(tenantID, appID, policyID, decision == ksealv1.RequestProofResult_DECISION_DENY)
+}
+
+// applyFleetGuard observes the fused risk bits into the population engine and,
+// when the (tenant, app, build, region) cohort is surging — either a signal
+// surge or a volume-velocity spike — fuses the server-derived FLEET_ANOMALY bit
+// into the returned bitset. It is a no-op (returning fused unchanged) unless the
+// engine is wired and the feature is enabled for the tenant, so it adds zero
+// overhead on the default path.
+func (s *Service) applyFleetGuard(tenantID, appID, buildHash, region string, fused uint64, span trace.Span) uint64 {
+	if s.fleet == nil || !s.flags.Enabled(tenantID, compliance.FlagFleetAnomaly) {
+		return fused
+	}
+	// Observe and assess on the engine's own clock under a single shard-lock
+	// acquisition, so the arrival time and the window assessment share one
+	// (injectable) time source and the hot path locks the cohort's shard once.
+	a := s.fleet.ObserveAndAssessNow(tenantID, appID, buildHash, region, fused)
+	if !a.Anomalous {
+		return fused
+	}
+	names := make([]string, 0, len(a.Signals))
+	for _, sig := range a.Signals {
+		names = append(names, sig.Name)
+	}
+	span.SetAttributes(
+		attribute.Bool("fleet.anomaly", true),
+		attribute.String("fleet.signals", strings.Join(names, ",")),
+		attribute.Bool("fleet.velocity_surge", a.VelocitySurge),
+		attribute.Int("fleet.observed", a.Observed),
+	)
+	return fused | risk.BitFleetAnomaly
+}
+
+// edgeCountryHeaders are the request headers a fronting CDN/edge commonly sets
+// with the client's ISO country, used as the best-effort cohort region. When
+// none are present the region is empty and the cohort is build-level.
+var edgeCountryHeaders = []string{
+	"Cf-Ipcountry",        // Cloudflare
+	"X-Vercel-Ip-Country", // Vercel
+	"X-Geo-Country",       // generic / Fastly
+	"X-Country-Code",
+	"X-Appengine-Country", // Google Cloud
+}
+
+// edgeRegion extracts a best-effort country/region from edge headers. An empty
+// or sentinel value (e.g. Cloudflare's "XX"/"T1") collapses to "". It returns ""
+// unless the operator has opted in via AttachFleetGuard, because these headers
+// are client-spoofable absent a trusted CDN/edge that sets and strips them;
+// collapsing to a build-level cohort is the safe default (an attacker cannot
+// then shard traffic across fabricated regions to dodge the per-cohort floors).
+func (s *Service) edgeRegion(h http.Header) string {
+	if !s.trustEdgeRegion {
+		return ""
+	}
+	for _, name := range edgeCountryHeaders {
+		v := strings.ToUpper(strings.TrimSpace(h.Get(name)))
+		if v == "" || v == "XX" || v == "T1" {
+			continue
+		}
+		return v
+	}
+	return ""
 }
 
 // GetNonce issues a single-use challenge nonce for the attestation step.
@@ -164,7 +253,8 @@ func (s *Service) VerifyAttestation(ctx context.Context, req *connect.Request[ks
 	// the active policy.
 	policy, _ := s.store.GetActivePolicy(ctx, m.TenantId, m.AppId)
 	thresholds := parseThresholds(policy)
-	fused := risk.Fuse(m.RiskBitset, res.RiskBits)
+	fused := risk.Fuse(risk.FromWire(m.RiskBitset), res.RiskBits)
+	fused = s.applyFleetGuard(m.TenantId, m.AppId, m.BuildHash, s.edgeRegion(req.Header()), fused, span)
 	score := risk.Score(fused, parseWeights(policy))
 	level := risk.Level(score, thresholds)
 	nextChecks := risk.NextChecks(level)
