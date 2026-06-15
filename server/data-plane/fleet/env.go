@@ -21,6 +21,7 @@ import (
 //	KSEAL_FLEET_VELOCITY_MIN_VOLUME integer > 0
 //	KSEAL_FLEET_VELOCITY_COLD_VOLUME integer > 0
 //	KSEAL_FLEET_MAX_SCOPES     integer > 0
+//	KSEAL_FLEET_SNAPSHOT_TTL   Go duration ("0" or negative disables read caching)
 func ConfigFromEnv() Config {
 	c := DefaultConfig()
 	if v := os.Getenv("KSEAL_FLEET_WINDOW"); v != "" {
@@ -76,6 +77,17 @@ func ConfigFromEnv() Config {
 	if v := os.Getenv("KSEAL_FLEET_MAX_SCOPES"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			c.MaxScopes = n
+		}
+	}
+	if v := os.Getenv("KSEAL_FLEET_SNAPSHOT_TTL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			// A non-positive duration disables caching; New treats <0 as the
+			// "disabled" sentinel, so map 0 to -1 to avoid the zero-means-default
+			// rule.
+			if d <= 0 {
+				d = -1
+			}
+			c.SnapshotTTL = d
 		}
 	}
 	return c

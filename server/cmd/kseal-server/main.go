@@ -116,7 +116,7 @@ func run() error {
 
 	nonceStore := trust.NewNonceStore(rdb, cfg.NonceTTL)
 	verifier := attestation.NewProductionVerifier()
-	trustSvc := trust.NewService(store, nonceStore, verifier, cfg.TrustTokenTTL)
+	trustSvc := trust.NewService(store, nonceStore, verifier, cfg.TrustTokenTTL, cfg.FeatureFlags)
 
 	configSvc := cfgsvc.NewService(store, cfgsvc.NewSigner(store), cfg.ConfigTTL)
 
@@ -132,7 +132,7 @@ func run() error {
 	// selection + kill-switch delivery in config, and the canary health feed in
 	// trust. Disabled per tenant unless the matching feature flag is on.
 	configSvc.AttachCompliance(canaryReg, complianceStore, cfg.FeatureFlags)
-	trustSvc.AttachCanaryHealth(detector, canaryReg, cfg.FeatureFlags)
+	trustSvc.AttachCanaryHealth(detector, canaryReg)
 
 	// Population-level fleet-anomaly detection: learns each app's baseline
 	// prevalence of coordinated-abuse signals and fuses a server-derived
@@ -140,7 +140,7 @@ func run() error {
 	// bounded memory. Flag-gated per tenant (compliance.FlagFleetAnomaly,
 	// default off), so the per-instance decision is unchanged on main.
 	fleetEngine := fleet.New(fleet.ConfigFromEnv())
-	trustSvc.AttachFleetGuard(fleetEngine, cfg.FeatureFlags)
+	trustSvc.AttachFleetGuard(fleetEngine)
 
 	dispatcher := webhook.NewDispatcher(store, webhook.DispatcherConfig{}, tel.Metrics)
 	defer dispatcher.Stop()
@@ -312,23 +312,41 @@ func run() error {
 // runFleetMetricsSampler periodically reflects the fleet engine's currently
 // anomalous (tenant, app, build, region) cohorts into the FleetAnomaly gauge,
 // clearing cohorts that have recovered. It returns when ctx is cancelled.
+//
+// It updates the gauge by diffing against the previous tick's active set rather
+// than calling Reset(): active series are re-set to 1 (idempotent) and only the
+// cohorts that have recovered are deleted. Reset() would briefly drop every
+// series to absent, so a scrape landing mid-tick could see zero anomalies and
+// flap a "no longer under attack" alert; the diff keeps each active series
+// continuously present.
 func runFleetMetricsSampler(ctx context.Context, engine *fleet.Engine, m *telemetry.Metrics, interval time.Duration) {
 	if engine == nil || m == nil {
 		return
 	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+	// cohortLabels is the gauge's label tuple in declaration order.
+	type cohortLabels = [4]string
+	active := map[cohortLabels]struct{}{}
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			// Reset first so a cohort that recovered since the last tick drops to
-			// absent rather than sticking at 1.
-			m.FleetAnomaly.Reset()
+			next := make(map[cohortLabels]struct{}, len(active))
 			for _, a := range engine.Snapshot() {
-				m.FleetAnomaly.WithLabelValues(a.TenantID, a.AppID, a.BuildHash, a.Region).Set(1)
+				lv := cohortLabels{a.TenantID, a.AppID, a.BuildHash, a.Region}
+				m.FleetAnomaly.WithLabelValues(lv[:]...).Set(1)
+				next[lv] = struct{}{}
 			}
+			// Delete only cohorts that were active last tick but recovered now,
+			// so still-anomalous cohorts never momentarily read absent/zero.
+			for lv := range active {
+				if _, ok := next[lv]; !ok {
+					m.FleetAnomaly.DeleteLabelValues(lv[:]...)
+				}
+			}
+			active = next
 		}
 	}
 }

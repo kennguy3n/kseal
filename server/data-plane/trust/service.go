@@ -49,8 +49,11 @@ type Service struct {
 	fleet *fleet.Engine
 }
 
-// NewService builds a TrustService.
-func NewService(store registry.Store, nonces *NonceStore, verifier *attestation.Verifier, tokenTTL time.Duration) *Service {
+// NewService builds a TrustService. flags carries the per-tenant feature toggles
+// that gate the optional subsystems (canary health, fleet anomaly); it is owned
+// by the service for its lifetime, so the Attach* wirings never mutate it. The
+// zero value disables every flag.
+func NewService(store registry.Store, nonces *NonceStore, verifier *attestation.Verifier, tokenTTL time.Duration, flags appconfig.FeatureFlags) *Service {
 	if tokenTTL <= 0 {
 		tokenTTL = 15 * time.Minute
 	}
@@ -60,29 +63,28 @@ func NewService(store registry.Store, nonces *NonceStore, verifier *attestation.
 		verifier: verifier,
 		tokenTTL: tokenTTL,
 		tracer:   otel.Tracer("github.com/kennguy3n/kseal/server/data-plane/trust"),
+		flags:    flags,
 	}
 }
 
 // AttachCanaryHealth wires the guardrail health feed for canary auto-rollback.
 // Each validated request's allow/deny outcome is recorded against the cohort's
 // policy id (candidate or stable), so the controller can detect a candidate that
-// degrades. Flag-gated per tenant (compliance.FlagCanaryRollout); a nil detector
-// or registry disables it entirely.
-func (s *Service) AttachCanaryHealth(detector *guardrails.Detector, reg *canary.Registry, flags appconfig.FeatureFlags) {
+// degrades. Flag-gated per tenant (compliance.FlagCanaryRollout, supplied to
+// NewService); a nil detector or registry disables it entirely.
+func (s *Service) AttachCanaryHealth(detector *guardrails.Detector, reg *canary.Registry) {
 	s.detector = detector
 	s.canary = reg
-	s.flags = flags
 }
 
 // AttachFleetGuard wires the population-level fleet-anomaly engine. Each accepted
-// attestation is observed into the engine, and when the (tenant, app) population
-// is surging, a server-derived FLEET_ANOMALY risk bit is fused into the newly
-// minted session's risk before scoring. Flag-gated per tenant
-// (compliance.FlagFleetAnomaly); a nil engine disables it entirely. Safe to call
-// alongside AttachCanaryHealth — both share the same feature-flag set.
-func (s *Service) AttachFleetGuard(engine *fleet.Engine, flags appconfig.FeatureFlags) {
+// attestation is observed into the engine, and when the (tenant, app, build,
+// region) cohort is surging, a server-derived FLEET_ANOMALY risk bit is fused
+// into the newly minted session's risk before scoring. Flag-gated per tenant
+// (compliance.FlagFleetAnomaly, supplied to NewService); a nil engine disables
+// it entirely.
+func (s *Service) AttachFleetGuard(engine *fleet.Engine) {
 	s.fleet = engine
-	s.flags = flags
 }
 
 // recordCanaryHealth attributes one decision to the instance's canary cohort.
@@ -112,8 +114,9 @@ func (s *Service) applyFleetGuard(tenantID, appID, buildHash, region string, fus
 	if s.fleet == nil || !s.flags.Enabled(tenantID, compliance.FlagFleetAnomaly) {
 		return fused
 	}
-	now := time.Now()
-	s.fleet.Observe(tenantID, appID, buildHash, region, fused, now)
+	// Observe and assess on the engine's own clock so the arrival time and the
+	// window assessment share one (injectable) time source.
+	s.fleet.ObserveNow(tenantID, appID, buildHash, region, fused)
 	a := s.fleet.Assess(tenantID, appID, buildHash, region)
 	if !a.Anomalous {
 		return fused

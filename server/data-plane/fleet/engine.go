@@ -39,6 +39,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/kennguy3n/kseal/server/shared/risk"
 )
 
 // Signal names a coordinated-abuse signal the engine watches at the population
@@ -85,6 +87,11 @@ type Config struct {
 	// MaxScopes caps the number of tracked cohorts; least-recently observed
 	// cohorts are evicted beyond the cap.
 	MaxScopes int
+	// SnapshotTTL caches the full anomaly snapshot for this long so a burst of
+	// dashboard reads collapses to at most one full cohort scan per TTL instead
+	// of locking every shard on each request. Zero uses the default; a negative
+	// value disables caching (every Snapshot recomputes).
+	SnapshotTTL time.Duration
 	// Signals is the watched signal set. Defaults to DefaultSignals.
 	Signals []Signal
 	// now is injectable for tests; nil means time.Now.
@@ -124,6 +131,14 @@ type Engine struct {
 	bucketSize time.Duration
 	now        func() time.Time
 	shards     [shardCount]shard
+
+	// snap caches the full anomaly scan for cfg.SnapshotTTL; the read path
+	// (dashboard + metrics sampler) shares it so concurrent reads do not each
+	// lock every shard. snapVal is treated as immutable once published.
+	snapTTL time.Duration
+	snapMu  sync.Mutex
+	snapAt  time.Time
+	snapVal []ScopeAnomaly
 }
 
 type shard struct {
@@ -158,17 +173,19 @@ type ewma struct {
 }
 
 // DefaultSignals are the coordinated-abuse signals worth watching at the
-// population level. Masks use the server risk bit layout (see
-// server/shared/risk).
+// population level. Masks reference the server risk-bit constants directly so a
+// renumber in server/shared/risk updates this set at compile time rather than
+// silently drifting; Observe is always fed server-layout bits (the trust path
+// translates the device/wire layout through risk.FromWire first).
 func DefaultSignals() []Signal {
 	return []Signal{
-		{Name: "root_jailbreak", Mask: 1 << 0},   // risk.BitRootJailbreak
-		{Name: "emulator", Mask: 1 << 2},         // risk.BitEmulator
-		{Name: "hooking", Mask: 1 << 3},          // risk.BitHooking
-		{Name: "app_tamper", Mask: 1 << 4},       // risk.BitAppTamper
-		{Name: "attestation_fail", Mask: 1 << 5}, // risk.BitAttestationFail
-		{Name: "device_integrity", Mask: 1 << 8}, // risk.BitDeviceIntegrity
-		{Name: "app_unrecognized", Mask: 1 << 9}, // risk.BitAppUnrecognized
+		{Name: "root_jailbreak", Mask: risk.BitRootJailbreak},
+		{Name: "emulator", Mask: risk.BitEmulator},
+		{Name: "hooking", Mask: risk.BitHooking},
+		{Name: "app_tamper", Mask: risk.BitAppTamper},
+		{Name: "attestation_fail", Mask: risk.BitAttestationFail},
+		{Name: "device_integrity", Mask: risk.BitDeviceIntegrity},
+		{Name: "app_unrecognized", Mask: risk.BitAppUnrecognized},
 	}
 }
 
@@ -186,6 +203,7 @@ func DefaultConfig() Config {
 		VelocityMinVolume:  200,
 		VelocityColdVolume: 500,
 		MaxScopes:          200_000,
+		SnapshotTTL:        time.Second,
 		Signals:            DefaultSignals(),
 	}
 }
@@ -226,6 +244,13 @@ func New(cfg Config) *Engine {
 	if cfg.MaxScopes <= 0 {
 		cfg.MaxScopes = d.MaxScopes
 	}
+	// SnapshotTTL: zero takes the default; a negative value is kept as a
+	// sentinel meaning "caching disabled" (clamped to 0 below).
+	if cfg.SnapshotTTL == 0 {
+		cfg.SnapshotTTL = d.SnapshotTTL
+	} else if cfg.SnapshotTTL < 0 {
+		cfg.SnapshotTTL = 0
+	}
 	if len(cfg.Signals) == 0 {
 		cfg.Signals = d.Signals
 	}
@@ -237,6 +262,7 @@ func New(cfg Config) *Engine {
 		cfg:        cfg,
 		bucketSize: cfg.Window / time.Duration(cfg.Buckets),
 		now:        nowFn,
+		snapTTL:    cfg.SnapshotTTL,
 	}
 	for i := range e.shards {
 		e.shards[i].byKey = make(map[scopeKey]*list.Element)
@@ -296,6 +322,14 @@ func (e *Engine) getOrCreateLocked(sh *shard, k scopeKey) *scope {
 		sh.lru.Remove(back)
 	}
 	return sc
+}
+
+// ObserveNow records one attestation using the engine's own (injectable) clock,
+// so callers on the trust hot path share the exact time source the assessment
+// uses. This keeps production and tests on a single clock rather than mixing an
+// external time.Now() with the engine's e.now().
+func (e *Engine) ObserveNow(tenant, app, build, region string, bits uint64) {
+	e.Observe(tenant, app, build, region, bits, e.now())
 }
 
 // Observe records one attestation for the (tenant, app, build, region) cohort
@@ -437,9 +471,30 @@ type ScopeAnomaly struct {
 }
 
 // Snapshot returns every currently-anomalous cohort. It is used by the metrics
-// sampler and the dashboard read path; it does not mutate LRU order.
+// sampler and the dashboard read path; it does not mutate LRU order. The result
+// is cached for cfg.SnapshotTTL and shared across concurrent callers, so a burst
+// of reads costs a single full scan; the returned slice must be treated as
+// read-only.
 func (e *Engine) Snapshot() []ScopeAnomaly {
-	ep := e.epoch(e.now())
+	now := e.now()
+	e.snapMu.Lock()
+	defer e.snapMu.Unlock()
+	// Serve the cached scan when still fresh; recompute on a backwards clock
+	// (e.g. a new test with a reset clock) or when the TTL has elapsed.
+	if e.snapTTL > 0 && e.snapVal != nil && !now.Before(e.snapAt) && now.Sub(e.snapAt) < e.snapTTL {
+		return e.snapVal
+	}
+	out := e.computeSnapshot(now)
+	e.snapVal = out
+	e.snapAt = now
+	return out
+}
+
+// computeSnapshot scans every shard and returns the anomalous cohorts sorted by
+// (tenant, app, build, region). Callers hold no shard lock; it acquires each in
+// turn. Used only via Snapshot (which caches the result).
+func (e *Engine) computeSnapshot(now time.Time) []ScopeAnomaly {
+	ep := e.epoch(now)
 	var out []ScopeAnomaly
 	for s := range e.shards {
 		sh := &e.shards[s]

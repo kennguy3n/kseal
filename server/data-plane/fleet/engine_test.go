@@ -5,11 +5,15 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/kennguy3n/kseal/server/shared/risk"
 )
 
+// These mirror the server risk-bit layout via the canonical constants so the
+// window/surge tests track any renumber in server/shared/risk automatically.
 const (
-	bitEmulator = uint64(1) << 2 // risk.BitEmulator
-	bitRoot     = uint64(1) << 0 // risk.BitRootJailbreak
+	bitEmulator = risk.BitEmulator
+	bitRoot     = risk.BitRootJailbreak
 )
 
 // clock is a manually-advanced time source for deterministic window tests.
@@ -175,6 +179,55 @@ func TestSnapshotAndTenantSnapshot(t *testing.T) {
 	t1 := e.TenantSnapshot("t1")
 	if len(t1) != 1 || t1[0].AppID != "a1" {
 		t.Fatalf("expected only t1/a1 in tenant snapshot, got %+v", t1)
+	}
+}
+
+// TestSnapshotCaching verifies the read-path cache: within the TTL a second
+// Snapshot reuses the prior scan (so a burst of dashboard reads costs one scan),
+// and once the TTL elapses the scan is recomputed and reflects new cohorts.
+func TestSnapshotCaching(t *testing.T) {
+	clk := newClock()
+	cfg := testConfig(clk)
+	cfg.SnapshotTTL = 5 * time.Second // < Window so both cohorts stay in-window
+	e := New(cfg)
+
+	feedBucket(e, clk, "t1", "a1", bitEmulator, 100, 70)
+	if got := len(e.Snapshot()); got != 1 {
+		t.Fatalf("first snapshot = %d cohorts, want 1", got)
+	}
+
+	// A new surging cohort appears, but the clock has not advanced past the TTL:
+	// the cached scan must still be served.
+	feedBucket(e, clk, "t2", "a9", bitRoot, 100, 70)
+	if got := len(e.Snapshot()); got != 1 {
+		t.Fatalf("within-TTL snapshot = %d cohorts, want cached 1", got)
+	}
+	if got := len(e.TenantSnapshot("t2")); got != 0 {
+		t.Fatalf("within-TTL tenant snapshot saw uncached cohort: %d", got)
+	}
+
+	// Past the TTL the scan recomputes and both cohorts surface.
+	clk.advance(cfg.SnapshotTTL)
+	if got := len(e.Snapshot()); got != 2 {
+		t.Fatalf("post-TTL snapshot = %d cohorts, want 2", got)
+	}
+}
+
+// TestSnapshotCachingDisabled verifies a negative TTL disables caching so every
+// Snapshot recomputes immediately.
+func TestSnapshotCachingDisabled(t *testing.T) {
+	clk := newClock()
+	cfg := testConfig(clk)
+	cfg.SnapshotTTL = -1 // disabled
+	e := New(cfg)
+
+	feedBucket(e, clk, "t1", "a1", bitEmulator, 100, 70)
+	if got := len(e.Snapshot()); got != 1 {
+		t.Fatalf("snapshot = %d cohorts, want 1", got)
+	}
+	feedBucket(e, clk, "t2", "a9", bitRoot, 100, 70)
+	if got := len(e.Snapshot()); got != 2 {
+		t.Fatalf("caching disabled: snapshot = %d cohorts, want fresh 2", got)
 	}
 }
 

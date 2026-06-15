@@ -44,9 +44,9 @@ func verifyOnce(t *testing.T, svc *Service, tenant, app, build string, wireBits 
 // elevated to MEDIUM_RISK by the fused FLEET_ANOMALY bit — the per-instance path
 // alone would have minted it TRUSTED.
 func TestFleetGuardFusesAnomalyBitOnSurge(t *testing.T) {
-	svc, _, tn, app := setupService(t, &attestation.Result{Accepted: true, AppRecognized: true, DeviceIntegrity: true})
+	svc, _, tn, app := setupServiceWithFlags(t, &attestation.Result{Accepted: true, AppRecognized: true, DeviceIntegrity: true}, flags(t, "*:"+compliance.FlagFleetAnomaly+"=true"))
 	engine := fleet.New(fleet.DefaultConfig())
-	svc.AttachFleetGuard(engine, flags(t, "*:"+compliance.FlagFleetAnomaly+"=true"))
+	svc.AttachFleetGuard(engine)
 
 	const build = "bh-surge"
 
@@ -70,9 +70,9 @@ func TestFleetGuardFusesAnomalyBitOnSurge(t *testing.T) {
 // TestFleetGuardFlagGated asserts the guard never fires when the feature flag is
 // off for the tenant, even with the engine attached and a clear surge present.
 func TestFleetGuardFlagGated(t *testing.T) {
-	svc, _, tn, app := setupService(t, &attestation.Result{Accepted: true, AppRecognized: true, DeviceIntegrity: true})
+	svc, _, tn, app := setupServiceWithFlags(t, &attestation.Result{Accepted: true, AppRecognized: true, DeviceIntegrity: true}, flags(t, "")) // flag off
 	engine := fleet.New(fleet.DefaultConfig())
-	svc.AttachFleetGuard(engine, flags(t, "")) // flag off
+	svc.AttachFleetGuard(engine)
 
 	const build = "bh-nogate"
 	for i := 0; i < 80; i++ {

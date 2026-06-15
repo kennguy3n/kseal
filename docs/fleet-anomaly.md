@@ -88,7 +88,7 @@ Designed to hold at 5,000 tenants × millions of apps × tens of millions of MAU
 
 ## Wiring
 
-`TrustService.VerifyAttestation` calls `Observe(tenant, app, build, region, fused, now)`
+`TrustService.VerifyAttestation` calls `ObserveNow(tenant, app, build, region, fused)`
 then `Assess(...)`; when the cohort is anomalous it fuses `risk.BitFleetAnomaly`
 into the minted session's risk **before** scoring, so the new client is stepped
 up by the active policy's weight for that bit. The fused bits passed to the
@@ -96,11 +96,22 @@ engine are already in the **server** risk-bit layout (see
 [risk-bit-contract.md](risk-bit-contract.md)), so signal masks match the rest of
 the decision path.
 
+`ObserveNow` records the arrival on the engine's own (injectable) clock — the
+same source `Assess` reads — so the observation time and the window assessment
+never drift apart and the whole path is deterministic under test.
+
+The watched signal masks in `DefaultSignals` reference the `risk.Bit*` constants
+directly, so a renumber in `server/shared/risk` updates the engine at compile
+time rather than silently drifting.
+
 ## Observability
 
 - **Prometheus**: `kseal_fleet_anomaly_active` gauge, labelled
   `{tenant, app, build, region}`, set to 1 for each anomalous cohort by a
-  background sampler and cleared when a cohort recovers.
+  background sampler (every 15s). The sampler diffs against the previous tick
+  and deletes only the series of cohorts that have recovered, so a still-anomalous
+  cohort's series is never momentarily dropped to absent — a scrape can't briefly
+  see "no anomalies" and flap a resolve.
 - **OTel**: `trust.VerifyAttestation` spans carry `fleet.anomalous`,
   `fleet.signals`, and `fleet.velocity_surge` attributes.
 - **Console**: the tenant **Overview** surfaces a *Fleet anomalies* panel listing
@@ -125,7 +136,18 @@ KSEAL_FLEET_VELOCITY_FACTOR     float > 1
 KSEAL_FLEET_VELOCITY_MIN_VOLUME integer > 0
 KSEAL_FLEET_VELOCITY_COLD_VOLUME integer > 0
 KSEAL_FLEET_MAX_SCOPES          integer > 0
+KSEAL_FLEET_SNAPSHOT_TTL        Go duration ("0"/negative disables read caching)
 ```
+
+### Read-path snapshot cache
+
+`Snapshot()` (used by the dashboard via `TenantSnapshot` and by the metrics
+sampler) scans every shard. To keep dashboard reads cheap at scale, the full
+anomaly scan is cached for `SnapshotTTL` (default 1s) and shared across
+concurrent callers, so a burst of overview requests costs a single scan per TTL
+instead of locking all shards on every request. The hot `Observe` path is
+untouched — no extra locks — and a ≤1s staleness is irrelevant for an anomaly
+overview. Set `KSEAL_FLEET_SNAPSHOT_TTL=0` to disable caching (always recompute).
 
 ## Flag-gating
 

@@ -31,9 +31,9 @@ func canaryReg(tenant, app, cand string) *canary.Registry {
 
 func TestRecordCanaryHealthAttributesToCohort(t *testing.T) {
 	const tenant, app, cand = "t1", "app1", "cand"
-	svc := NewService(registry.NewMemStore(), nil, nil, 0)
+	svc := NewService(registry.NewMemStore(), nil, nil, 0, flags(t, "*:"+compliance.FlagCanaryRollout+"=true"))
 	det := guardrails.NewDetector(0)
-	svc.AttachCanaryHealth(det, canaryReg(tenant, app, cand), flags(t, "*:"+compliance.FlagCanaryRollout+"=true"))
+	svc.AttachCanaryHealth(det, canaryReg(tenant, app, cand))
 
 	// 8 denies + 2 allows on the candidate cohort -> 0.8 block rate.
 	for i := 0; i < 8; i++ {
@@ -54,10 +54,10 @@ func TestRecordCanaryHealthAttributesToCohort(t *testing.T) {
 
 func TestRecordCanaryHealthFlagGated(t *testing.T) {
 	const tenant, app, cand = "t1", "app1", "cand"
-	svc := NewService(registry.NewMemStore(), nil, nil, 0)
+	svc := NewService(registry.NewMemStore(), nil, nil, 0, flags(t, ""))
 	det := guardrails.NewDetector(0)
 	// Flag off: nothing recorded.
-	svc.AttachCanaryHealth(det, canaryReg(tenant, app, cand), flags(t, ""))
+	svc.AttachCanaryHealth(det, canaryReg(tenant, app, cand))
 	svc.recordCanaryHealth(tenant, app, "inst", ksealv1.RequestProofResult_DECISION_DENY)
 	if _, total := det.Sample(tenant, app, cand); total != 0 {
 		t.Fatalf("flag off must record nothing, got %d", total)
@@ -66,9 +66,9 @@ func TestRecordCanaryHealthFlagGated(t *testing.T) {
 
 func TestRecordCanaryHealthNoInstanceNoOp(t *testing.T) {
 	const tenant, app, cand = "t1", "app1", "cand"
-	svc := NewService(registry.NewMemStore(), nil, nil, 0)
+	svc := NewService(registry.NewMemStore(), nil, nil, 0, flags(t, "*:"+compliance.FlagCanaryRollout+"=true"))
 	det := guardrails.NewDetector(0)
-	svc.AttachCanaryHealth(det, canaryReg(tenant, app, cand), flags(t, "*:"+compliance.FlagCanaryRollout+"=true"))
+	svc.AttachCanaryHealth(det, canaryReg(tenant, app, cand))
 	// Empty instance id -> no cohort attribution.
 	svc.recordCanaryHealth(tenant, app, "", ksealv1.RequestProofResult_DECISION_DENY)
 	if _, total := det.Sample(tenant, app, cand); total != 0 {
@@ -78,7 +78,7 @@ func TestRecordCanaryHealthNoInstanceNoOp(t *testing.T) {
 
 func TestRecordCanaryHealthDisabledWithoutAttach(t *testing.T) {
 	const tenant, app = "t1", "app1"
-	svc := NewService(registry.NewMemStore(), nil, nil, 0)
+	svc := NewService(registry.NewMemStore(), nil, nil, 0, appconfig.FeatureFlags{})
 	// No AttachCanaryHealth call -> detector is nil, must not panic.
 	svc.recordCanaryHealth(tenant, app, "inst", ksealv1.RequestProofResult_DECISION_DENY)
 }

@@ -29,6 +29,7 @@ import (
 	"github.com/kennguy3n/kseal/server/data-plane/trust"
 	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
 	"github.com/kennguy3n/kseal/server/shared/auth"
+	appconfig "github.com/kennguy3n/kseal/server/shared/config"
 	kcrypto "github.com/kennguy3n/kseal/server/shared/crypto"
 	"github.com/kennguy3n/kseal/server/shared/db"
 )
@@ -95,7 +96,7 @@ func Connect(ctx context.Context, dsn, redisAddr string) (*Env, error) {
 	verifier := attestation.NewVerifier(play, nil)
 
 	nonces := trust.NewNonceStore(rdb, 0)
-	trustSvc := trust.NewService(store, nonces, verifier, 0)
+	trustSvc := trust.NewService(store, nonces, verifier, 0, appconfig.FeatureFlags{})
 
 	// QueryService reads tenant overview + trust-session stats from the store;
 	// an in-memory analytics store satisfies the (unused-here) events path.
