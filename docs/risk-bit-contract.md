@@ -81,6 +81,19 @@ No destructive backfill is run, by design:
 The live trust decision is unaffected — it always translates the incoming device
 bitset per request and never reads stored bits.
 
+### Consumers of stored `risk_bits` (webhooks / SIEM)
+
+The webhook sink and the SIEM exporter emit the stored `risk_bits` integer
+verbatim (they do not expand it into per-bit named fields). Because ingest now
+stores server-layout bits, those egress fields are **server layout** going
+forward, where before this change they carried the raw device/wire layout. This
+is the correct behaviour — wire bits should never have leaked to consumers, and
+the server-side SIEM field names already describe the server layout — but any
+external integration or SIEM correlation rule written against the old wire
+positions (e.g. treating bit 4 as `DEBUGGER`) must be updated to the server
+layout (bit 4 = `APP_TAMPER`; see the mapping table above). Call this out in the
+release notes for operators with custom `risk_bits` parsing.
+
 ## Pinned on both ends
 
 Any silent renumber must break CI deliberately:

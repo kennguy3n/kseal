@@ -360,6 +360,29 @@ func (e *Engine) Observe(tenant, app, build, region string, bits uint64, t time.
 	sh.mu.Lock()
 	defer sh.mu.Unlock()
 	sc := e.getOrCreateLocked(sh, k)
+	e.observeLocked(sc, ep, bits)
+}
+
+// ObserveAndAssessNow records one attestation and assesses the same cohort under
+// a single shard-lock acquisition on the engine's own clock. The trust hot path
+// uses this instead of ObserveNow + Assess so it takes the shard mutex once per
+// attestation (not twice) and the observation and assessment are atomic — no
+// other goroutine can mutate the cohort between recording the arrival and
+// reading the window it just joined.
+func (e *Engine) ObserveAndAssessNow(tenant, app, build, region string, bits uint64) Assessment {
+	k := scopeKey{tenant: tenant, app: app, build: build, region: region}
+	ep := e.epoch(e.now())
+	sh := e.shardFor(k)
+	sh.mu.Lock()
+	defer sh.mu.Unlock()
+	sc := e.getOrCreateLocked(sh, k)
+	e.observeLocked(sc, ep, bits)
+	return e.assessLocked(sc, ep)
+}
+
+// observeLocked records one attestation into sc's bucket for epoch ep. The
+// owning shard's mutex must be held.
+func (e *Engine) observeLocked(sc *scope, ep int64, bits uint64) {
 	idx := int(((ep % int64(e.cfg.Buckets)) + int64(e.cfg.Buckets)) % int64(e.cfg.Buckets))
 	b := &sc.ring[idx]
 	if b.epoch != ep {
@@ -576,5 +599,14 @@ func (e *Engine) TenantSnapshot(tenant string) []ScopeAnomaly {
 	}
 	out := make([]ScopeAnomaly, hi-lo)
 	copy(out, all[lo:hi])
+	// The shared cached snapshot is read-only; copying the ScopeAnomaly values
+	// above still aliases each Assessment.Signals backing array. Clone those so
+	// the returned slice fully owns its data and a caller mutating Signals can
+	// never corrupt the cache.
+	for i := range out {
+		if len(out[i].Signals) > 0 {
+			out[i].Signals = append([]SignalAssessment(nil), out[i].Signals...)
+		}
+	}
 	return out
 }

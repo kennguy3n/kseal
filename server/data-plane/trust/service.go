@@ -123,10 +123,10 @@ func (s *Service) applyFleetGuard(tenantID, appID, buildHash, region string, fus
 	if s.fleet == nil || !s.flags.Enabled(tenantID, compliance.FlagFleetAnomaly) {
 		return fused
 	}
-	// Observe and assess on the engine's own clock so the arrival time and the
-	// window assessment share one (injectable) time source.
-	s.fleet.ObserveNow(tenantID, appID, buildHash, region, fused)
-	a := s.fleet.Assess(tenantID, appID, buildHash, region)
+	// Observe and assess on the engine's own clock under a single shard-lock
+	// acquisition, so the arrival time and the window assessment share one
+	// (injectable) time source and the hot path locks the cohort's shard once.
+	a := s.fleet.ObserveAndAssessNow(tenantID, appID, buildHash, region, fused)
 	if !a.Anomalous {
 		return fused
 	}
