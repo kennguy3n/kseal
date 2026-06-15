@@ -182,11 +182,30 @@ mod tests {
         assert_eq!(RiskBitset::from_raw(raw).as_u64(), raw);
     }
 
+    // Pins the entire wire bit layout. This is the device end of the unifying
+    // risk-bit contract: the server translates these exact positions into its
+    // own layout (server/shared/risk FromWire, pinned by TestWireToServerContract).
+    // Renumbering any bit here is a breaking wire change and must fail CI on both
+    // ends deliberately, never silently.
     #[test]
     fn bit_positions_are_stable() {
-        assert_eq!(RiskBitset::ROOT.bits(), 1);
+        assert_eq!(RiskBitset::ROOT.bits(), 1 << 0);
+        assert_eq!(RiskBitset::JAILBREAK.bits(), 1 << 1);
+        assert_eq!(RiskBitset::EMULATOR.bits(), 1 << 2);
+        assert_eq!(RiskBitset::SIMULATOR.bits(), 1 << 3);
         assert_eq!(RiskBitset::DEBUGGER.bits(), 1 << 4);
+        assert_eq!(RiskBitset::HOOKING.bits(), 1 << 5);
+        assert_eq!(RiskBitset::TAMPER.bits(), 1 << 6);
+        assert_eq!(RiskBitset::APP_INTEGRITY.bits(), 1 << 7);
+        assert_eq!(RiskBitset::NETWORK_MITM.bits(), 1 << 8);
+        assert_eq!(RiskBitset::ENVIRONMENT.bits(), 1 << 9);
+        assert_eq!(RiskBitset::PROXY.bits(), 1 << 10);
+        assert_eq!(RiskBitset::USER_CA.bits(), 1 << 11);
+        assert_eq!(RiskBitset::PINNING_FAILURE.bits(), 1 << 12);
+        assert_eq!(RiskBitset::ATTESTATION_FAIL.bits(), 1 << 13);
+        assert_eq!(RiskBitset::SECURE_HW_MISSING.bits(), 1 << 14);
         assert_eq!(RiskBitset::REPACKAGED.bits(), 1 << 15);
+        assert_eq!(MAX_SIGNAL_BIT, 15);
     }
 
     #[test]

@@ -18,6 +18,7 @@ type Metrics struct {
 	IngestEvents    *prometheus.CounterVec
 	WebhookDispatch *prometheus.CounterVec
 	BlockRate       *prometheus.GaugeVec
+	FleetAnomaly    *prometheus.GaugeVec
 }
 
 // NewMetrics constructs and registers the metric instruments.
@@ -50,10 +51,14 @@ func NewMetrics() (*Metrics, error) {
 			Name: "kseal_block_rate",
 			Help: "Observed block rate per tenant/app (0..1).",
 		}, []string{"tenant", "app"}),
+		FleetAnomaly: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "kseal_fleet_anomaly_active",
+			Help: "1 when a (tenant, app, build, region) cohort is in a fleet-anomaly surge, else absent.",
+		}, []string{"tenant", "app", "build", "region"}),
 	}
 
 	for _, c := range []prometheus.Collector{
-		m.RPCRequests, m.RPCLatency, m.RateLimited, m.IngestEvents, m.WebhookDispatch, m.BlockRate,
+		m.RPCRequests, m.RPCLatency, m.RateLimited, m.IngestEvents, m.WebhookDispatch, m.BlockRate, m.FleetAnomaly,
 	} {
 		if err := reg.Register(c); err != nil {
 			return nil, err

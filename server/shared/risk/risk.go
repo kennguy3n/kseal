@@ -23,6 +23,13 @@ const (
 	BitDeviceIntegrity uint64 = 1 << 8 // device integrity could not be established
 	BitAppUnrecognized uint64 = 1 << 9 // app not recognized by the platform
 	BitEnvironmentRisk uint64 = 1 << 10
+
+	// BitFleetAnomaly is a server-derived signal: the (tenant, app) population
+	// is currently showing a coordinated surge of an abuse signal above its
+	// learned baseline (see server/data-plane/fleet). It is never reported by a
+	// device — devices cannot see the fleet — so it is placed well clear of the
+	// device-reported bit range (0..15) to avoid colliding with any wire bit.
+	BitFleetAnomaly uint64 = 1 << 32
 )
 
 // defaultWeights assigns a severity weight to each known bit. Higher means more
@@ -39,10 +46,87 @@ var defaultWeights = map[uint64]uint32{
 	BitDeviceIntegrity: 45,
 	BitAppUnrecognized: 65,
 	BitEnvironmentRisk: 15,
+	// A fleet surge alone lands an otherwise-clean instance at MEDIUM_RISK
+	// (step-up), the graduated response; combined with any device signal it
+	// escalates further. Override per policy via signal_weights["32"].
+	BitFleetAnomaly: 50,
+}
+
+// Wire bit positions as packed by the device SDKs / Rust trust core's
+// RiskBitset (the layout carried on the wire in proto RiskBitset and
+// TelemetryEvent.risk_bits). These are a DIFFERENT, finer-grained namespace
+// than the server bits above — keep them in sync with
+// sdk/rust-core/kseal-core/src/risk.rs. Do not renumber; only append.
+const (
+	wireRoot            = 0
+	wireJailbreak       = 1
+	wireEmulator        = 2
+	wireSimulator       = 3
+	wireDebugger        = 4
+	wireHooking         = 5
+	wireTamper          = 6
+	wireAppIntegrity    = 7
+	wireNetworkMITM     = 8
+	wireEnvironment     = 9
+	wireProxy           = 10
+	wireUserCA          = 11
+	wirePinningFailure  = 12
+	wireAttestationFail = 13
+	wireSecureHWMissing = 14
+	wireRepackaged      = 15
+
+	// maxWireBit is the highest meaningful wire bit (see MAX_SIGNAL_BIT in the
+	// Rust core). Wire bits above this carry no server meaning and are dropped
+	// by FromWire rather than being scored against an unrelated server weight.
+	maxWireBit = wireRepackaged
+)
+
+// wireToServer maps each device/wire RiskBitset bit (index) to the server-side
+// bit mask it means. The two layouts are distinct (e.g. wire bit 4 is DEBUGGER
+// but server bit 4 is APP_TAMPER), so the device bitset MUST be translated
+// through this table before it is fused or scored — never fused raw. This table
+// is the single source of truth for that contract; see TestWireToServerContract
+// and the Rust-side TestRiskBitLayoutContract.
+var wireToServer = [maxWireBit + 1]uint64{
+	wireRoot:            BitRootJailbreak,
+	wireJailbreak:       BitRootJailbreak,
+	wireEmulator:        BitEmulator,
+	wireSimulator:       BitEmulator,
+	wireDebugger:        BitDebugger,
+	wireHooking:         BitHooking,
+	wireTamper:          BitAppTamper,
+	wireAppIntegrity:    BitAppTamper,
+	wireNetworkMITM:     BitNetworkMITM,
+	wireEnvironment:     BitEnvironmentRisk,
+	wireProxy:           BitEnvironmentRisk,
+	wireUserCA:          BitNetworkMITM,
+	wirePinningFailure:  BitNetworkMITM,
+	wireAttestationFail: BitAttestationFail,
+	wireSecureHWMissing: BitDeviceIntegrity,
+	wireRepackaged:      BitAppTamper,
+}
+
+// FromWire translates a device-reported RiskBitset (wire/Rust-core layout) into
+// the server-side risk-bit layout that Score, Level, and the policy weights all
+// speak. Every wire bit is remapped through wireToServer; wire bits with no
+// server meaning (and any bit above maxWireBit) are dropped. Callers at the
+// device→server boundary (trust attestation, telemetry ingest) MUST run device
+// bits through FromWire before Fuse/Score so a single uint64 is never
+// interpreted under two different bit namespaces.
+func FromWire(wire uint64) uint64 {
+	var out uint64
+	for i := 0; i <= maxWireBit; i++ {
+		if wire&(uint64(1)<<uint(i)) != 0 {
+			out |= wireToServer[i]
+		}
+	}
+	return out
 }
 
 // Fuse combines locally-reported risk bits with bits derived from server-side
-// attestation. Fusion is a union: any source asserting a risk keeps it set.
+// attestation. Both inputs must already be in the server bit layout (run device
+// bits through FromWire first). Fusion is a union: any source asserting a risk
+// keeps it set.
 func Fuse(reported, attestation uint64) uint64 {
 	return reported | attestation
 }

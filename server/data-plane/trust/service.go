@@ -5,7 +5,9 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"connectrpc.com/connect"
@@ -19,6 +21,7 @@ import (
 	"github.com/kennguy3n/kseal/server/control-plane/registry"
 	"github.com/kennguy3n/kseal/server/data-plane/attestation"
 	"github.com/kennguy3n/kseal/server/data-plane/canary"
+	"github.com/kennguy3n/kseal/server/data-plane/fleet"
 	"github.com/kennguy3n/kseal/server/data-plane/guardrails"
 	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
 	"github.com/kennguy3n/kseal/server/gen/kseal/v1/ksealv1connect"
@@ -41,6 +44,9 @@ type Service struct {
 	detector *guardrails.Detector
 	canary   *canary.Registry
 	flags    appconfig.FeatureFlags
+
+	// Optional population-level fleet-anomaly engine; nil disables it.
+	fleet *fleet.Engine
 }
 
 // NewService builds a TrustService.
@@ -68,6 +74,17 @@ func (s *Service) AttachCanaryHealth(detector *guardrails.Detector, reg *canary.
 	s.flags = flags
 }
 
+// AttachFleetGuard wires the population-level fleet-anomaly engine. Each accepted
+// attestation is observed into the engine, and when the (tenant, app) population
+// is surging, a server-derived FLEET_ANOMALY risk bit is fused into the newly
+// minted session's risk before scoring. Flag-gated per tenant
+// (compliance.FlagFleetAnomaly); a nil engine disables it entirely. Safe to call
+// alongside AttachCanaryHealth — both share the same feature-flag set.
+func (s *Service) AttachFleetGuard(engine *fleet.Engine, flags appconfig.FeatureFlags) {
+	s.fleet = engine
+	s.flags = flags
+}
+
 // recordCanaryHealth attributes one decision to the instance's canary cohort.
 // It is cheap (in-memory) and no-ops unless the feature is enabled and a rollout
 // is active for the scope.
@@ -83,6 +100,59 @@ func (s *Service) recordCanaryHealth(tenantID, appID, instanceID string, decisio
 		return
 	}
 	s.detector.RecordDecision(tenantID, appID, policyID, decision == ksealv1.RequestProofResult_DECISION_DENY)
+}
+
+// applyFleetGuard observes the fused risk bits into the population engine and,
+// when the (tenant, app, build, region) cohort is surging — either a signal
+// surge or a volume-velocity spike — fuses the server-derived FLEET_ANOMALY bit
+// into the returned bitset. It is a no-op (returning fused unchanged) unless the
+// engine is wired and the feature is enabled for the tenant, so it adds zero
+// overhead on the default path.
+func (s *Service) applyFleetGuard(tenantID, appID, buildHash, region string, fused uint64, span trace.Span) uint64 {
+	if s.fleet == nil || !s.flags.Enabled(tenantID, compliance.FlagFleetAnomaly) {
+		return fused
+	}
+	now := time.Now()
+	s.fleet.Observe(tenantID, appID, buildHash, region, fused, now)
+	a := s.fleet.Assess(tenantID, appID, buildHash, region)
+	if !a.Anomalous {
+		return fused
+	}
+	names := make([]string, 0, len(a.Signals))
+	for _, sig := range a.Signals {
+		names = append(names, sig.Name)
+	}
+	span.SetAttributes(
+		attribute.Bool("fleet.anomaly", true),
+		attribute.String("fleet.signals", strings.Join(names, ",")),
+		attribute.Bool("fleet.velocity_surge", a.VelocitySurge),
+		attribute.Int("fleet.observed", a.Observed),
+	)
+	return fused | risk.BitFleetAnomaly
+}
+
+// edgeCountryHeaders are the request headers a fronting CDN/edge commonly sets
+// with the client's ISO country, used as the best-effort cohort region. When
+// none are present the region is empty and the cohort is build-level.
+var edgeCountryHeaders = []string{
+	"Cf-Ipcountry",        // Cloudflare
+	"X-Vercel-Ip-Country", // Vercel
+	"X-Geo-Country",       // generic / Fastly
+	"X-Country-Code",
+	"X-Appengine-Country", // Google Cloud
+}
+
+// edgeRegion extracts a best-effort country/region from edge headers. An empty
+// or sentinel value (e.g. Cloudflare's "XX"/"T1") collapses to "".
+func edgeRegion(h http.Header) string {
+	for _, name := range edgeCountryHeaders {
+		v := strings.ToUpper(strings.TrimSpace(h.Get(name)))
+		if v == "" || v == "XX" || v == "T1" {
+			continue
+		}
+		return v
+	}
+	return ""
 }
 
 // GetNonce issues a single-use challenge nonce for the attestation step.
@@ -164,7 +234,8 @@ func (s *Service) VerifyAttestation(ctx context.Context, req *connect.Request[ks
 	// the active policy.
 	policy, _ := s.store.GetActivePolicy(ctx, m.TenantId, m.AppId)
 	thresholds := parseThresholds(policy)
-	fused := risk.Fuse(m.RiskBitset, res.RiskBits)
+	fused := risk.Fuse(risk.FromWire(m.RiskBitset), res.RiskBits)
+	fused = s.applyFleetGuard(m.TenantId, m.AppId, m.BuildHash, edgeRegion(req.Header()), fused, span)
 	score := risk.Score(fused, parseWeights(policy))
 	level := risk.Level(score, thresholds)
 	nextChecks := risk.NextChecks(level)

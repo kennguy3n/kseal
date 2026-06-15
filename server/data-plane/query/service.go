@@ -17,6 +17,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/kennguy3n/kseal/server/control-plane/registry"
+	"github.com/kennguy3n/kseal/server/data-plane/fleet"
 	"github.com/kennguy3n/kseal/server/data-plane/ingest"
 	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
 	"github.com/kennguy3n/kseal/server/gen/kseal/v1/ksealv1connect"
@@ -35,6 +36,17 @@ type Service struct {
 	analytics ingest.AnalyticsStore
 	recentN   int
 	tracer    trace.Tracer
+
+	// Optional population-level fleet-anomaly engine; nil omits the overview's
+	// active_fleet_anomalies field.
+	fleet *fleet.Engine
+}
+
+// AttachFleetGuard wires the fleet-anomaly engine so the tenant overview can
+// report the apps currently in a coordinated-abuse surge. A nil engine leaves
+// the field empty.
+func (s *Service) AttachFleetGuard(engine *fleet.Engine) {
+	s.fleet = engine
 }
 
 // NewService builds a QueryService handler reading from the registry store and
@@ -126,7 +138,40 @@ func (s *Service) GetTenantOverview(ctx context.Context, req *connect.Request[ks
 	for _, e := range recent.Events {
 		resp.RecentEvents = append(resp.RecentEvents, toEventRecord(e))
 	}
+	resp.ActiveFleetAnomalies = s.fleetAnomalies(tenant)
 	return connect.NewResponse(resp), nil
+}
+
+// fleetAnomalies returns the tenant's currently-surging cohorts for the
+// overview. It is empty when the fleet guard is not wired.
+func (s *Service) fleetAnomalies(tenant string) []*ksealv1.FleetAnomaly {
+	if s.fleet == nil {
+		return nil
+	}
+	scopes := s.fleet.TenantSnapshot(tenant)
+	out := make([]*ksealv1.FleetAnomaly, 0, len(scopes))
+	for _, sc := range scopes {
+		fa := &ksealv1.FleetAnomaly{
+			AppId:         sc.AppID,
+			Signals:       make([]string, 0, len(sc.Signals)),
+			Observed:      int64(sc.Observed),
+			BuildHash:     sc.BuildHash,
+			Region:        sc.Region,
+			VelocitySurge: sc.VelocitySurge,
+			VelocityRatio: sc.VelocityRatio,
+		}
+		for _, sig := range sc.Signals {
+			fa.Signals = append(fa.Signals, sig.Name)
+			if sig.SurgeRatio > fa.MaxSurgeRatio {
+				fa.MaxSurgeRatio = sig.SurgeRatio
+			}
+			if sig.CurrentRate > fa.MaxCurrentRate {
+				fa.MaxCurrentRate = sig.CurrentRate
+			}
+		}
+		out = append(out, fa)
+	}
+	return out
 }
 
 // GetTrustSessionStats aggregates trust-session outcomes for the caller's tenant

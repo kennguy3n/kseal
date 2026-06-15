@@ -56,6 +56,36 @@ message GetTenantOverviewResponse {
   int64 events_last_24h = 5;
   // A small slice of the most recent events for the overview panel.
   repeated EventRecord recent_events = 6;
+  // Cohorts in this tenant whose population is currently in a fleet-anomaly
+  // surge — a coordinated abuse-signal spike above the cohort's learned baseline
+  // and/or a volume-velocity spike. Empty when the fleet guard is disabled or no
+  // cohort is anomalous.
+  repeated FleetAnomaly active_fleet_anomalies = 7;
+}
+
+// FleetAnomaly summarises a currently-anomalous (tenant, app, build, region)
+// cohort for the dashboard. It is derived from aggregate, non-PII risk-signal
+// counts and arrival volume; it carries no per-user data.
+message FleetAnomaly {
+  string app_id = 1;
+  // Names of the surging signals (e.g. "emulator", "attestation_fail"). May be
+  // empty when only a volume-velocity spike tripped the anomaly.
+  repeated string signals = 2;
+  // Largest current/baseline surge ratio among the surging signals (0 when the
+  // baseline is not yet seeded — i.e. a cold-start absolute-rate trip).
+  double max_surge_ratio = 3;
+  // Highest current rate (0..1) among the surging signals.
+  double max_current_rate = 4;
+  // Number of attestations observed in the current window for this cohort.
+  int64 observed = 5;
+  // Build hash of the cohort ("" when not cohorted by build).
+  string build_hash = 6;
+  // Best-effort region/country of the cohort ("" when unknown).
+  string region = 7;
+  // True when the cohort's arrival volume spiked far above its baseline.
+  bool velocity_surge = 8;
+  // windowVolume/projected-baseline-volume (0 on a cold-start volume trip).
+  double velocity_ratio = 9;
 }
 
 message GetTrustSessionStatsRequest {

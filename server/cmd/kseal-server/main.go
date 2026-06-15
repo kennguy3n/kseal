@@ -33,6 +33,7 @@ import (
 	"github.com/kennguy3n/kseal/server/data-plane/attestation"
 	"github.com/kennguy3n/kseal/server/data-plane/canary"
 	cfgsvc "github.com/kennguy3n/kseal/server/data-plane/config"
+	"github.com/kennguy3n/kseal/server/data-plane/fleet"
 	"github.com/kennguy3n/kseal/server/data-plane/guardrails"
 	"github.com/kennguy3n/kseal/server/data-plane/ingest"
 	"github.com/kennguy3n/kseal/server/data-plane/query"
@@ -133,6 +134,14 @@ func run() error {
 	configSvc.AttachCompliance(canaryReg, complianceStore, cfg.FeatureFlags)
 	trustSvc.AttachCanaryHealth(detector, canaryReg, cfg.FeatureFlags)
 
+	// Population-level fleet-anomaly detection: learns each app's baseline
+	// prevalence of coordinated-abuse signals and fuses a server-derived
+	// FLEET_ANOMALY risk bit during a surge. In-process, O(1)/attestation,
+	// bounded memory. Flag-gated per tenant (compliance.FlagFleetAnomaly,
+	// default off), so the per-instance decision is unchanged on main.
+	fleetEngine := fleet.New(fleet.ConfigFromEnv())
+	trustSvc.AttachFleetGuard(fleetEngine, cfg.FeatureFlags)
+
 	dispatcher := webhook.NewDispatcher(store, webhook.DispatcherConfig{}, tel.Metrics)
 	defer dispatcher.Stop()
 
@@ -201,6 +210,7 @@ func run() error {
 	}
 
 	querySvc := query.NewService(store, analytics)
+	querySvc.AttachFleetGuard(fleetEngine)
 
 	// Raw-telemetry retention: purge per-tenant raw events past their window
 	// (platform default KSEAL_RAW_RETENTION_DAYS), retaining aggregates. Tracked
@@ -223,6 +233,15 @@ func run() error {
 	go func() {
 		defer bg.Done()
 		canaryCtl.Run(rootCtx)
+	}()
+
+	// Fleet-anomaly metrics sampler: periodically reflects the engine's active
+	// anomalies into the kseal_fleet_anomaly_active gauge. Cheap (reads bounded
+	// in-memory state); tracked in bg so it stops cleanly on shutdown.
+	bg.Add(1)
+	go func() {
+		defer bg.Done()
+		runFleetMetricsSampler(rootCtx, fleetEngine, tel.Metrics, 15*time.Second)
 	}()
 
 	// Interceptors.
@@ -288,6 +307,30 @@ func run() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return srv.Shutdown(shutdownCtx)
+}
+
+// runFleetMetricsSampler periodically reflects the fleet engine's currently
+// anomalous (tenant, app, build, region) cohorts into the FleetAnomaly gauge,
+// clearing cohorts that have recovered. It returns when ctx is cancelled.
+func runFleetMetricsSampler(ctx context.Context, engine *fleet.Engine, m *telemetry.Metrics, interval time.Duration) {
+	if engine == nil || m == nil {
+		return
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			// Reset first so a cohort that recovered since the last tick drops to
+			// absent rather than sticking at 1.
+			m.FleetAnomaly.Reset()
+			for _, a := range engine.Snapshot() {
+				m.FleetAnomaly.WithLabelValues(a.TenantID, a.AppID, a.BuildHash, a.Region).Set(1)
+			}
+		}
+	}
 }
 
 // buildTenantSealer selects how tenant secret material is sealed at rest. When

@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file kseal/v1/query.proto.
  */
 export const file_kseal_v1_query: GenFile = /*@__PURE__*/
-  fileDesc("ChRrc2VhbC92MS9xdWVyeS5wcm90bxIIa3NlYWwudjEiwgIKC0V2ZW50UmVjb3JkEgoKAmlkGAEgASgJEhEKCXRlbmFudF9pZBgCIAEoCRIOCgZhcHBfaWQYAyABKAkSJwoKZXZlbnRfdHlwZRgEIAEoDjITLmtzZWFsLnYxLkV2ZW50VHlwZRIoCgpyaXNrX2xldmVsGAUgASgOMhQua3NlYWwudjEuVHJ1c3RMZXZlbBIRCglyaXNrX2JpdHMYBiABKAQSKAoKY29uZmlkZW5jZRgHIAEoDjIULmtzZWFsLnYxLkNvbmZpZGVuY2USFgoOYXBwX2J1aWxkX2hhc2gYCCABKAkSEwoLcG9saWN5X2hhc2gYCSABKAkSEQoJdGltZXN0YW1wGAogASgDEh4KEWNvdW50cnlfb3JfcmVnaW9uGAsgASgJSACIAQFCFAoSX2NvdW50cnlfb3JfcmVnaW9uItgBChFMaXN0RXZlbnRzUmVxdWVzdBIRCgl0ZW5hbnRfaWQYASABKAkSDgoGYXBwX2lkGAIgASgJEigKC2V2ZW50X3R5cGVzGAMgAygOMhMua3NlYWwudjEuRXZlbnRUeXBlEikKC3Jpc2tfbGV2ZWxzGAQgAygOMhQua3NlYWwudjEuVHJ1c3RMZXZlbBISCgpzdGFydF90aW1lGAUgASgDEhAKCGVuZF90aW1lGAYgASgDEhEKCXBhZ2Vfc2l6ZRgHIAEoBRISCgpwYWdlX3Rva2VuGAggASgJIlQKEkxpc3RFdmVudHNSZXNwb25zZRIlCgZldmVudHMYASADKAsyFS5rc2VhbC52MS5FdmVudFJlY29yZBIXCg9uZXh0X3BhZ2VfdG9rZW4YAiABKAkiLQoYR2V0VGVuYW50T3ZlcnZpZXdSZXF1ZXN0EhEKCXRlbmFudF9pZBgBIAEoCSK+AQoZR2V0VGVuYW50T3ZlcnZpZXdSZXNwb25zZRIRCglhcHBfY291bnQYASABKAUSEwoLYnVpbGRfY291bnQYAiABKAUSGwoTYWN0aXZlX3BvbGljeV9jb3VudBgDIAEoBRIVCg13ZWJob29rX2NvdW50GAQgASgFEhcKD2V2ZW50c19sYXN0XzI0aBgFIAEoAxIsCg1yZWNlbnRfZXZlbnRzGAYgAygLMhUua3NlYWwudjEuRXZlbnRSZWNvcmQiVgobR2V0VHJ1c3RTZXNzaW9uU3RhdHNSZXF1ZXN0EhEKCXRlbmFudF9pZBgBIAEoCRISCgpzdGFydF90aW1lGAIgASgDEhAKCGVuZF90aW1lGAMgASgDIooCChxHZXRUcnVzdFNlc3Npb25TdGF0c1Jlc3BvbnNlEhYKDnRvdGFsX3Nlc3Npb25zGAEgASgDEhUKDXRva2Vuc19pc3N1ZWQYAiABKAMSGwoTYXR0ZXN0YXRpb25zX2ZhaWxlZBgDIAEoAxJhChdzZXNzaW9uc19ieV90cnVzdF9sZXZlbBgEIAMoCzJALmtzZWFsLnYxLkdldFRydXN0U2Vzc2lvblN0YXRzUmVzcG9uc2UuU2Vzc2lvbnNCeVRydXN0TGV2ZWxFbnRyeRo7ChlTZXNzaW9uc0J5VHJ1c3RMZXZlbEVudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoAzoCOAFCOFo2Z2l0aHViLmNvbS9rZW5uZ3V5M24va3NlYWwvc2VydmVyL2dlbi9rc2VhbC92MTtrc2VhbHYxYgZwcm90bzM", [file_kseal_v1_common]);
+  fileDesc("ChRrc2VhbC92MS9xdWVyeS5wcm90bxIIa3NlYWwudjEiwgIKC0V2ZW50UmVjb3JkEgoKAmlkGAEgASgJEhEKCXRlbmFudF9pZBgCIAEoCRIOCgZhcHBfaWQYAyABKAkSJwoKZXZlbnRfdHlwZRgEIAEoDjITLmtzZWFsLnYxLkV2ZW50VHlwZRIoCgpyaXNrX2xldmVsGAUgASgOMhQua3NlYWwudjEuVHJ1c3RMZXZlbBIRCglyaXNrX2JpdHMYBiABKAQSKAoKY29uZmlkZW5jZRgHIAEoDjIULmtzZWFsLnYxLkNvbmZpZGVuY2USFgoOYXBwX2J1aWxkX2hhc2gYCCABKAkSEwoLcG9saWN5X2hhc2gYCSABKAkSEQoJdGltZXN0YW1wGAogASgDEh4KEWNvdW50cnlfb3JfcmVnaW9uGAsgASgJSACIAQFCFAoSX2NvdW50cnlfb3JfcmVnaW9uItgBChFMaXN0RXZlbnRzUmVxdWVzdBIRCgl0ZW5hbnRfaWQYASABKAkSDgoGYXBwX2lkGAIgASgJEigKC2V2ZW50X3R5cGVzGAMgAygOMhMua3NlYWwudjEuRXZlbnRUeXBlEikKC3Jpc2tfbGV2ZWxzGAQgAygOMhQua3NlYWwudjEuVHJ1c3RMZXZlbBISCgpzdGFydF90aW1lGAUgASgDEhAKCGVuZF90aW1lGAYgASgDEhEKCXBhZ2Vfc2l6ZRgHIAEoBRISCgpwYWdlX3Rva2VuGAggASgJIlQKEkxpc3RFdmVudHNSZXNwb25zZRIlCgZldmVudHMYASADKAsyFS5rc2VhbC52MS5FdmVudFJlY29yZBIXCg9uZXh0X3BhZ2VfdG9rZW4YAiABKAkiLQoYR2V0VGVuYW50T3ZlcnZpZXdSZXF1ZXN0EhEKCXRlbmFudF9pZBgBIAEoCSL2AQoZR2V0VGVuYW50T3ZlcnZpZXdSZXNwb25zZRIRCglhcHBfY291bnQYASABKAUSEwoLYnVpbGRfY291bnQYAiABKAUSGwoTYWN0aXZlX3BvbGljeV9jb3VudBgDIAEoBRIVCg13ZWJob29rX2NvdW50GAQgASgFEhcKD2V2ZW50c19sYXN0XzI0aBgFIAEoAxIsCg1yZWNlbnRfZXZlbnRzGAYgAygLMhUua3NlYWwudjEuRXZlbnRSZWNvcmQSNgoWYWN0aXZlX2ZsZWV0X2Fub21hbGllcxgHIAMoCzIWLmtzZWFsLnYxLkZsZWV0QW5vbWFseSLIAQoMRmxlZXRBbm9tYWx5Eg4KBmFwcF9pZBgBIAEoCRIPCgdzaWduYWxzGAIgAygJEhcKD21heF9zdXJnZV9yYXRpbxgDIAEoARIYChBtYXhfY3VycmVudF9yYXRlGAQgASgBEhAKCG9ic2VydmVkGAUgASgDEhIKCmJ1aWxkX2hhc2gYBiABKAkSDgoGcmVnaW9uGAcgASgJEhYKDnZlbG9jaXR5X3N1cmdlGAggASgIEhYKDnZlbG9jaXR5X3JhdGlvGAkgASgBIlYKG0dldFRydXN0U2Vzc2lvblN0YXRzUmVxdWVzdBIRCgl0ZW5hbnRfaWQYASABKAkSEgoKc3RhcnRfdGltZRgCIAEoAxIQCghlbmRfdGltZRgDIAEoAyKKAgocR2V0VHJ1c3RTZXNzaW9uU3RhdHNSZXNwb25zZRIWCg50b3RhbF9zZXNzaW9ucxgBIAEoAxIVCg10b2tlbnNfaXNzdWVkGAIgASgDEhsKE2F0dGVzdGF0aW9uc19mYWlsZWQYAyABKAMSYQoXc2Vzc2lvbnNfYnlfdHJ1c3RfbGV2ZWwYBCADKAsyQC5rc2VhbC52MS5HZXRUcnVzdFNlc3Npb25TdGF0c1Jlc3BvbnNlLlNlc3Npb25zQnlUcnVzdExldmVsRW50cnkaOwoZU2Vzc2lvbnNCeVRydXN0TGV2ZWxFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAM6AjgBQjhaNmdpdGh1Yi5jb20va2Vubmd1eTNuL2tzZWFsL3NlcnZlci9nZW4va3NlYWwvdjE7a3NlYWx2MWIGcHJvdG8z", [file_kseal_v1_common]);
 
 /**
  * EventRecord is a stored, queryable risk event: a server-enriched, persisted
@@ -222,6 +222,16 @@ export type GetTenantOverviewResponse = Message<"kseal.v1.GetTenantOverviewRespo
    * @generated from field: repeated kseal.v1.EventRecord recent_events = 6;
    */
   recentEvents: EventRecord[];
+
+  /**
+   * Cohorts in this tenant whose population is currently in a fleet-anomaly
+   * surge — a coordinated abuse-signal spike above the cohort's learned baseline
+   * and/or a volume-velocity spike. Empty when the fleet guard is disabled or no
+   * cohort is anomalous.
+   *
+   * @generated from field: repeated kseal.v1.FleetAnomaly active_fleet_anomalies = 7;
+   */
+  activeFleetAnomalies: FleetAnomaly[];
 };
 
 /**
@@ -230,6 +240,85 @@ export type GetTenantOverviewResponse = Message<"kseal.v1.GetTenantOverviewRespo
  */
 export const GetTenantOverviewResponseSchema: GenMessage<GetTenantOverviewResponse> = /*@__PURE__*/
   messageDesc(file_kseal_v1_query, 4);
+
+/**
+ * FleetAnomaly summarises a currently-anomalous (tenant, app, build, region)
+ * cohort for the dashboard. It is derived from aggregate, non-PII risk-signal
+ * counts and arrival volume; it carries no per-user data.
+ *
+ * @generated from message kseal.v1.FleetAnomaly
+ */
+export type FleetAnomaly = Message<"kseal.v1.FleetAnomaly"> & {
+  /**
+   * @generated from field: string app_id = 1;
+   */
+  appId: string;
+
+  /**
+   * Names of the surging signals (e.g. "emulator", "attestation_fail"). May be
+   * empty when only a volume-velocity spike tripped the anomaly.
+   *
+   * @generated from field: repeated string signals = 2;
+   */
+  signals: string[];
+
+  /**
+   * Largest current/baseline surge ratio among the surging signals (0 when the
+   * baseline is not yet seeded — i.e. a cold-start absolute-rate trip).
+   *
+   * @generated from field: double max_surge_ratio = 3;
+   */
+  maxSurgeRatio: number;
+
+  /**
+   * Highest current rate (0..1) among the surging signals.
+   *
+   * @generated from field: double max_current_rate = 4;
+   */
+  maxCurrentRate: number;
+
+  /**
+   * Number of attestations observed in the current window for this cohort.
+   *
+   * @generated from field: int64 observed = 5;
+   */
+  observed: bigint;
+
+  /**
+   * Build hash of the cohort ("" when not cohorted by build).
+   *
+   * @generated from field: string build_hash = 6;
+   */
+  buildHash: string;
+
+  /**
+   * Best-effort region/country of the cohort ("" when unknown).
+   *
+   * @generated from field: string region = 7;
+   */
+  region: string;
+
+  /**
+   * True when the cohort's arrival volume spiked far above its baseline.
+   *
+   * @generated from field: bool velocity_surge = 8;
+   */
+  velocitySurge: boolean;
+
+  /**
+   * windowVolume/projected-baseline-volume (0 on a cold-start volume trip).
+   *
+   * @generated from field: double velocity_ratio = 9;
+   */
+  velocityRatio: number;
+};
+
+/**
+ * Describes the message kseal.v1.FleetAnomaly.
+ * Use `create(FleetAnomalySchema)` to create a new message.
+ */
+export const FleetAnomalySchema: GenMessage<FleetAnomaly> = /*@__PURE__*/
+  messageDesc(file_kseal_v1_query, 5);
 
 /**
  * @generated from message kseal.v1.GetTrustSessionStatsRequest
@@ -258,7 +347,7 @@ export type GetTrustSessionStatsRequest = Message<"kseal.v1.GetTrustSessionStats
  * Use `create(GetTrustSessionStatsRequestSchema)` to create a new message.
  */
 export const GetTrustSessionStatsRequestSchema: GenMessage<GetTrustSessionStatsRequest> = /*@__PURE__*/
-  messageDesc(file_kseal_v1_query, 5);
+  messageDesc(file_kseal_v1_query, 6);
 
 /**
  * @generated from message kseal.v1.GetTrustSessionStatsResponse
@@ -292,5 +381,5 @@ export type GetTrustSessionStatsResponse = Message<"kseal.v1.GetTrustSessionStat
  * Use `create(GetTrustSessionStatsResponseSchema)` to create a new message.
  */
 export const GetTrustSessionStatsResponseSchema: GenMessage<GetTrustSessionStatsResponse> = /*@__PURE__*/
-  messageDesc(file_kseal_v1_query, 6);
+  messageDesc(file_kseal_v1_query, 7);
 
