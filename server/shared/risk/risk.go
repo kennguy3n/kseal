@@ -1,16 +1,28 @@
 // Package risk defines the packed risk-signal bit layout and the fusion/scoring
 // helpers shared by the trust, attestation, config, simulator, and guardrails
-// components. The bit positions mirror the Rust trust core's RiskBitset; they
-// are the server-side authority for interpreting telemetry and attestation
-// outcomes.
+// components. These constants are the *server* layout — the authority for
+// interpreting telemetry and attestation outcomes and for scoring.
+//
+// This layout is deliberately NOT identical to the device/wire layout carried
+// in proto RiskBitset (the Rust core's RiskBitset, bits 0..15): the same numeric
+// position can mean different things on each side (e.g. wire bit 4 is DEBUGGER
+// but server bit 4 is BitAppTamper). Device-reported bits must therefore be
+// translated with FromWire before they are fused or scored against this layout;
+// never OR a raw wire bitset into a server bitset. See wireToServer / FromWire
+// and the pinned wire_contract_test.go for the mapping.
 package risk
 
 import (
 	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
 )
 
-// Risk signal bit positions (packed into a uint64). Keep in sync with the Rust
-// core's RiskBitset and the protocol docs.
+// Server risk-signal bit positions (packed into a uint64). This is the server
+// layout used for scoring; it is distinct from the device/wire layout (see the
+// package doc and FromWire). Renumbering here is pinned by wire_contract_test.go
+// so the wire→server mapping can't silently drift.
+//
+// NOTE: these positions are NOT a mirror of the Rust core's wire RiskBitset.
+// Device-reported bits arrive in the wire layout and are remapped via FromWire.
 const (
 	BitRootJailbreak   uint64 = 1 << 0
 	BitDebugger        uint64 = 1 << 1

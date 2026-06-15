@@ -268,9 +268,17 @@ func New(cfg Config) *Engine {
 	if nowFn == nil {
 		nowFn = time.Now
 	}
+	// bucketSize is the integer division Window/Buckets; with an extreme config
+	// (a sub-Buckets-nanosecond window) it can truncate to 0, which would make
+	// epoch divide by zero. Clamp to at least 1ns so the engine can never panic
+	// on pathological input.
+	bucketSize := cfg.Window / time.Duration(cfg.Buckets)
+	if bucketSize <= 0 {
+		bucketSize = 1
+	}
 	e := &Engine{
 		cfg:        cfg,
-		bucketSize: cfg.Window / time.Duration(cfg.Buckets),
+		bucketSize: bucketSize,
 		now:        nowFn,
 		snapTTL:    cfg.SnapshotTTL,
 	}

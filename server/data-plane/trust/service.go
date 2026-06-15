@@ -47,6 +47,14 @@ type Service struct {
 
 	// Optional population-level fleet-anomaly engine; nil disables it.
 	fleet *fleet.Engine
+	// trustEdgeRegion gates whether CDN-injected country headers are read as the
+	// fleet cohort's region dimension. Off by default: these headers are
+	// client-spoofable when the server is not behind a CDN that sets and
+	// sanitizes them, so trusting them blindly would let an attacker fragment
+	// their traffic across fabricated region cohorts (each staying under
+	// MinSamples/VelocityMinVolume) to evade detection. Operators behind such a
+	// trusted edge opt in explicitly.
+	trustEdgeRegion bool
 }
 
 // NewService builds a TrustService. flags carries the per-tenant feature toggles
@@ -83,8 +91,9 @@ func (s *Service) AttachCanaryHealth(detector *guardrails.Detector, reg *canary.
 // into the newly minted session's risk before scoring. Flag-gated per tenant
 // (compliance.FlagFleetAnomaly, supplied to NewService); a nil engine disables
 // it entirely.
-func (s *Service) AttachFleetGuard(engine *fleet.Engine) {
+func (s *Service) AttachFleetGuard(engine *fleet.Engine, trustEdgeRegionHeaders bool) {
 	s.fleet = engine
+	s.trustEdgeRegion = trustEdgeRegionHeaders
 }
 
 // recordCanaryHealth attributes one decision to the instance's canary cohort.
@@ -146,8 +155,15 @@ var edgeCountryHeaders = []string{
 }
 
 // edgeRegion extracts a best-effort country/region from edge headers. An empty
-// or sentinel value (e.g. Cloudflare's "XX"/"T1") collapses to "".
-func edgeRegion(h http.Header) string {
+// or sentinel value (e.g. Cloudflare's "XX"/"T1") collapses to "". It returns ""
+// unless the operator has opted in via AttachFleetGuard, because these headers
+// are client-spoofable absent a trusted CDN/edge that sets and strips them;
+// collapsing to a build-level cohort is the safe default (an attacker cannot
+// then shard traffic across fabricated regions to dodge the per-cohort floors).
+func (s *Service) edgeRegion(h http.Header) string {
+	if !s.trustEdgeRegion {
+		return ""
+	}
 	for _, name := range edgeCountryHeaders {
 		v := strings.ToUpper(strings.TrimSpace(h.Get(name)))
 		if v == "" || v == "XX" || v == "T1" {
@@ -238,7 +254,7 @@ func (s *Service) VerifyAttestation(ctx context.Context, req *connect.Request[ks
 	policy, _ := s.store.GetActivePolicy(ctx, m.TenantId, m.AppId)
 	thresholds := parseThresholds(policy)
 	fused := risk.Fuse(risk.FromWire(m.RiskBitset), res.RiskBits)
-	fused = s.applyFleetGuard(m.TenantId, m.AppId, m.BuildHash, edgeRegion(req.Header()), fused, span)
+	fused = s.applyFleetGuard(m.TenantId, m.AppId, m.BuildHash, s.edgeRegion(req.Header()), fused, span)
 	score := risk.Score(fused, parseWeights(policy))
 	level := risk.Level(score, thresholds)
 	nextChecks := risk.NextChecks(level)

@@ -3,6 +3,7 @@ package fleet
 import (
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -22,6 +23,7 @@ import (
 //	KSEAL_FLEET_VELOCITY_COLD_VOLUME integer > 0
 //	KSEAL_FLEET_MAX_SCOPES     integer > 0
 //	KSEAL_FLEET_SNAPSHOT_TTL   Go duration ("0" or negative disables read caching)
+//	KSEAL_FLEET_TRUST_EDGE_REGION bool (see TrustEdgeRegionFromEnv)
 func ConfigFromEnv() Config {
 	c := DefaultConfig()
 	if v := os.Getenv("KSEAL_FLEET_WINDOW"); v != "" {
@@ -91,4 +93,19 @@ func ConfigFromEnv() Config {
 		}
 	}
 	return c
+}
+
+// TrustEdgeRegionFromEnv reports whether CDN-injected country headers should be
+// trusted as the fleet cohort's region dimension, controlled by
+// KSEAL_FLEET_TRUST_EDGE_REGION. It defaults to false: those headers are
+// client-spoofable unless the server sits behind a CDN/edge that sets and
+// strips them, so operators must opt in explicitly. Only "1", "true", "t",
+// "yes", "y", "on" (case-insensitive) enable it.
+func TrustEdgeRegionFromEnv() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("KSEAL_FLEET_TRUST_EDGE_REGION"))) {
+	case "1", "true", "t", "yes", "y", "on":
+		return true
+	default:
+		return false
+	}
 }

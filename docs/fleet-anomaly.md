@@ -28,6 +28,18 @@ degrades to a build-level cohort. `build_hash` comes from the attestation
 request. No new identifier is introduced and no per-user state is kept — the
 engine counts already-collected, non-PII risk bits and arrival volume.
 
+> **Security — region headers are trusted only on opt-in.** Those edge headers
+> are trivially client-spoofable when the server is reached directly (no CDN, or
+> a CDN that forwards rather than overwrites them). An attacker could otherwise
+> set a fresh fake country per request to scatter their traffic across fabricated
+> region cohorts, each staying under `MinSamples` / `VelocityMinVolume` and so
+> evading the per-cohort detectors. The region dimension is therefore **off by
+> default**: every request collapses to a build-level cohort unless the operator
+> sets `KSEAL_FLEET_TRUST_EDGE_REGION=true`, which they should do only when the
+> server sits behind a trusted edge that *sets and strips* these headers.
+> Build-level cohorts lose no detection power — they simply can't be sharded by a
+> spoofed region — so the safe default never weakens the guard.
+
 ## Two detectors
 
 For each cohort the engine keeps a sliding window (`Window`, default 5m) split
@@ -137,6 +149,7 @@ KSEAL_FLEET_VELOCITY_MIN_VOLUME integer > 0
 KSEAL_FLEET_VELOCITY_COLD_VOLUME integer > 0
 KSEAL_FLEET_MAX_SCOPES          integer > 0
 KSEAL_FLEET_SNAPSHOT_TTL        Go duration ("0"/negative disables read caching)
+KSEAL_FLEET_TRUST_EDGE_REGION   bool (default false; trust CDN country headers)
 ```
 
 ### Read-path snapshot cache

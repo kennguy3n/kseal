@@ -2,6 +2,7 @@ package trust
 
 import (
 	"context"
+	"net/http"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -46,7 +47,7 @@ func verifyOnce(t *testing.T, svc *Service, tenant, app, build string, wireBits 
 func TestFleetGuardFusesAnomalyBitOnSurge(t *testing.T) {
 	svc, _, tn, app := setupServiceWithFlags(t, &attestation.Result{Accepted: true, AppRecognized: true, DeviceIntegrity: true}, flags(t, "*:"+compliance.FlagFleetAnomaly+"=true"))
 	engine := fleet.New(fleet.DefaultConfig())
-	svc.AttachFleetGuard(engine)
+	svc.AttachFleetGuard(engine, false)
 
 	const build = "bh-surge"
 
@@ -72,7 +73,7 @@ func TestFleetGuardFusesAnomalyBitOnSurge(t *testing.T) {
 func TestFleetGuardFlagGated(t *testing.T) {
 	svc, _, tn, app := setupServiceWithFlags(t, &attestation.Result{Accepted: true, AppRecognized: true, DeviceIntegrity: true}, flags(t, "")) // flag off
 	engine := fleet.New(fleet.DefaultConfig())
-	svc.AttachFleetGuard(engine)
+	svc.AttachFleetGuard(engine, false)
 
 	const build = "bh-nogate"
 	for i := 0; i < 80; i++ {
@@ -93,5 +94,29 @@ func TestFleetGuardDisabledWithoutAttach(t *testing.T) {
 	}
 	if lvl := verifyOnce(t, svc, tn.Id, app.Id, build, 0); lvl != ksealv1.TrustLevel_TRUST_LEVEL_TRUSTED {
 		t.Fatalf("no engine attached must leave clean device TRUSTED, got %v", lvl)
+	}
+}
+
+// TestEdgeRegionTrustGate asserts CDN country headers are honored only when the
+// operator opts in, so a spoofable header cannot fragment cohorts by default.
+func TestEdgeRegionTrustGate(t *testing.T) {
+	h := http.Header{}
+	h.Set("Cf-Ipcountry", "de")
+
+	off := &Service{trustEdgeRegion: false}
+	if got := off.edgeRegion(h); got != "" {
+		t.Fatalf("edgeRegion with trust off = %q, want \"\" (spoofable header ignored)", got)
+	}
+
+	on := &Service{trustEdgeRegion: true}
+	if got := on.edgeRegion(h); got != "DE" {
+		t.Fatalf("edgeRegion with trust on = %q, want \"DE\"", got)
+	}
+
+	// Sentinel/unknown country collapses to "" even when trusted.
+	sentinel := http.Header{}
+	sentinel.Set("Cf-Ipcountry", "XX")
+	if got := on.edgeRegion(sentinel); got != "" {
+		t.Fatalf("edgeRegion sentinel = %q, want \"\"", got)
 	}
 }

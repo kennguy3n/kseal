@@ -140,7 +140,7 @@ func run() error {
 	// bounded memory. Flag-gated per tenant (compliance.FlagFleetAnomaly,
 	// default off), so the per-instance decision is unchanged on main.
 	fleetEngine := fleet.New(fleet.ConfigFromEnv())
-	trustSvc.AttachFleetGuard(fleetEngine)
+	trustSvc.AttachFleetGuard(fleetEngine, fleet.TrustEdgeRegionFromEnv())
 
 	dispatcher := webhook.NewDispatcher(store, webhook.DispatcherConfig{}, tel.Metrics)
 	defer dispatcher.Stop()
