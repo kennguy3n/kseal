@@ -2,6 +2,7 @@ package siem
 
 import (
 	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
+	"github.com/kennguy3n/kseal/server/shared/risk"
 )
 
 // Event is the neutral, already-minimized risk/trust event the exporter
@@ -43,6 +44,7 @@ func (e Event) minimized(allow map[string]struct{}) map[string]any {
 		FieldEventType:        e.EventType.String(),
 		FieldRiskLevel:        e.RiskLevel.String(),
 		FieldRiskBits:         e.RiskBits,
+		FieldRiskSignals:      riskSignalsOf(e.RiskBits),
 		FieldConfidence:       e.Confidence.String(),
 		FieldBuildHash:        e.BuildHash,
 		FieldPolicyHash:       e.PolicyHash,
@@ -59,6 +61,18 @@ func (e Event) minimized(allow map[string]struct{}) map[string]any {
 		}
 	}
 	return out
+}
+
+// riskSignalsOf returns the stable per-signal names for the (server-layout)
+// risk bits, always as a non-nil slice so the field serializes as a JSON array
+// (never null) even when no signal is set. RiskBits MUST already be in the
+// server layout; main.go normalizes via risk.NormalizeStored before adapting.
+func riskSignalsOf(bits uint64) []string {
+	names := risk.SignalNames(bits)
+	if names == nil {
+		return []string{}
+	}
+	return names
 }
 
 // allowSet builds a lookup set from an allow-list slice, intersected with the

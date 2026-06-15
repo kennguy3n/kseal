@@ -25,7 +25,8 @@ The exporter is privacy-preserving by construction. Only the following
 | `app_id` | Application identifier |
 | `event_type` | Coarse event class (e.g. `ROOT_RISK`) |
 | `risk_level` | Fused trust classification |
-| `risk_bits` | Packed bitmask of contributing risk signals |
+| `risk_bits` | Packed bitmask of contributing risk signals (server layout) |
+| `risk_signals` | Array of stable per-signal names (e.g. `["debugger","app_tamper"]`); the name-based view of `risk_bits`. Prefer correlating on these names rather than numeric bit positions |
 | `confidence` | Coarse confidence bucket |
 | `build_hash` | Build identity hash |
 | `policy_hash` | Active policy hash |

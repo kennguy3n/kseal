@@ -110,6 +110,7 @@ CREATE TABLE IF NOT EXISTS telemetry_events (
   event_type   Int32,
   risk_level   Int32,
   risk_bits    UInt64,
+  risk_bits_layout UInt8 DEFAULT 0,  -- self-describing layout marker (0=unknown→server, 1=wire, 2=server)
   confidence   Int32,
   build_hash   String,
   policy_hash  String,

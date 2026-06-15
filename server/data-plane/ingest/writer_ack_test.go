@@ -51,7 +51,7 @@ func (s *gatedStore) Write(_ context.Context, events []StoredEvent) error {
 		return errors.New("clickhouse down")
 	}
 }
-func (s *gatedStore) writes() int { s.mu.Lock(); defer s.mu.Unlock(); return s.written }
+func (s *gatedStore) writes() int                                         { s.mu.Lock(); defer s.mu.Unlock(); return s.written }
 func (s *gatedStore) Query(context.Context, Query) ([]StoredEvent, error) { return nil, nil }
 func (s *gatedStore) Count(context.Context, Query) (int, error)           { return 0, nil }
 func (s *gatedStore) ListEvents(context.Context, Query, int, string) (Page, error) {

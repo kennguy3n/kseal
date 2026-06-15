@@ -12,6 +12,7 @@
           { "name": "event_type", "type": "string" },
           { "name": "risk_level", "type": "string" },
           { "name": "risk_bits", "type": "long" },
+          { "name": "risk_signals", "type": "dynamic" },
           { "name": "confidence", "type": "string" },
           { "name": "build_hash", "type": "string" },
           { "name": "policy_hash", "type": "string" },

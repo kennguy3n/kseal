@@ -45,6 +45,7 @@ func (s *ClickHouseAnalyticsStore) ensureSchema(ctx context.Context) error {
 	event_type       Int32,
 	risk_level       Int32,
 	risk_bits        UInt64,
+	risk_bits_layout UInt8 DEFAULT 0,
 	confidence       Int32,
 	build_hash       String,
 	policy_hash      String,
@@ -61,6 +62,15 @@ SETTINGS index_granularity = 8192`, s.table, onCluster, engine, ttl)
 
 	if err := s.conn.Exec(ctx, ddl); err != nil {
 		return fmt.Errorf("clickhouse: ensure schema: %w", err)
+	}
+
+	// Idempotently add risk_bits_layout to clusters created before the column
+	// existed. Existing rows materialize the DEFAULT 0 (risk.LayoutUnknown),
+	// which readers treat as the server layout — matching their pre-column
+	// behavior, so the migration is a pure no-op for already-correct rows.
+	alter := fmt.Sprintf("ALTER TABLE %s%s ADD COLUMN IF NOT EXISTS risk_bits_layout UInt8 DEFAULT 0 AFTER risk_bits", s.table, onCluster)
+	if err := s.conn.Exec(ctx, alter); err != nil {
+		return fmt.Errorf("clickhouse: add risk_bits_layout column: %w", err)
 	}
 	return nil
 }

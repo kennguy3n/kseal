@@ -29,6 +29,7 @@
             "event_type": { "type": "keyword" },
             "risk_level": { "type": "keyword" },
             "risk_bits": { "type": "long" },
+            "risk_signals": { "type": "keyword" },
             "confidence": { "type": "keyword" },
             "build_hash": { "type": "keyword" },
             "policy_hash": { "type": "keyword" },

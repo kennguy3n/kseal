@@ -24,6 +24,7 @@ import (
 	"github.com/kennguy3n/kseal/server/gen/kseal/v1/ksealv1connect"
 	"github.com/kennguy3n/kseal/server/shared/auth"
 	appconfig "github.com/kennguy3n/kseal/server/shared/config"
+	"github.com/kennguy3n/kseal/server/shared/risk"
 )
 
 // defaultRecentEvents is how many recent events the overview panel returns.
@@ -211,12 +212,14 @@ func (s *Service) GetTrustSessionStats(ctx context.Context, req *connect.Request
 // toEventRecord projects a stored analytics event onto the wire EventRecord.
 func toEventRecord(e ingest.StoredEvent) *ksealv1.EventRecord {
 	rec := &ksealv1.EventRecord{
-		Id:           e.ID,
-		TenantId:     e.TenantID,
-		AppId:        e.AppID,
-		EventType:    e.EventType,
-		RiskLevel:    e.RiskLevel,
-		RiskBits:     e.RiskBits,
+		Id:        e.ID,
+		TenantId:  e.TenantID,
+		AppId:     e.AppID,
+		EventType: e.EventType,
+		RiskLevel: e.RiskLevel,
+		// Project in the server layout so the dashboard always interprets the
+		// bits under one namespace, even for a row stored in another layout.
+		RiskBits:     risk.NormalizeStored(e.RiskBits, e.RiskBitsLayout),
 		Confidence:   e.Confidence,
 		AppBuildHash: e.BuildHash,
 		PolicyHash:   e.PolicyHash,

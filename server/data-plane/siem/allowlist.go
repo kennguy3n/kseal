@@ -28,11 +28,15 @@ import "sort"
 // (identifiers, not user PII). No raw identifier, precise location, or device
 // fingerprint is representable here.
 const (
-	FieldTenantID         = "tenant_id"
-	FieldAppID            = "app_id"
-	FieldEventType        = "event_type"
-	FieldRiskLevel        = "risk_level"
-	FieldRiskBits         = "risk_bits"
+	FieldTenantID  = "tenant_id"
+	FieldAppID     = "app_id"
+	FieldEventType = "event_type"
+	FieldRiskLevel = "risk_level"
+	FieldRiskBits  = "risk_bits"
+	// FieldRiskSignals is the stable, name-based view of FieldRiskBits: the same
+	// information as an array of per-signal names (e.g. "debugger",
+	// "app_tamper") so external rules key on names, not numeric bit positions.
+	FieldRiskSignals      = "risk_signals"
 	FieldConfidence       = "confidence"
 	FieldBuildHash        = "build_hash"
 	FieldPolicyHash       = "policy_hash"
@@ -50,6 +54,7 @@ var canonicalFields = map[string]struct{}{
 	FieldEventType:        {},
 	FieldRiskLevel:        {},
 	FieldRiskBits:         {},
+	FieldRiskSignals:      {},
 	FieldConfidence:       {},
 	FieldBuildHash:        {},
 	FieldPolicyHash:       {},

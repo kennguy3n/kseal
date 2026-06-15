@@ -49,8 +49,12 @@ func (s *Simulator) Simulate(ctx context.Context, tenantID, appID string, from, 
 		CandidateCounts: map[ksealv1.RequestProofResult_Decision]int{},
 	}
 	for _, e := range events {
-		cur := decide(e.RiskBits, current)
-		cand := decide(e.RiskBits, candidate)
+		// Score in the server layout regardless of how the row was stored: a
+		// row tagged LayoutWire (or a future layout) is translated here so
+		// historical events are never scored under the wrong namespace.
+		bits := risk.NormalizeStored(e.RiskBits, e.RiskBitsLayout)
+		cur := decide(bits, current)
+		cand := decide(bits, candidate)
 		report.Total++
 		report.CurrentCounts[cur]++
 		report.CandidateCounts[cand]++
