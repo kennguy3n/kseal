@@ -210,7 +210,7 @@ func run() error {
 	}
 
 	querySvc := query.NewService(store, analytics)
-	querySvc.AttachFleetGuard(fleetEngine)
+	querySvc.AttachFleetGuard(fleetEngine, cfg.FeatureFlags)
 
 	// Raw-telemetry retention: purge per-tenant raw events past their window
 	// (platform default KSEAL_RAW_RETENTION_DAYS), retaining aggregates. Tracked

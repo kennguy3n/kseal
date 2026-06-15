@@ -55,6 +55,32 @@ meaning and are dropped (not scored against an unrelated bit). `BitFleetAnomaly`
 sits at bit 32, well clear of the wire range, so a device can never forge it and
 it never collides with a translated bit.
 
+## Historical telemetry written before this contract
+
+`IngestService` now stores `risk.FromWire(ev.RiskBits)`, so every event written
+**after** this change carries server-layout bits and is scored correctly by the
+simulator and analytics. Events written **before** it carry the old wire-layout
+bits in their `risk_bits` column, so the simulator (which scores stored bits with
+server weights) mis-scores those rows for any signal whose meaning differs by
+position (bit ≥ ~4).
+
+No destructive backfill is run, by design:
+
+- There is **no per-row layout/version marker**, so a blind re-translation would
+  double-apply `FromWire` to already-correct post-fix rows and corrupt them. A
+  one-time, timestamp-cutoff backfill (`received_at < deploy_time`) is the only
+  safe form and is intentionally left as an opt-in operator action rather than an
+  automatic migration, to keep the NoOps default safe.
+- The discontinuity is **bounded and self-healing**: raw events age out of each
+  tenant's retention window (`server/data-plane/ingest/retention.go`), so once a
+  full window has elapsed past the deploy, every remaining row is server-layout.
+  Only tenants configured to *retain indefinitely* (`days <= 0`) keep pre-fix
+  rows; such a tenant can run the cutoff backfill above if exact historical
+  simulation over that range is required.
+
+The live trust decision is unaffected — it always translates the incoming device
+bitset per request and never reads stored bits.
+
 ## Pinned on both ends
 
 Any silent renumber must break CI deliberately:

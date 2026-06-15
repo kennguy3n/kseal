@@ -563,14 +563,18 @@ func (e *Engine) computeSnapshot(now time.Time) []ScopeAnomaly {
 	return out
 }
 
-// TenantSnapshot returns the currently-anomalous cohorts for one tenant.
+// TenantSnapshot returns the currently-anomalous cohorts for one tenant. The
+// shared snapshot is sorted by (tenant, app, build, region), so this slices out
+// the tenant's contiguous run via binary search rather than scanning every
+// tenant's anomalies and over-allocating to the full cross-tenant length.
 func (e *Engine) TenantSnapshot(tenant string) []ScopeAnomaly {
 	all := e.Snapshot()
-	out := make([]ScopeAnomaly, 0, len(all))
-	for _, a := range all {
-		if a.TenantID == tenant {
-			out = append(out, a)
-		}
+	lo := sort.Search(len(all), func(i int) bool { return all[i].TenantID >= tenant })
+	hi := sort.Search(len(all), func(i int) bool { return all[i].TenantID > tenant })
+	if lo >= hi {
+		return nil
 	}
+	out := make([]ScopeAnomaly, hi-lo)
+	copy(out, all[lo:hi])
 	return out
 }
