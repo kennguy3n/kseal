@@ -24,11 +24,13 @@ func TestSignalNamesContract(t *testing.T) {
 		{
 			BitRootJailbreak | BitDebugger | BitEmulator | BitHooking | BitAppTamper |
 				BitAttestationFail | BitNetworkMITM | BitAccountRisk | BitDeviceIntegrity |
-				BitAppUnrecognized | BitEnvironmentRisk | BitFleetAnomaly,
+				BitAppUnrecognized | BitEnvironmentRisk | BitScreenCapture | BitOverlayAbuse |
+				BitAccessibilityAbuse | BitMaliciousIME | BitRemoteAccess | BitFleetAnomaly,
 			[]string{
 				"root_jailbreak", "debugger", "emulator", "hooking", "app_tamper",
 				"attestation_fail", "network_mitm", "account_risk", "device_integrity",
-				"app_unrecognized", "environment_risk", "fleet_anomaly",
+				"app_unrecognized", "environment_risk", "screen_capture", "overlay_abuse",
+				"accessibility_abuse", "malicious_ime", "remote_access", "fleet_anomaly",
 			},
 		},
 	}

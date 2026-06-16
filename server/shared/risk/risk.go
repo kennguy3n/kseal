@@ -4,7 +4,7 @@
 // interpreting telemetry and attestation outcomes and for scoring.
 //
 // This layout is deliberately NOT identical to the device/wire layout carried
-// in proto RiskBitset (the Rust core's RiskBitset, bits 0..15): the same numeric
+// in proto RiskBitset (the Rust core's RiskBitset, bits 0..20): the same numeric
 // position can mean different things on each side (e.g. wire bit 4 is DEBUGGER
 // but server bit 4 is BitAppTamper). Device-reported bits must therefore be
 // translated with FromWire before they are fused or scored against this layout;
