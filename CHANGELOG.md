@@ -14,11 +14,12 @@ codecs, rollout ordering). Pure internal refactors are out of scope.
 
 ### Changed
 
-- **SSRF egress guard now also blocks non-routable IPv4 documentation,
+- **SSRF egress guard now also blocks non-routable documentation,
   benchmarking, and 6to4-relay ranges.** `safehttp.IsPublicIP` additionally
   rejects TEST-NET-1/2/3 (`192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`;
-  RFC 5737), benchmarking `198.18.0.0/15` (RFC 2544), and 6to4 relay anycast
-  `192.88.99.0/24` (RFC 7526). A webhook or SIEM endpoint that resolves to one
+  RFC 5737), benchmarking `198.18.0.0/15` (RFC 2544), 6to4 relay anycast
+  `192.88.99.0/24` (RFC 7526), and the IPv6 documentation prefix
+  `2001:db8::/32` (RFC 3849). A webhook or SIEM endpoint that resolves to one
   of these is refused at dial time, same as the existing private/metadata
   ranges. Real public addresses are unaffected. See `docs/egress-hardening.md`.
 - **Egress `risk_bits` is now the server scoring layout (not the device/wire

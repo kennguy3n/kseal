@@ -66,6 +66,7 @@ func TestIsPublicIP(t *testing.T) {
 		"198.18.0.1",      // benchmarking 198.18.0.0/15 (RFC 2544), low end
 		"198.19.255.255",  // benchmarking 198.18.0.0/15 (RFC 2544), high end
 		"192.88.99.1",     // 6to4 relay anycast (RFC 7526)
+		"2001:db8::1",     // IPv6 documentation 2001:db8::/32 (RFC 3849)
 	}
 	for _, s := range blocked {
 		if IsPublicIP(net.ParseIP(s)) {

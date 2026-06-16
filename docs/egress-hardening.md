@@ -36,10 +36,10 @@ for the authoritative list): loopback, unspecified, link-local (covering the
 carrier-grade NAT (`100.64.0.0/10`), IETF protocol assignments
 (`192.0.0.0/24`), the RFC 5737 documentation ranges TEST-NET-1/2/3
 (`192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`), RFC 2544 benchmarking
-(`198.18.0.0/15`), and the RFC 7526 6to4 relay anycast prefix
-(`192.88.99.0/24`). None of these are routable on the public internet, so a
-tenant URL resolving to one is not a real external endpoint and is refused at
-dial time with `ErrBlockedAddress`.
+(`198.18.0.0/15`), the RFC 7526 6to4 relay anycast prefix (`192.88.99.0/24`),
+and the RFC 3849 IPv6 documentation prefix (`2001:db8::/32`). None of these are
+routable on the public internet, so a tenant URL resolving to one is not a real
+external endpoint and is refused at dial time with `ErrBlockedAddress`.
 
 ## Redirects are not followed (3xx is a delivery failure)
 

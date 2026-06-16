@@ -176,10 +176,11 @@ func guardedDialContext(d *net.Dialer) func(context.Context, string, string) (ne
 // metadata endpoint), multicast, RFC1918/ULA private, carrier-grade NAT
 // (100.64.0.0/10), IETF-reserved (192.0.0.0/24), the RFC 5737 documentation
 // ranges TEST-NET-1/2/3 (192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24),
-// RFC 2544 benchmarking (198.18.0.0/15), or the RFC 7526 6to4 relay anycast
-// prefix (192.88.99.0/24). These extra IPv4 ranges are non-routable on the
-// public internet, so a tenant URL that resolves to one is treated as an
-// attempt to reach something other than a real external endpoint.
+// RFC 2544 benchmarking (198.18.0.0/15), the RFC 7526 6to4 relay anycast
+// prefix (192.88.99.0/24), or the RFC 3849 IPv6 documentation prefix
+// (2001:db8::/32). These ranges are non-routable on the public internet, so a
+// tenant URL that resolves to one is treated as an attempt to reach something
+// other than a real external endpoint.
 func IsPublicIP(ip net.IP) bool {
 	if ip == nil {
 		return false
@@ -205,6 +206,15 @@ func IsPublicIP(ip net.IP) bool {
 		case v4[0] == 198 && (v4[1] == 18 || v4[1] == 19): // 198.18.0.0/15 benchmarking (RFC 2544)
 			return false
 		case v4[0] == 192 && v4[1] == 88 && v4[2] == 99: // 192.88.99.0/24 6to4 relay anycast (RFC 7526)
+			return false
+		}
+		return true
+	}
+	// IPv6-only ranges the stdlib predicates above don't cover, mirroring the
+	// IPv4 documentation ranges for defense-in-depth consistency.
+	if v6 := ip.To16(); v6 != nil {
+		// 2001:db8::/32 documentation prefix (RFC 3849).
+		if v6[0] == 0x20 && v6[1] == 0x01 && v6[2] == 0x0d && v6[3] == 0xb8 {
 			return false
 		}
 	}
