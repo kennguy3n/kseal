@@ -86,6 +86,15 @@ internal interface TrustCore : AutoCloseable {
     fun decision(riskBits: Long): Decision
 
     /**
+     * Resolves the [TrustLevel] and host-facing [Decision] for [riskBits]
+     * atomically under a single policy read, so a concurrent config swap can
+     * never surface a mismatched `(level, decision)` pair to the host. Falls
+     * back to ([TrustLevel.UNSPECIFIED], [Decision.ALLOW]) on an internal error
+     * so the SDK never blocks the host on its own.
+     */
+    fun decisionWithLevel(riskBits: Long): Pair<TrustLevel, Decision>
+
+    /**
      * Verifies and applies a serialized `kseal.v1.SignedKillSwitch`, returning
      * the resulting killed state. Fail-safe: a malformed, wrongly-signed, or
      * absent command never disables the app; only an Ed25519-valid `DISABLE`
@@ -246,7 +255,23 @@ internal class NativeTrustCore private constructor(
         if (code < 0) Decision.ALLOW else Decision.fromCode(code)
     }
 
-    override fun applyKillSwitch(signedKillSwitchBytes: ByteArray): Boolean = coreLock.read {
+    override fun decisionWithLevel(riskBits: Long): Pair<TrustLevel, Decision> = coreLock.read {
+        check(!closed) { "core is closed" }
+        val out = NativeBridge.nativeDecisionWithLevel(handle, riskBits)
+        // A null/malformed result is an internal error; fail open so the SDK
+        // never blocks the host on its own.
+        if (out == null || out.size != 2) {
+            TrustLevel.UNSPECIFIED to Decision.ALLOW
+        } else {
+            TrustLevel.fromCode(out[0]) to Decision.fromCode(out[1])
+        }
+    }
+
+    // State mutation: run under the write lock, matching `loadConfig` and the
+    // iOS/macOS barrier convention for state-changing FFI calls. The core also
+    // serializes internally, so correctness does not depend on this lock; it
+    // keeps the locking strategy consistent across platforms.
+    override fun applyKillSwitch(signedKillSwitchBytes: ByteArray): Boolean = coreLock.write {
         check(!closed) { "core is closed" }
         // 1 = killed; 0 or a negative status leaves the app available (fail-safe).
         NativeBridge.nativeApplyKillSwitch(handle, signedKillSwitchBytes) == 1

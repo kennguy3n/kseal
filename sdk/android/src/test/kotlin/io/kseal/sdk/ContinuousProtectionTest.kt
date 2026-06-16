@@ -61,6 +61,7 @@ class ContinuousProtectionTest {
         override fun decompress(data: ByteArray) = data
         override fun reattestIntervalSecs() = intervalSecs
         override fun decision(riskBits: Long) = decisionValue
+        override fun decisionWithLevel(riskBits: Long) = level to decisionValue
         override fun applyKillSwitch(signedKillSwitchBytes: ByteArray): Boolean {
             killed = applyResult
             return killed

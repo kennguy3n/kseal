@@ -49,6 +49,7 @@ final class ContinuousProtectionTests: XCTestCase {
         func decompress(_ data: Data) throws -> Data { data }
         func reattestIntervalSecs() -> UInt32 { intervalSecs }
         func decision(_ riskBits: UInt64) -> Decision { decisionValue }
+        func decisionWithLevel(_ riskBits: UInt64) -> (TrustLevel, Decision) { (level, decisionValue) }
         func applyKillSwitch(_ signedKillSwitchBytes: Data) -> Bool { killed = applyResult; return killed }
         func isKilled() -> Bool { killed }
     }

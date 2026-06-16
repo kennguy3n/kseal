@@ -320,6 +320,24 @@ Java_io_kseal_sdk_internal_NativeBridge_nativeDecision(
     return (jint)kseal_decision(as_handle(handle), (uint64_t)risk_bits);
 }
 
+JNIEXPORT jintArray JNICALL
+Java_io_kseal_sdk_internal_NativeBridge_nativeDecisionWithLevel(
+    JNIEnv *env, jobject thiz, jlong handle, jlong risk_bits) {
+    (void)thiz;
+    int32_t level = 0;
+    int32_t decision = 0;
+    KsealStatus st = kseal_decision_with_level(
+        as_handle(handle), (uint64_t)risk_bits, &level, &decision);
+    if (st != 0) {
+        return NULL;
+    }
+    jintArray out = (*env)->NewIntArray(env, 2);
+    if (out == NULL) return NULL;
+    jint vals[2] = {(jint)level, (jint)decision};
+    (*env)->SetIntArrayRegion(env, out, 0, 2, vals);
+    return out;
+}
+
 JNIEXPORT jint JNICALL
 Java_io_kseal_sdk_internal_NativeBridge_nativeApplyKillSwitch(
     JNIEnv *env, jobject thiz, jlong handle, jbyteArray bytes) {

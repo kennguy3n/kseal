@@ -57,6 +57,11 @@ public final class KsealSDK {
     private var policyHash: String = ""
 
     private let reattestQueue = DispatchQueue(label: "io.kseal.reattest")
+    // Serializes the read-apply-compare in `applyKillSwitch` so concurrent
+    // callers (the heartbeat and a direct host call) can't each observe a stale
+    // `before` and double- or miss-fire `onKillSwitchChanged`. The core state is
+    // always correct on its own; this only guards the transition notification.
+    private let killSwitchLock = NSLock()
     private var reattestTimer: DispatchSourceTimer?
     private var _onTrustDecision: ((TrustLevel, Decision) -> Void)?
     private var _onKillSwitchChanged: ((Bool) -> Void)?
@@ -222,7 +227,9 @@ public final class KsealSDK {
     /// surfaces this for the host's active-response hooks; it never enforces it.
     public func evaluateTrustDecision() throws -> (TrustLevel, Decision) {
         let assessment = try evaluateRisk()
-        return (assessment.trustLevel, core.decision(assessment.riskBits))
+        // Resolve level + decision in one core read so a concurrent config swap
+        // can't surface a mismatched pair (e.g. .highRisk with .allow).
+        return core.decisionWithLevel(assessment.riskBits)
     }
 
     /// Verifies and applies a serialized `kseal.v1.SignedKillSwitch` (typically
@@ -232,9 +239,13 @@ public final class KsealSDK {
     /// `isKilled` state and fires `onKillSwitchChanged` on a transition.
     @discardableResult
     public func applyKillSwitch(_ signedKillSwitchBytes: Data) -> Bool {
+        killSwitchLock.lock()
         let before = core.isKilled()
         let after = core.applyKillSwitch(signedKillSwitchBytes)
-        if after != before {
+        let transitioned = after != before
+        killSwitchLock.unlock()
+        // Fire outside the lock so a host callback can't re-enter and deadlock.
+        if transitioned {
             lock.lock(); let cb = _onKillSwitchChanged; lock.unlock()
             cb?(after)
         }
@@ -289,15 +300,18 @@ public final class KsealSDK {
     /// drive it directly without the timer.
     func runReattestCycle() {
         guard let assessment = try? evaluateRisk() else { return }
-        let decision = core.decision(assessment.riskBits)
+        // One core read yields a consistent (level, decision) pair even if a
+        // config reload races this cycle; both feed the hook and the escalation
+        // gate below.
+        let (level, decision) = core.decisionWithLevel(assessment.riskBits)
         lock.lock(); let cb = _onTrustDecision; lock.unlock()
-        cb?(assessment.trustLevel, decision)
+        cb?(level, decision)
         // Baseline re-validation: refresh the signed config (default provider
         // returns nil and falls back to cache — no network).
         refreshConfig()
         // Escalation: at .mediumRisk or above, also pull + apply the latest kill
         // switch so a server-driven forced degrade surfaces promptly.
-        if assessment.trustLevel.rawValue >= TrustLevel.mediumRisk.rawValue {
+        if level.rawValue >= TrustLevel.mediumRisk.rawValue {
             _ = refreshKillSwitch()
         }
     }

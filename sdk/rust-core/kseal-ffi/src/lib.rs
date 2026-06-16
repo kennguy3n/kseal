@@ -605,6 +605,42 @@ pub unsafe extern "C" fn kseal_decision(handle: *const CoreHandle, risk_bits: u6
     })
 }
 
+/// Atomically resolves both the composite
+/// [`TrustLevel`](kseal_core::proto::TrustLevel) discriminant (`out_level`) and
+/// the host-facing
+/// [`Decision`](kseal_core::proto::request_proof_result::Decision) discriminant
+/// (`out_decision`) for `risk_bits` under a single read of the active policy.
+///
+/// Platform SDKs deliver this `(level, decision)` pair to `onTrustDecision`
+/// together; resolving both under one lock guarantees they reflect the same
+/// policy snapshot, so a concurrent [`kseal_load_config`] can never surface a
+/// mismatched pair (e.g. `HIGH_RISK` with `ALLOW`). `out` parameters are
+/// written only on [`Status::Ok`].
+///
+/// # Safety
+/// `handle` must be valid; `out_level` and `out_decision` must be valid,
+/// writable pointers.
+#[no_mangle]
+pub unsafe extern "C" fn kseal_decision_with_level(
+    handle: *const CoreHandle,
+    risk_bits: u64,
+    out_level: *mut i32,
+    out_decision: *mut i32,
+) -> Status {
+    ffi_catch(Status::ErrPanic, || {
+        let Some(handle) = handle.as_ref() else {
+            return Status::ErrNull;
+        };
+        if out_level.is_null() || out_decision.is_null() {
+            return Status::ErrNull;
+        }
+        let (level, decision) = handle.core.decision_with_level(RiskBitset::from_raw(risk_bits));
+        out_level.write(level as i32);
+        out_decision.write(decision as i32);
+        Status::Ok
+    })
+}
+
 /// Verifies and applies a server-issued `SignedKillSwitch` (protobuf bytes),
 /// returning `1` if the app is now killed, `0` if not, or a negative [`Status`]
 /// value on bad args.
@@ -1389,6 +1425,22 @@ mod tests {
                 Decision::StepUp as i32
             );
 
+            // decision_with_level resolves the matching (level, decision) pair
+            // atomically under one policy read.
+            let mut level = -123i32;
+            let mut decision = -123i32;
+            assert_eq!(
+                kseal_decision_with_level(
+                    handle,
+                    RiskBitset::ROOT.as_u64(),
+                    &mut level,
+                    &mut decision
+                ),
+                Status::Ok
+            );
+            assert_eq!(level, TrustLevel::HighRisk as i32);
+            assert_eq!(decision, Decision::Deny as i32);
+
             // Kill switch: a valid DISABLE kills; a wrong-key payload is a no-op.
             let attacker = SigningKey::from_bytes(&[9u8; 32]);
             let forged =
@@ -1422,6 +1474,11 @@ mod tests {
         unsafe {
             assert_eq!(kseal_reattest_interval_secs(std::ptr::null()), -1);
             assert!(kseal_decision(std::ptr::null(), 0) < 0);
+            let (mut level, mut decision) = (0i32, 0i32);
+            assert_eq!(
+                kseal_decision_with_level(std::ptr::null(), 0, &mut level, &mut decision),
+                Status::ErrNull
+            );
             assert!(kseal_apply_kill_switch(std::ptr::null(), std::ptr::null(), 0) < 0);
             assert!(kseal_is_killed(std::ptr::null()) < 0);
         }

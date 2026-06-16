@@ -273,7 +273,7 @@ pub fn verify_config_envelope(
 #[must_use]
 pub fn kill_switch_preimage(ks: &SignedKillSwitch) -> Vec<u8> {
     let mut msg = Vec::with_capacity(
-        4 * core::mem::size_of::<u32>()
+        5 * core::mem::size_of::<u32>()
             + KILL_SWITCH_DOMAIN.len()
             + ks.tenant_id.len()
             + ks.app_id.len()

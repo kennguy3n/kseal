@@ -73,6 +73,11 @@ public final class KsealDesktop {
     private var policyHash: String = ""
 
     private let reattestQueue = DispatchQueue(label: "io.kseal.reattest")
+    // Serializes the read-apply-compare in `applyKillSwitch` so concurrent
+    // callers (the heartbeat and a direct host call) can't each observe a stale
+    // `before` and double- or miss-fire `onKillSwitchChanged`. The core state is
+    // always correct on its own; this only guards the transition notification.
+    private let killSwitchLock = NSLock()
     private var reattestTimer: DispatchSourceTimer?
     private var _onTrustDecision: ((TrustLevel, TrustDecision) -> Void)?
     private var _onKillSwitchChanged: ((Bool) -> Void)?
@@ -212,11 +217,19 @@ public final class KsealDesktop {
     /// it, returning the ALLOW / STEP_UP / DENY decision. The server decision is
     /// also surfaced through `onTrustDecision` so the host can actively respond
     /// (the SDK itself never enforces it).
+    ///
+    /// Cost note: when an `onTrustDecision` callback is registered, this runs one
+    /// fresh probe pass to pair the *current* local `TrustLevel` with the server
+    /// `TrustDecision`. The server proof result carries only the decision, and we
+    /// deliberately avoid caching probe results (which could go stale), so the
+    /// level is recomputed per authorized request. With the default (no callback)
+    /// there is no probe pass and no added cost.
     public func authorizeRequest(requestHash: Data, using client: TrustSessionClient) throws -> RequestProofDecision {
         let proof = try getRequestProof(requestHash: requestHash)
         let result = try client.validateRequestProof(proof)
         lock.lock(); let cb = _onTrustDecision; lock.unlock()
         if let cb {
+            // Single probe pass, only when a callback is registered.
             let level = (try? evaluateRisk().trustLevel) ?? .unspecified
             cb(level, result.decision)
         }
@@ -288,7 +301,9 @@ public final class KsealDesktop {
     /// only surfaces this for the host's active-response hooks; never enforces it.
     public func evaluateTrustDecision() throws -> (TrustLevel, TrustDecision) {
         let assessment = try evaluateRisk()
-        return (assessment.trustLevel, core.decision(assessment.riskBits))
+        // Resolve level + decision in one core read so a concurrent config swap
+        // can't surface a mismatched pair (e.g. .highRisk with .allow).
+        return core.decisionWithLevel(assessment.riskBits)
     }
 
     /// Verifies and applies a serialized `kseal.v1.SignedKillSwitch` (typically
@@ -298,9 +313,13 @@ public final class KsealDesktop {
     /// `isKilled` state and fires `onKillSwitchChanged` on a transition.
     @discardableResult
     public func applyKillSwitch(_ signedKillSwitchBytes: Data) -> Bool {
+        killSwitchLock.lock()
         let before = core.isKilled()
         let after = core.applyKillSwitch(signedKillSwitchBytes)
-        if after != before {
+        let transitioned = after != before
+        killSwitchLock.unlock()
+        // Fire outside the lock so a host callback can't re-enter and deadlock.
+        if transitioned {
             lock.lock(); let cb = _onKillSwitchChanged; lock.unlock()
             cb?(after)
         }
@@ -355,15 +374,18 @@ public final class KsealDesktop {
     /// drive it directly without the timer.
     func runReattestCycle() {
         guard let assessment = try? evaluateRisk() else { return }
-        let decision = core.decision(assessment.riskBits)
+        // One core read yields a consistent (level, decision) pair even if a
+        // config reload races this cycle; both feed the hook and the escalation
+        // gate below.
+        let (level, decision) = core.decisionWithLevel(assessment.riskBits)
         lock.lock(); let cb = _onTrustDecision; lock.unlock()
-        cb?(assessment.trustLevel, decision)
+        cb?(level, decision)
         // Baseline re-validation: refresh the signed config (default provider
         // returns nil and falls back to cache — no network).
         refreshConfig()
         // Escalation: at .mediumRisk or above, also pull + apply the latest kill
         // switch so a server-driven forced degrade surfaces promptly.
-        if assessment.trustLevel.rawValue >= TrustLevel.mediumRisk.rawValue {
+        if level.rawValue >= TrustLevel.mediumRisk.rawValue {
             _ = refreshKillSwitch()
         }
     }

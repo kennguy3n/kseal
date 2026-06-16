@@ -104,6 +104,11 @@ protocol TrustCore: AnyObject {
     /// Maps `riskBits` to a `TrustDecision` using the exact mapping the server
     /// applies (`risk.Decision`). `.allow` when no policy is loaded.
     func decision(_ riskBits: UInt64) -> TrustDecision
+    /// Resolves the `TrustLevel` and host-facing `TrustDecision` for `riskBits`
+    /// atomically under a single policy read, so a concurrent config swap can't
+    /// surface a mismatched pair. `(.unspecified, .allow)` when no policy is
+    /// loaded or on an internal error.
+    func decisionWithLevel(_ riskBits: UInt64) -> (TrustLevel, TrustDecision)
     /// Verifies + applies a serialized `kseal.v1.SignedKillSwitch`; returns the
     /// resulting killed state. Fail-safe: a forged/absent command never disables
     /// the app, only an Ed25519-valid `DISABLE` does (a valid `ENABLE` lifts it).
@@ -361,6 +366,18 @@ final class NativeTrustCore: TrustCore {
             // SDK never blocks the host on its own.
             let code = kseal_decision(handle, riskBits)
             return code < 0 ? .allow : TrustDecision(code: code)
+        }
+    }
+
+    func decisionWithLevel(_ riskBits: UInt64) -> (TrustLevel, TrustDecision) {
+        coreQueue.sync {
+            var level: Int32 = 0
+            var decision: Int32 = 0
+            let status = kseal_decision_with_level(handle, riskBits, &level, &decision)
+            // A non-Ok status is an internal error; fail open so the SDK never
+            // blocks the host on its own.
+            guard status == 0 else { return (.unspecified, .allow) }
+            return (TrustLevel(code: level), TrustDecision(code: decision))
         }
     }
 

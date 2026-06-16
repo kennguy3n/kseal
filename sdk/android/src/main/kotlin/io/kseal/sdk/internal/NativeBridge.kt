@@ -110,6 +110,12 @@ internal object NativeBridge {
     /** Returns the `Decision` discriminant (0..3), or a negative status on error. */
     external fun nativeDecision(handle: Long, riskBits: Long): Int
 
+    /**
+     * Resolves the `[trustLevel, decision]` discriminant pair atomically under a
+     * single policy read, or returns `null` on error.
+     */
+    external fun nativeDecisionWithLevel(handle: Long, riskBits: Long): IntArray?
+
     /** Returns 1 (killed) / 0 (not killed), or a negative status on bad args. */
     external fun nativeApplyKillSwitch(handle: Long, bytes: ByteArray): Int
 

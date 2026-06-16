@@ -105,6 +105,12 @@ class KsealSDK internal constructor(
     private var scheduler: ScheduledExecutorService? = null
     private var reattestTask: ScheduledFuture<*>? = null
 
+    // Serializes the read-apply-compare in [applyKillSwitch] so concurrent
+    // callers (the heartbeat and a direct host call) can't each observe a stale
+    // `before` and double- or miss-fire [onKillSwitchChanged]. The core state is
+    // always correct on its own; this only guards the transition notification.
+    private val killSwitchLock = Any()
+
     /**
      * Active-response hook (Phase 3.2). Invoked with the locally re-computed
      * trust decision — using the exact mapping the server applies
@@ -265,7 +271,9 @@ class KsealSDK internal constructor(
      */
     fun evaluateTrustDecision(): Pair<TrustLevel, Decision> {
         val assessment = evaluateRisk()
-        return assessment.trustLevel to core.decision(assessment.riskBits)
+        // Resolve level + decision in one core read so a concurrent config swap
+        // can't surface a mismatched pair (e.g. HIGH_RISK with ALLOW).
+        return core.decisionWithLevel(assessment.riskBits)
     }
 
     /**
@@ -276,9 +284,15 @@ class KsealSDK internal constructor(
      * [isKilled] state and fires [onKillSwitchChanged] on a transition.
      */
     fun applyKillSwitch(signedKillSwitchBytes: ByteArray): Boolean {
-        val before = core.isKilled()
-        val after = core.applyKillSwitch(signedKillSwitchBytes)
-        if (after != before) onKillSwitchChanged?.invoke(after)
+        val after: Boolean
+        val transitioned: Boolean
+        synchronized(killSwitchLock) {
+            val before = core.isKilled()
+            after = core.applyKillSwitch(signedKillSwitchBytes)
+            transitioned = after != before
+        }
+        // Fire outside the lock so a host callback can't re-enter and deadlock.
+        if (transitioned) onKillSwitchChanged?.invoke(after)
         return after
     }
 
@@ -317,12 +331,14 @@ class KsealSDK internal constructor(
         return true
     }
 
-    /** Stops the periodic heartbeat. The SDK remains usable on demand. */
+    /**
+     * Stops the periodic heartbeat and releases its executor thread, so no
+     * `kseal-reattest` daemon lingers while continuous mode is off (matching the
+     * iOS/macOS timer release). A later [startContinuousProtection] spins up a
+     * fresh executor. The SDK remains usable on demand.
+     */
     fun stopContinuousProtection() {
-        synchronized(schedulerLock) {
-            reattestTask?.cancel(false)
-            reattestTask = null
-        }
+        shutdownScheduler()
     }
 
     /**
@@ -342,13 +358,17 @@ class KsealSDK internal constructor(
      */
     internal fun runReattestCycle() {
         val assessment = evaluateRisk()
-        onTrustDecision?.invoke(assessment.trustLevel, core.decision(assessment.riskBits))
+        // One core read yields a consistent (level, decision) pair even if a
+        // config reload races this cycle; both feed the host hook and the
+        // escalation gate below.
+        val (level, decision) = core.decisionWithLevel(assessment.riskBits)
+        onTrustDecision?.invoke(level, decision)
         // Baseline re-validation: refresh the signed config. The default
         // provider returns null and falls back to cache (no network).
         refreshConfig()
         // Escalation: at MEDIUM_RISK or above, also pull + apply the latest
         // kill switch so a server-driven forced degrade surfaces promptly.
-        if (assessment.trustLevel.code >= TrustLevel.MEDIUM_RISK.code) {
+        if (level.code >= TrustLevel.MEDIUM_RISK.code) {
             refreshKillSwitch()
         }
     }

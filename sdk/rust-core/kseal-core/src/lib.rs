@@ -410,6 +410,31 @@ impl KsealCore {
         }
     }
 
+    /// Atomically resolves both the composite [`TrustLevel`] and the host-facing
+    /// [`Decision`] for `signals` under a single read of the active policy,
+    /// returning `(Unspecified, Allow)` when no policy is loaded.
+    ///
+    /// The platform SDKs deliver this pair to `onTrustDecision` together. Doing
+    /// the level and decision derivation under one lock acquisition guarantees
+    /// they reflect the *same* policy snapshot — calling
+    /// [`trust_level_for`](Self::trust_level_for) and [`decision`](Self::decision)
+    /// separately could otherwise straddle a concurrent
+    /// [`load_config`](Self::load_config) and surface a mismatched pair
+    /// (e.g. `(HIGH_RISK, ALLOW)`).
+    #[must_use]
+    pub fn decision_with_level(&self, signals: RiskBitset) -> (TrustLevel, Decision) {
+        match self.read_state().engine.as_ref() {
+            Some(engine) => {
+                let p = engine.policy();
+                let score =
+                    RiskScore::compute(p.filter_signals(signals), &p.config().signal_weights).score;
+                let level = p.trust_level_for_score(score);
+                (level, policy::decision(level, p.default_mode()))
+            }
+            None => (TrustLevel::Unspecified, Decision::Allow),
+        }
+    }
+
     /// Applies a server-issued [`SignedKillSwitch`] (protobuf bytes), updating
     /// the [`is_killed`](Self::is_killed) state, and returns the resulting
     /// killed flag.
@@ -702,6 +727,10 @@ mod tests {
         // No policy -> nothing to enforce.
         let core = core_with(&sk);
         assert_eq!(core.decision(RiskBitset::ROOT), Decision::Allow);
+        assert_eq!(
+            core.decision_with_level(RiskBitset::ROOT),
+            (crate::proto::TrustLevel::Unspecified, Decision::Allow)
+        );
 
         // Block mode: ROOT (100) -> HIGH_RISK -> Deny; DEBUGGER (50) -> MEDIUM -> StepUp.
         let core = core_with(&sk);
@@ -710,6 +739,22 @@ mod tests {
         assert_eq!(core.decision(RiskBitset::ROOT), Decision::Deny);
         assert_eq!(core.decision(RiskBitset::DEBUGGER), Decision::StepUp);
         assert_eq!(core.decision(RiskBitset::empty()), Decision::Allow);
+
+        // decision_with_level returns the same decision as decision(), plus the
+        // matching level, from a single policy read.
+        use crate::proto::TrustLevel;
+        assert_eq!(
+            core.decision_with_level(RiskBitset::ROOT),
+            (TrustLevel::HighRisk, Decision::Deny)
+        );
+        assert_eq!(
+            core.decision_with_level(RiskBitset::DEBUGGER),
+            (TrustLevel::MediumRisk, Decision::StepUp)
+        );
+        assert_eq!(
+            core.decision_with_level(RiskBitset::empty()),
+            (TrustLevel::Trusted, Decision::Allow)
+        );
 
         // Observe mode never denies.
         let core = core_with(&sk);
