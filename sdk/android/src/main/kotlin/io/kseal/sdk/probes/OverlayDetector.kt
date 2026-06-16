@@ -72,6 +72,13 @@ internal class OverlayDetector(private val env: DeviceEnvironment) : Probe {
             "com.lge.",
             "com.sonymobile.",
             "com.motorola.",
+            "com.asus.",            // ASUS / ROG
+            "com.nothing.",         // Nothing
+            "com.transsion.",       // Transsion (Tecno / Infinix / itel)
+            "com.tecno.",
+            "com.infinix.",
+            "com.zte.",
+            "com.lenovo.",
         )
     }
 }

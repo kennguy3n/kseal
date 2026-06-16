@@ -31,6 +31,9 @@ class OverlayDetectorTest {
                 "com.google.android.marvin.talkback",
                 "com.samsung.android.app.cocktailbarservice",
                 "com.miui.home",
+                "com.asus.systemui",
+                "com.transsion.overlay",
+                "com.lenovo.launcher",
             )
         }
         assertTrue(OverlayDetector(env).evaluate().isEmpty())
