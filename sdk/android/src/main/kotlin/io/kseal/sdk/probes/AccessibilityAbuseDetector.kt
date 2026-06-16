@@ -52,12 +52,27 @@ internal class AccessibilityAbuseDetector(private val env: DeviceEnvironment) : 
         pkg in BENIGN_PACKAGES || SYSTEM_PACKAGE_PREFIXES.any { pkg.startsWith(it) }
 
     private companion object {
-        /** Platform / major-OEM namespaces whose accessibility services are first-party. */
+        /**
+         * Platform / major-OEM namespaces whose accessibility services are
+         * first-party. Covering the large non-Pixel/Samsung OEMs (Huawei, Xiaomi,
+         * OnePlus, Oppo/ColorOS, Vivo) keeps the bit from firing on their shipped
+         * assistive services and skewing scoring calibration on those populations.
+         * Prefix trust is spoofable by a sideloaded app, but that is acceptable
+         * here for the same reason the rest of the check is — the signal is fused,
+         * not trusted in isolation (see class doc).
+         */
         val SYSTEM_PACKAGE_PREFIXES = listOf(
             "com.android.",
             "com.google.android.",
             "com.samsung.",
             "com.sec.android.",
+            "com.huawei.",
+            "com.xiaomi.",
+            "com.miui.",
+            "com.oneplus.",
+            "com.oppo.",
+            "com.coloros.",
+            "com.vivo.",
         )
 
         /**

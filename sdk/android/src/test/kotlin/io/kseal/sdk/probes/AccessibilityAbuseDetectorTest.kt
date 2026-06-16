@@ -51,6 +51,27 @@ class AccessibilityAbuseDetectorTest {
     }
 
     @Test
+    fun xiaomiMiuiOemAccessibilityServiceIsBenign() {
+        val env = FakeDeviceEnvironment()
+        env.accessibilityServices = listOf(
+            "com.miui.accessibility/com.miui.accessibility.asr.SomeService",
+        )
+        assertTrue(AccessibilityAbuseDetector(env).evaluate().isEmpty())
+    }
+
+    @Test
+    fun otherMajorOemAccessibilityServicesAreBenign() {
+        val env = FakeDeviceEnvironment()
+        env.accessibilityServices = listOf(
+            "com.huawei.accessibility/com.huawei.accessibility.SomeService",
+            "com.oneplus.accessibility/com.oneplus.accessibility.SomeService",
+            "com.coloros.accessibility/com.coloros.accessibility.SomeService",
+            "com.vivo.accessibility/com.vivo.accessibility.SomeService",
+        )
+        assertTrue(AccessibilityAbuseDetector(env).evaluate().isEmpty())
+    }
+
+    @Test
     fun bareAndroidFrameworkPackageIsBenign() {
         val env = FakeDeviceEnvironment()
         env.accessibilityServices = listOf("android/android.SomeFrameworkService")
