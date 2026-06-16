@@ -98,6 +98,14 @@ object ScreenCapturePolicy {
      * registers an `Activity.ScreenCaptureCallback` to latch screenshots.
      */
     fun registerActivity(activity: Activity) {
+        // Release any callback still registered on a previously-registered
+        // Activity first: re-registering without a matching unregisterActivity
+        // (e.g. two Activities registering concurrently) would otherwise orphan
+        // the earlier Activity's ScreenCaptureCallback.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            activityRef?.get()?.let { unregisterScreenCaptureCallback(it) }
+        }
+        screenCaptureCallback = null
         activityRef = WeakReference(activity)
         contextRef = WeakReference(activity.applicationContext)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
@@ -147,6 +155,27 @@ object ScreenCapturePolicy {
         screenshotObserved.set(false)
     }
 
+    /**
+     * Resets all host-supplied state: unregisters any API-34 screenshot
+     * callback, drops the stored `Activity`/`Context`, and clears the latched
+     * screenshot observation and `FLAG_SECURE` record.
+     *
+     * [ScreenCapturePolicy] is a process-level singleton the SDK never wires up,
+     * so its state would otherwise outlive a `KsealSDK.shutdown()` and leak into
+     * a subsequent re-init (or across tests). The host should call this from its
+     * shutdown path; the SDK deliberately does not reach into this object.
+     */
+    fun reset() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            activityRef?.get()?.let { unregisterScreenCaptureCallback(it) }
+        }
+        screenCaptureCallback = null
+        activityRef = null
+        contextRef = null
+        screenshotObserved.set(false)
+        secureFlagApplied.set(false)
+    }
+
     /** Runs the fused detection; never throws (a failure means "not observed"). */
     internal fun evaluate(): Set<RiskSignal> = runCatching {
         assess(displaySnapshots(), screenshotObserved.get())
@@ -183,9 +212,19 @@ object ScreenCapturePolicy {
         return manager.displays.orEmpty().map { it.toSnapshot() }
     }
 
+    /**
+     * Treats every display state except [Display.STATE_OFF] as powered on.
+     * A MediaProjection/virtual recording display can report
+     * [Display.STATE_UNKNOWN] (and external sinks may report `DOZE`/`VR`/
+     * `ON_SUSPEND`) instead of [Display.STATE_ON]; matching only `STATE_ON`
+     * would miss those captures, so we cast the wider net and let the
+     * `displayId`/secure-flag checks in [isUnprotectedMirrorSink] gate the rest.
+     */
+    internal fun isDisplayPoweredOn(state: Int): Boolean = state != Display.STATE_OFF
+
     private fun Display.toSnapshot(): DisplaySnapshot = DisplaySnapshot(
         displayId = displayId,
-        isOn = state == Display.STATE_ON,
+        isOn = isDisplayPoweredOn(state),
         isSecure = (flags and Display.FLAG_SECURE) != 0,
         isPresentation = (flags and Display.FLAG_PRESENTATION) != 0,
         isPrivate = (flags and Display.FLAG_PRIVATE) != 0,

@@ -1,5 +1,6 @@
 package io.kseal.sdk.probes
 
+import android.view.Display
 import io.kseal.sdk.RiskSignal
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -39,7 +40,7 @@ class ScreenCaptureDetectorTest {
 
     @After
     fun tearDown() {
-        ScreenCapturePolicy.clearScreenshotObservation()
+        ScreenCapturePolicy.reset()
     }
 
     @Test
@@ -107,5 +108,28 @@ class ScreenCaptureDetectorTest {
         assertFalse(ScreenCapturePolicy.isUnprotectedMirrorSink(display(id = 2, isSecure = true)))
         assertFalse(ScreenCapturePolicy.isUnprotectedMirrorSink(display(id = 2, isOn = false)))
         assertTrue(ScreenCapturePolicy.isUnprotectedMirrorSink(display(id = 2)))
+    }
+
+    @Test
+    fun onlyPoweredOffDisplaysAreTreatedAsOff() {
+        // A recording virtual display can report STATE_UNKNOWN (and external
+        // sinks DOZE/VR/ON_SUSPEND); every non-OFF state must count as on so the
+        // capture is not missed.
+        assertFalse(ScreenCapturePolicy.isDisplayPoweredOn(Display.STATE_OFF))
+        assertTrue(ScreenCapturePolicy.isDisplayPoweredOn(Display.STATE_ON))
+        assertTrue(ScreenCapturePolicy.isDisplayPoweredOn(Display.STATE_UNKNOWN))
+        assertTrue(ScreenCapturePolicy.isDisplayPoweredOn(Display.STATE_DOZE))
+        assertTrue(ScreenCapturePolicy.isDisplayPoweredOn(Display.STATE_DOZE_SUSPEND))
+        assertTrue(ScreenCapturePolicy.isDisplayPoweredOn(Display.STATE_ON_SUSPEND))
+        assertTrue(ScreenCapturePolicy.isDisplayPoweredOn(Display.STATE_VR))
+    }
+
+    @Test
+    fun resetClearsLatchedScreenshotObservation() {
+        ScreenCapturePolicy.onScreenCaptured()
+        assertTrue(RiskSignal.SCREEN_CAPTURE in ScreenCaptureDetector().evaluate())
+
+        ScreenCapturePolicy.reset()
+        assertTrue(ScreenCaptureDetector().evaluate().isEmpty())
     }
 }
