@@ -23,18 +23,18 @@ class OverlayDetectorTest {
 
     @Test
     fun onlySystemOverlayAppsAreClean() {
+        val systemHolders = listOf(
+            "android",
+            "com.android.systemui",
+            "com.google.android.apps.nexuslauncher",
+            "com.google.android.marvin.talkback",
+            "com.samsung.android.app.cocktailbarservice",
+            "com.miui.home",
+            "com.asus.systemui",
+        )
         val env = FakeDeviceEnvironment().apply {
-            overlayPackages = listOf(
-                "android",
-                "com.android.systemui",
-                "com.google.android.apps.nexuslauncher",
-                "com.google.android.marvin.talkback",
-                "com.samsung.android.app.cocktailbarservice",
-                "com.miui.home",
-                "com.asus.systemui",
-                "com.transsion.overlay",
-                "com.lenovo.launcher",
-            )
+            overlayPackages = systemHolders
+            systemPackages = systemHolders.toSet()
         }
         assertTrue(OverlayDetector(env).evaluate().isEmpty())
     }
@@ -42,10 +42,8 @@ class OverlayDetectorTest {
     @Test
     fun thirdPartyAmongSystemAppsIsOverlayAbuse() {
         val env = FakeDeviceEnvironment().apply {
-            overlayPackages = listOf(
-                "com.android.systemui",
-                "com.facebook.katana",
-            )
+            overlayPackages = listOf("com.android.systemui", "com.facebook.katana")
+            systemPackages = setOf("com.android.systemui")
         }
         val signals = OverlayDetector(env).evaluate()
         assertTrue(RiskSignal.OVERLAY_ABUSE in signals)
@@ -59,10 +57,25 @@ class OverlayDetectorTest {
         assertTrue(OverlayDetector(env).evaluate().isEmpty())
     }
 
+    /**
+     * Regression guard for the spoofing gap: a user-installed app that adopts an
+     * OEM-looking package name is *not* reported as a system app by the OS, so it
+     * must still be flagged (trust is keyed off `FLAG_SYSTEM`, not the name).
+     */
     @Test
-    fun ownHostPackageOverlayIsClean() {
+    fun spoofedOemPackageNameIsStillOverlayAbuse() {
         val env = FakeDeviceEnvironment().apply {
-            overlayPackages = listOf("io.kseal.sdk.testhost")
+            overlayPackages = listOf("com.samsung.android.malware")
+            systemPackages = emptySet()
+        }
+        assertEquals(setOf(RiskSignal.OVERLAY_ABUSE), OverlayDetector(env).evaluate())
+    }
+
+    @Test
+    fun updatedSystemAppHolderIsClean() {
+        val env = FakeDeviceEnvironment().apply {
+            overlayPackages = listOf("com.android.chrome")
+            systemPackages = setOf("com.android.chrome")
         }
         val signals = OverlayDetector(env).evaluate()
         assertFalse(RiskSignal.OVERLAY_ABUSE in signals)

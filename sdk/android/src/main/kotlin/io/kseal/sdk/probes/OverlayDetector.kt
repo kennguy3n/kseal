@@ -9,13 +9,16 @@ import io.kseal.sdk.RiskSignal
  * protected app ([RiskSignal.OVERLAY_ABUSE]).
  *
  * It enumerates [DeviceEnvironment.appsWithOverlayPermission] (which already
- * excludes the host app) and flags [RiskSignal.OVERLAY_ABUSE] when a package
- * that is *not* a known system / launcher / accessibility-framework component
- * holds the permission. Those first-party surfaces (SystemUI, launchers, OEM
- * system overlays, the accessibility/IME framework) routinely and legitimately
- * hold `SYSTEM_ALERT_WINDOW`, so they are excluded to keep the false-positive
- * rate low; the check is intentionally conservative and treats only third-party
- * packages outside those namespaces as the abuse pre-condition.
+ * excludes the host app) and flags [RiskSignal.OVERLAY_ABUSE] when a holder is
+ * *not* an OS-installed system app. Trust is established via
+ * [DeviceEnvironment.isSystemPackage] — backed by `ApplicationInfo.FLAG_SYSTEM` /
+ * `FLAG_UPDATED_SYSTEM_APP` — rather than by matching package-name prefixes.
+ * That distinction matters: first-party surfaces (SystemUI, launchers, OEM
+ * system overlays, the accessibility/IME framework) ship on the system partition
+ * and so are reported as system apps, keeping the false-positive rate low, while
+ * a user-installed app cannot evade detection merely by adopting a
+ * system-looking package name (e.g. `com.samsung.android.<anything>`) — the flag
+ * reflects the install partition, not the chosen name.
  *
  * This is a fusion-weighted risk signal, not an auto-block: the server combines
  * it with other signals before deciding. The definitive per-touch confirmation
@@ -31,54 +34,14 @@ internal class OverlayDetector(private val env: DeviceEnvironment) : Probe {
         return if (abusive) setOf(RiskSignal.OVERLAY_ABUSE) else emptySet()
     }
 
-    /** True when [pkg] is a non-system, third-party holder of the overlay permission. */
+    /**
+     * True when [pkg] is a non-system, third-party holder of the overlay
+     * permission. Blank entries are ignored; everything that the OS does not
+     * report as a system app is treated as the tapjacking pre-condition.
+     */
     private fun isThirdPartyOverlay(pkg: String): Boolean {
         val name = pkg.trim()
         if (name.isEmpty()) return false
-        if (name in SYSTEM_PACKAGES) return false
-        return SYSTEM_PREFIXES.none { name.startsWith(it) }
-    }
-
-    private companion object {
-        /** Exact first-party packages that routinely hold `SYSTEM_ALERT_WINDOW`. */
-        val SYSTEM_PACKAGES = setOf(
-            "android",
-        )
-
-        /**
-         * Package-name prefixes for first-party / OEM system, launcher, and
-         * accessibility-framework components that legitimately draw overlays.
-         * Conservative by design: a package outside every one of these
-         * namespaces that still holds the overlay permission is treated as the
-         * tapjacking pre-condition.
-         */
-        val SYSTEM_PREFIXES = listOf(
-            "io.kseal.",            // our own SDK / host namespace (defensive)
-            "android.",
-            "com.android.",         // AOSP: systemui, launcher, settings, ...
-            "com.google.android.",  // GMS, SystemUI, Pixel launcher, TalkBack, ...
-            "com.samsung.android.", // Samsung One UI system surfaces
-            "com.sec.android.",     // Samsung legacy system surfaces
-            "com.miui.",            // Xiaomi MIUI system UI
-            "com.xiaomi.",
-            "com.huawei.",
-            "com.hihonor.",
-            "com.oppo.",
-            "com.coloros.",
-            "com.oneplus.",
-            "com.realme.",
-            "com.vivo.",
-            "com.bbk.",
-            "com.lge.",
-            "com.sonymobile.",
-            "com.motorola.",
-            "com.asus.",            // ASUS / ROG
-            "com.nothing.",         // Nothing
-            "com.transsion.",       // Transsion (Tecno / Infinix / itel)
-            "com.tecno.",
-            "com.infinix.",
-            "com.zte.",
-            "com.lenovo.",
-        )
+        return !env.isSystemPackage(name)
     }
 }

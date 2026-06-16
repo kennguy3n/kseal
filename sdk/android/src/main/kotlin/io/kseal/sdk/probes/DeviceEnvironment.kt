@@ -91,6 +91,17 @@ interface DeviceEnvironment {
      */
     fun appsWithOverlayPermission(): List<String>
 
+    /**
+     * Whether [packageName] is an OS-installed system app — i.e. its
+     * `ApplicationInfo` carries `FLAG_SYSTEM` or `FLAG_UPDATED_SYSTEM_APP`.
+     *
+     * Unlike a package-name match, this reflects the partition the package was
+     * installed from and therefore cannot be forged by a user-installed app
+     * simply choosing a system-looking package name. Returns `false` when the
+     * package is unknown / not a system app, or when the lookup is unavailable.
+     */
+    fun isSystemPackage(packageName: String): Boolean
+
     /** Whether ADB (`Settings.Global.ADB_ENABLED`) is enabled on the device. */
     fun isAdbEnabled(): Boolean
 }
