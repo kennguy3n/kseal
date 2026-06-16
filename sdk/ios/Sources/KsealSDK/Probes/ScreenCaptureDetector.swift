@@ -10,7 +10,9 @@ import UIKit
 ///
 ///  1. **Active capture** — `UIScreen.main.isCaptured` is `true` while the
 ///     screen is being recorded or mirrored (ReplayKit, AirPlay, QuickTime).
-///     This is the primary signal and is read fresh on every `evaluate()`.
+///     `UIScreen.main` is main-thread-only, so the monitor samples it on the
+///     main thread (at init and on `UIScreen.capturedDidChangeNotification`),
+///     caches the value, and lets `evaluate()` read the cache from any thread.
 ///  2. **Screenshots** — `UIApplication.userDidTakeScreenshotNotification`
 ///     fires *after* the user grabs a still; the monitor observes it within
 ///     this file and latches the observation until cleared.
@@ -34,8 +36,8 @@ struct ScreenCaptureDetector: Probe {
 }
 
 /// Tracks live screen-capture state for the `screen_capture` probe. A single
-/// shared instance observes screenshot notifications for the process lifetime;
-/// `UIScreen.isCaptured` is sampled on demand.
+/// shared instance observes screenshot and capture-change notifications for the
+/// process lifetime, caching `UIScreen.isCaptured` from the main thread.
 final class ScreenCaptureMonitor {
     static let shared = ScreenCaptureMonitor()
 
@@ -43,16 +45,26 @@ final class ScreenCaptureMonitor {
     private var screenshotObserved = false
 
     #if canImport(UIKit)
+    /// Cached `UIScreen.main.isCaptured`. Written only on the main thread (the
+    /// initial sample and `capturedDidChangeNotification`) and read under
+    /// `lock` from any thread by `evaluate()`. Caching keeps the probe pipeline
+    /// off the main-thread-only `UIScreen.main`, which would otherwise trip the
+    /// Main Thread Checker in debug builds.
+    private var captured = false
     private var screenshotObserver: NSObjectProtocol?
+    private var captureObserver: NSObjectProtocol?
     #endif
 
     private init() {
-        beginObservingScreenshots()
+        beginObserving()
     }
 
     deinit {
         #if canImport(UIKit)
         if let observer = screenshotObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = captureObserver {
             NotificationCenter.default.removeObserver(observer)
         }
         #endif
@@ -89,20 +101,43 @@ final class ScreenCaptureMonitor {
 
     private func isScreenCaptured() -> Bool {
         #if canImport(UIKit)
-        return UIScreen.main.isCaptured
+        lock.lock(); defer { lock.unlock() }
+        return captured
         #else
         return false
         #endif
     }
 
-    private func beginObservingScreenshots() {
+    #if canImport(UIKit)
+    /// Stores the latest capture state. Only ever called on the main thread.
+    private func setCaptured(_ value: Bool) {
+        lock.lock(); defer { lock.unlock() }
+        captured = value
+    }
+    #endif
+
+    private func beginObserving() {
         #if canImport(UIKit)
         screenshotObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.userDidTakeScreenshotNotification,
             object: nil,
-            queue: nil
+            queue: .main
         ) { [weak self] _ in
             self?.recordScreenshot()
+        }
+        captureObserver = NotificationCenter.default.addObserver(
+            forName: UIScreen.capturedDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.setCaptured(UIScreen.main.isCaptured)
+        }
+        // Seed the initial value on the main thread.
+        let sampleInitial = { [weak self] in self?.setCaptured(UIScreen.main.isCaptured) }
+        if Thread.isMainThread {
+            sampleInitial()
+        } else {
+            DispatchQueue.main.async(execute: sampleInitial)
         }
         #endif
     }
