@@ -131,7 +131,11 @@ func TestIntegrationSuccessRespectsAllowListAndPrivacy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ex := NewExporter(st, fastConfig(), m)
+	// srv.Client() reaches the loopback sink, opting out of the production SSRF
+	// guard that blocks private/loopback export targets.
+	cfg := fastConfig()
+	cfg.HTTPClient = srv.Client()
+	ex := NewExporter(st, cfg, m)
 	defer ex.Stop()
 
 	ev := sampleEvent()
@@ -181,7 +185,9 @@ func TestIntegrationRetryThenSucceedReusesIdempotencyKey(t *testing.T) {
 	registerSplunk(t, st, "t-1", srv.URL, nil)
 
 	m, _ := NewMetrics()
-	ex := NewExporter(st, fastConfig(), m)
+	cfg := fastConfig()
+	cfg.HTTPClient = srv.Client()
+	ex := NewExporter(st, cfg, m)
 	defer ex.Stop()
 
 	ev := sampleEvent()
@@ -213,7 +219,9 @@ func TestIntegrationPermanentFailureDeadLetters(t *testing.T) {
 	registerSplunk(t, st, "t-1", srv.URL, nil)
 
 	m, _ := NewMetrics()
-	ex := NewExporter(st, fastConfig(), m)
+	cfg := fastConfig()
+	cfg.HTTPClient = srv.Client()
+	ex := NewExporter(st, cfg, m)
 	defer ex.Stop()
 
 	ev := sampleEvent()
@@ -241,6 +249,7 @@ func TestIntegrationExhaustedRetriesDeadLetters(t *testing.T) {
 
 	m, _ := NewMetrics()
 	cfg := fastConfig()
+	cfg.HTTPClient = srv.Client()
 	ex := NewExporter(st, cfg, m)
 	defer ex.Stop()
 

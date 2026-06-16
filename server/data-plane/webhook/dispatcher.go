@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -13,6 +14,7 @@ import (
 	"github.com/kennguy3n/kseal/server/control-plane/registry"
 	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
 	"github.com/kennguy3n/kseal/server/shared/crypto"
+	"github.com/kennguy3n/kseal/server/shared/safehttp"
 	"github.com/kennguy3n/kseal/server/shared/telemetry"
 )
 
@@ -25,6 +27,12 @@ type DispatcherConfig struct {
 	BreakerTrip  int           // consecutive failures before opening a breaker
 	BreakerReset time.Duration // how long a breaker stays open
 	Timeout      time.Duration // per-attempt HTTP timeout
+
+	// HTTPClient overrides the outbound client. Production leaves this nil and
+	// gets an SSRF-hardened client (safehttp.Client) that refuses to deliver to
+	// private/loopback/link-local addresses; tests inject a permissive client to
+	// reach a loopback httptest server.
+	HTTPClient *http.Client
 }
 
 func (c *DispatcherConfig) withDefaults() {
@@ -85,9 +93,13 @@ type Dispatcher struct {
 // NewDispatcher builds and starts a dispatcher.
 func NewDispatcher(store registry.Store, cfg DispatcherConfig, metrics *telemetry.Metrics) *Dispatcher {
 	cfg.withDefaults()
+	client := cfg.HTTPClient
+	if client == nil {
+		client = safehttp.Client(cfg.Timeout)
+	}
 	d := &Dispatcher{
 		store:   store,
-		client:  &http.Client{Timeout: cfg.Timeout},
+		client:  client,
 		cfg:     cfg,
 		metrics: metrics,
 		queue:   make(chan job, cfg.QueueSize),
@@ -187,6 +199,8 @@ func (d *Dispatcher) deliver(j job) {
 
 	resp, err := d.client.Do(req)
 	if err == nil {
+		// Drain (bounded) before closing so the connection can be reused.
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
 		_ = resp.Body.Close()
 	}
 	if err == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {

@@ -53,7 +53,9 @@ func TestE2EWebhook(t *testing.T) {
 
 		wh := registerWebhook(t, store, tenant.Id, srv.URL, eventType)
 
-		d := webhook.NewDispatcher(store, webhook.DispatcherConfig{Workers: 2, BaseBackoff: 10 * time.Millisecond}, nil)
+		// srv.Client() reaches the loopback test server, opting out of the
+		// production SSRF guard that blocks private/loopback delivery targets.
+		d := webhook.NewDispatcher(store, webhook.DispatcherConfig{Workers: 2, BaseBackoff: 10 * time.Millisecond, HTTPClient: srv.Client()}, nil)
 		defer d.Stop()
 
 		const payload = `{"alert":"root detected"}`
@@ -103,6 +105,7 @@ func TestE2EWebhook(t *testing.T) {
 		const maxAttempts = 3
 		d := webhook.NewDispatcher(store, webhook.DispatcherConfig{
 			Workers: 2, MaxAttempts: maxAttempts, BaseBackoff: 10 * time.Millisecond, BreakerTrip: 100,
+			HTTPClient: srv.Client(),
 		}, nil)
 		defer d.Stop()
 

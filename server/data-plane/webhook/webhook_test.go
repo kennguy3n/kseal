@@ -59,6 +59,18 @@ func TestWebhookServiceCrossTenantDenied(t *testing.T) {
 	}
 }
 
+func TestWebhookServiceRejectsNonHTTPURL(t *testing.T) {
+	store, tn := newStore(t)
+	svc := NewService(store)
+	ctx := auth.WithTenant(context.Background(), tn.Id)
+	for _, url := range []string{"file:///etc/passwd", "gopher://x", "not-a-url"} {
+		_, err := svc.RegisterWebhook(ctx, connect.NewRequest(&ksealv1.RegisterWebhookRequest{TenantId: tn.Id, Url: url}))
+		if connect.CodeOf(err) != connect.CodeInvalidArgument {
+			t.Fatalf("Url=%q: expected InvalidArgument, got %v", url, err)
+		}
+	}
+}
+
 func TestDispatcherSignsAndDelivers(t *testing.T) {
 	store, tn := newStore(t)
 	type received struct {
@@ -77,7 +89,9 @@ func TestDispatcherSignsAndDelivers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d := NewDispatcher(store, DispatcherConfig{Workers: 1, MaxAttempts: 3, BaseBackoff: time.Millisecond}, nil)
+	// srv.Client() targets the loopback test server, opting out of the
+	// production SSRF guard that would otherwise block 127.0.0.1.
+	d := NewDispatcher(store, DispatcherConfig{Workers: 1, MaxAttempts: 3, BaseBackoff: time.Millisecond, HTTPClient: srv.Client()}, nil)
 	defer d.Stop()
 
 	if err := d.Dispatch(context.Background(), Event{TenantID: tn.Id, Type: ksealv1.EventType_EVENT_TYPE_ROOT_RISK, Payload: `{"hello":"world"}`}); err != nil {
@@ -119,7 +133,7 @@ func TestDispatcherSubmitDelivers(t *testing.T) {
 	if _, err := store.CreateWebhook(context.Background(), tn.Id, srv.URL, []ksealv1.EventType{ksealv1.EventType_EVENT_TYPE_ROOT_RISK}); err != nil {
 		t.Fatal(err)
 	}
-	d := NewDispatcher(store, DispatcherConfig{Workers: 1, MaxAttempts: 1, BaseBackoff: time.Millisecond}, nil)
+	d := NewDispatcher(store, DispatcherConfig{Workers: 1, MaxAttempts: 1, BaseBackoff: time.Millisecond, HTTPClient: srv.Client()}, nil)
 	defer d.Stop()
 
 	// Submit is the async, non-blocking entry point used by the ingest writer:
@@ -149,7 +163,7 @@ func TestDispatcherStopWithPendingRetryNoPanic(t *testing.T) {
 	if _, err := store.CreateWebhook(context.Background(), tn.Id, srv.URL, []ksealv1.EventType{ksealv1.EventType_EVENT_TYPE_DEBUGGER}); err != nil {
 		t.Fatal(err)
 	}
-	d := NewDispatcher(store, DispatcherConfig{Workers: 1, MaxAttempts: 5, BaseBackoff: 50 * time.Millisecond}, nil)
+	d := NewDispatcher(store, DispatcherConfig{Workers: 1, MaxAttempts: 5, BaseBackoff: 50 * time.Millisecond, HTTPClient: srv.Client()}, nil)
 	_ = d.Dispatch(context.Background(), Event{TenantID: tn.Id, Type: ksealv1.EventType_EVENT_TYPE_DEBUGGER, Payload: "{}"})
 	time.Sleep(10 * time.Millisecond) // let the first attempt fail and schedule a retry
 	d.Stop()
@@ -172,7 +186,7 @@ func TestDispatcherRetriesThenSucceeds(t *testing.T) {
 	if _, err := store.CreateWebhook(context.Background(), tn.Id, srv.URL, []ksealv1.EventType{ksealv1.EventType_EVENT_TYPE_DEBUGGER}); err != nil {
 		t.Fatal(err)
 	}
-	d := NewDispatcher(store, DispatcherConfig{Workers: 1, MaxAttempts: 3, BaseBackoff: time.Millisecond}, nil)
+	d := NewDispatcher(store, DispatcherConfig{Workers: 1, MaxAttempts: 3, BaseBackoff: time.Millisecond, HTTPClient: srv.Client()}, nil)
 	defer d.Stop()
 	_ = d.Dispatch(context.Background(), Event{TenantID: tn.Id, Type: ksealv1.EventType_EVENT_TYPE_DEBUGGER, Payload: "{}"})
 
