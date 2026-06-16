@@ -24,6 +24,11 @@ class RiskSignalTest {
         assertEquals(13, RiskSignal.ATTESTATION_FAIL.bit)
         assertEquals(14, RiskSignal.SECURE_HW_MISSING.bit)
         assertEquals(15, RiskSignal.REPACKAGED.bit)
+        assertEquals(16, RiskSignal.SCREEN_CAPTURE.bit)
+        assertEquals(17, RiskSignal.OVERLAY_ABUSE.bit)
+        assertEquals(18, RiskSignal.ACCESSIBILITY_ABUSE.bit)
+        assertEquals(19, RiskSignal.MALICIOUS_IME.bit)
+        assertEquals(20, RiskSignal.REMOTE_ACCESS.bit)
     }
 
     @Test

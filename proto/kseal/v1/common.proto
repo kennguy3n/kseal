@@ -41,6 +41,11 @@ enum EventType {
   EVENT_TYPE_HOOKING_DETECTED = 7;
   EVENT_TYPE_APP_INTEGRITY_FAIL = 8;
   EVENT_TYPE_ENVIRONMENT_RISK = 9;
+  EVENT_TYPE_SCREEN_CAPTURE = 10;
+  EVENT_TYPE_OVERLAY_ABUSE = 11;
+  EVENT_TYPE_ACCESSIBILITY_ABUSE = 12;
+  EVENT_TYPE_MALICIOUS_IME = 13;
+  EVENT_TYPE_REMOTE_ACCESS = 14;
 }
 
 // EnforcementMode is the server-side response posture for a policy.
@@ -74,6 +79,13 @@ message PolicyHash {
 // RiskBitset is a packed 64-bit bitfield of risk signals. Bit positions are
 // defined by the Rust core's RiskBitset and mirrored in docs. Packing keeps
 // telemetry compact (a single uint64 instead of repeated enums).
+//
+// Wire bit positions (append-only; see sdk/rust-core/kseal-core/src/risk.rs):
+//   0 ROOT, 1 JAILBREAK, 2 EMULATOR, 3 SIMULATOR, 4 DEBUGGER, 5 HOOKING,
+//   6 TAMPER, 7 APP_INTEGRITY, 8 NETWORK_MITM, 9 ENVIRONMENT, 10 PROXY,
+//   11 USER_CA, 12 PINNING_FAILURE, 13 ATTESTATION_FAIL, 14 SECURE_HW_MISSING,
+//   15 REPACKAGED, 16 SCREEN_CAPTURE, 17 OVERLAY_ABUSE, 18 ACCESSIBILITY_ABUSE,
+//   19 MALICIOUS_IME, 20 REMOTE_ACCESS.
 message RiskBitset {
   uint64 bits = 1;
 }

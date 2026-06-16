@@ -41,6 +41,11 @@ public enum EventType: Int32, Sendable {
     case hookingDetected = 7
     case appIntegrityFail = 8
     case environmentRisk = 9
+    case screenCapture = 10
+    case overlayAbuse = 11
+    case accessibilityAbuse = 12
+    case maliciousIme = 13
+    case remoteAccess = 14
 }
 
 /// Reporting platform. Mirrors `kseal.v1.Platform`.

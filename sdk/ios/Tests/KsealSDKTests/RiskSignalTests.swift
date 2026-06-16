@@ -21,6 +21,11 @@ final class RiskSignalTests: XCTestCase {
         XCTAssertEqual(RiskSignal.attestationFail.rawValue, 13)
         XCTAssertEqual(RiskSignal.secureHwMissing.rawValue, 14)
         XCTAssertEqual(RiskSignal.repackaged.rawValue, 15)
+        XCTAssertEqual(RiskSignal.screenCapture.rawValue, 16)
+        XCTAssertEqual(RiskSignal.overlayAbuse.rawValue, 17)
+        XCTAssertEqual(RiskSignal.accessibilityAbuse.rawValue, 18)
+        XCTAssertEqual(RiskSignal.maliciousIme.rawValue, 19)
+        XCTAssertEqual(RiskSignal.remoteAccess.rawValue, 20)
     }
 
     func testPackUnpackRoundTrip() {

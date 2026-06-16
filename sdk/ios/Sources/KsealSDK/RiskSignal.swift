@@ -39,6 +39,16 @@ public enum RiskSignal: Int, CaseIterable, Sendable {
     case secureHwMissing = 14
     /// Signing/provisioning mismatch (repackaged binary).
     case repackaged = 15
+    /// The screen is being captured or recorded (credential/OTP exfiltration).
+    case screenCapture = 16
+    /// A tapjacking/overlay window is drawn over the app. (Unused on iOS; present for layout parity.)
+    case overlayAbuse = 17
+    /// An abusive accessibility service is active. (Unused on iOS; present for layout parity.)
+    case accessibilityAbuse = 18
+    /// A malicious/untrusted input method is active. (Unused on iOS; present for layout parity.)
+    case maliciousIme = 19
+    /// A remote-access / screen-sharing tool is controlling the device.
+    case remoteAccess = 20
 
     /// This signal as a single-bit mask in the packed `u64`.
     public var mask: UInt64 { UInt64(1) << UInt64(rawValue) }

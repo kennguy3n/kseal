@@ -3,10 +3,10 @@
 Two distinct risk-bit namespaces meet in the trust decision:
 
 - **Wire / device layout** — the Rust core's `RiskBitset`, a `u64` with bits
-  `0..15` (`sdk/rust-core/kseal-core/src/risk.rs`). This is what a device reports
+  `0..20` (`sdk/rust-core/kseal-core/src/risk.rs`). This is what a device reports
   on `AttestationRequest.risk_bitset` and `TelemetryEvent.risk_bits`, and what
   the platform SDKs populate.
-- **Server layout** — `server/shared/risk`, bits `0..10` plus the server-only
+- **Server layout** — `server/shared/risk`, bits `0..15` plus the server-only
   `BitFleetAnomaly = 1 << 32`. This is what policy weights, the scorer, the
   simulator, and the SIEM field mapping all assume.
 
@@ -48,12 +48,17 @@ masks (server layout) match what is actually scored.
 | 13 | ATTESTATION_FAIL | `BitAttestationFail` |
 | 14 | SECURE_HW_MISSING | `BitDeviceIntegrity` |
 | 15 | REPACKAGED | `BitAppTamper` |
+| 16 | SCREEN_CAPTURE | `BitScreenCapture` |
+| 17 | OVERLAY_ABUSE | `BitOverlayAbuse` |
+| 18 | ACCESSIBILITY_ABUSE | `BitAccessibilityAbuse` |
+| 19 | MALICIOUS_IME | `BitMaliciousIME` |
+| 20 | REMOTE_ACCESS | `BitRemoteAccess` |
 
-Multiple wire bits may fold onto one server bit (e.g. ROOT and JAILBREAK), and
-one wire bit maps to exactly one server bit. Wire bits above 15 carry no server
-meaning and are dropped (not scored against an unrelated bit). `BitFleetAnomaly`
-sits at bit 32, well clear of the wire range, so a device can never forge it and
-it never collides with a translated bit.
+Multiple wire bits may fold onto one server bit (e.g. ROOT and JAILBREAK), while
+the fraud-vector signals (16..20) each map 1:1 onto their own server bit. Wire
+bits above 20 carry no server meaning and are dropped (not scored against an
+unrelated bit). `BitFleetAnomaly` sits at bit 32, well clear of the wire range,
+so a device can never forge it and it never collides with a translated bit.
 
 ## Self-describing storage layout (`risk_bits_layout`)
 
@@ -144,8 +149,8 @@ Any silent renumber must break CI deliberately:
   full wire→server mapping, the drop-unknown-bits behaviour, and the
   `BitFleetAnomaly`-clear-of-wire-range invariant (`TestWireToServerContract`,
   `TestServerBitLayoutContract`, `TestFleetAnomalyBitClearOfWireRange`).
-- **Rust** — `risk::tests::bit_positions_are_stable` pins all 16 wire bit
-  positions and `MAX_SIGNAL_BIT`.
+- **Rust** — `risk::tests::bit_positions_are_stable` pins all 21 wire bit
+  positions (`0..20`) and `MAX_SIGNAL_BIT`.
 - **Egress names + layout** — `server/shared/risk/contract_test.go` pins the
   stable `risk_signals` names (`TestSignalNamesContract`), proves every weighted
   bit has a name (`TestSignalNamesCoversEveryWeightedBit`), and pins the

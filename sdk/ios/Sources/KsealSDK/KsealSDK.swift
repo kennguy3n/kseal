@@ -220,6 +220,14 @@ public final class KsealSDK {
             HookDetector(env),
             IntegrityChecker(env, policy: options.integrityPolicy),
             NetworkRiskDetector(env),
+            // Wave-2 fraud-vector RASP stubs: registered for cross-platform
+            // parity but currently emit no signals (zero runtime behaviour
+            // change). overlay/accessibility/ime are permanent no-ops on iOS.
+            ScreenCaptureDetector(),
+            OverlayDetector(),
+            AccessibilityAbuseDetector(),
+            ImeDetector(),
+            RemoteAccessDetector(),
         ]
         guard let enabled = options.enabledProbes else { return all }
         return all.filter { enabled.contains($0.id) }
