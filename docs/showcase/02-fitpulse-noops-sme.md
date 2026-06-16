@@ -81,6 +81,26 @@ an analyst" is not an answer.
 
 ---
 
+## Back-tested evidence
+
+The surge in the screenshot is a deliberate back-test — and the behaviour behind it is a
+unit test, not a one-off demo (full numbers in [Evidence & back-testing](evidence-and-backtesting.md)):
+
+- **Stimulus → result.** 320+ `root_jailbreak` attestations against `fitpulse-3.9` in a
+  five-minute window, on a learned clean baseline, break the cohort at **422 observations**
+  with a `Surge` verdict and auto step-up — exactly what `TestBaselineLearnThenSurge` in
+  `server/data-plane/fleet/engine_test.go` asserts, and what `TestUnobservedScopeIsClean`
+  proves it *won't* do to quiet cohorts (no false alarms).
+- **It costs cents, not an analyst's salary.** Detection is **O(1) per event**, in-process,
+  with bounded memory via sharded LRU cohort state — so it rides the same
+  **≈ $585/mo-at-100M-MAU** data-plane envelope from the [cost model](../cost-model.md)
+  instead of an enterprise abuse-detection contract.
+- **No privacy debt.** The engine works on **aggregates only** — it introduces no new
+  per-user identifier to do population detection, which is what
+  `privacy_contract_test.go` guards.
+
+---
+
 ## Why it wins for FitPulse
 
 - **It's the analyst FitPulse can't hire.** Coordinated attacks get caught and answered

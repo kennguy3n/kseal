@@ -86,6 +86,25 @@ three of them plus a pipeline** to land where kseal starts.
 
 ---
 
+## Back-tested evidence
+
+The trust decision isn't a screenshot — it's a measured, tested protocol (full numbers in
+[Evidence & back-testing](evidence-and-backtesting.md)):
+
+- **The chain is proven both ways.** `e2e_trust_flow_test.go` drives the real challenge →
+  attest → token → signed-proof flow and asserts that a **replayed proof, a decreasing
+  sequence number, the wrong nonce, the wrong token, or the wrong key all return DENY**.
+  Owning the client doesn't let you mint trust.
+- **It's effectively free on the hot path.** A per-request HMAC proof generates in
+  **≈ 333 ns** and verifies in **≈ 444 ns**; policy evaluation is **≈ 49 ns**. The
+  payment flow pays no perceptible latency tax for being attested.
+- **The SOC contract is minimized by construction.** `privacy_contract_test.go` asserts
+  the telemetry schema carries only non-PII fields, and the SIEM egress emits **named**
+  `risk_signals` (not fragile numeric bit positions) — so correlation rules don't break
+  when the bit layout evolves. The HEC token is sealed server-side.
+
+---
+
 ## Why it wins for NovaPay
 
 - **No data engineering.** The SOC gets signed webhooks and a minimized SIEM stream out of

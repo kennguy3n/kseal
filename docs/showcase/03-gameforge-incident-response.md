@@ -94,6 +94,25 @@ typically something a customer is expected to build with external logging infras
 
 ---
 
+## Back-tested evidence
+
+The "with receipts" promise is the part that's easy to fake and hard to prove — so it's
+the part we test hardest (full numbers in [Evidence & back-testing](evidence-and-backtesting.md)):
+
+- **The kill switch is signed, not just stored.** Clients verify the signature before
+  honoring it, so an attacker can't forge a "stand down" or replay an old state. The
+  signed-config path (the same envelope mechanism) is covered end-to-end by
+  `e2e_config_test.go` (Ed25519 verify + TTL + version rotation).
+- **The audit chain self-verifies.** Every mutation is a hash-chained entry in
+  `server/control-plane/compliance/`; the console recomputes the chain on load and refuses
+  to show "verified" if a single row was edited or deleted. That's the difference between a
+  log and evidence.
+- **The same events reach the SIEM, minimized.** `e2e_telemetry_test.go` proves zstd
+  ingest → queryable read-back with filters + keyset pagination and quota enforcement, so
+  the SOC's long-term correlation store gets the events without a bespoke pipeline.
+
+---
+
 ## Why it wins for GameForge
 
 - **Speed with safety.** A signed kill switch that clients can't forge, effective globally in

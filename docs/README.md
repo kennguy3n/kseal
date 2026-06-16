@@ -10,4 +10,13 @@ Complements the top-level [README](../README.md), [PROPOSAL](../PROPOSAL.md), [A
 - **Feature parity matrix** — comparison vs AppSealing/DoveRunner and other incumbents.
 - **Runbooks / ADRs** — operational guides and architecture decision records.
 
-**Status:** scaffold — see [PROGRESS.md](../PROGRESS.md) (Phase 0).
+## Narrative series
+
+Two long-form, blog-style series complement the reference docs above:
+
+- **[Capability showcase](showcase/00-showcase-index.md)** — kseal *doing the job*, told
+  through five companies, with live console screenshots and a
+  [measured evidence / back-testing](showcase/evidence-and-backtesting.md) appendix.
+- **[How to build a continuous app-trust platform](build-guide/00-index.md)** — a build-along
+  series for engineers *and* product readers: the architecture, the trust protocol, the scale
+  and privacy engineering, and the business decision behind each choice versus the incumbents.

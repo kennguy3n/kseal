@@ -82,6 +82,26 @@ assembling tools and maintaining spreadsheets.
 
 ---
 
+## Back-tested evidence
+
+Compliance evidence that can't be reproduced isn't evidence — so MediToken's view is
+derived from tested code, and is honest about its own provenance (full numbers in
+[Evidence & back-testing](evidence-and-backtesting.md)):
+
+- **The minimization claim is a test, not a promise.** `privacy_contract_test.go` asserts
+  the telemetry schema carries **only minimized, non-PII fields** — the machine-checked
+  backing for the registry's "Aggregates only" retention records.
+- **The change log is tamper-evident by construction.** Registering each data-processing
+  record writes a hash-chained audit entry (`server/control-plane/compliance/`) that the
+  console re-verifies on load — so the *act of documenting* is itself evidence.
+- **The view states what it isn't.** Coverage (8/8) is derived from the registered
+  build-manifest module set and the build-hash proof; the *Gaps & notes* panel explicitly
+  declines to claim per-control signed attestation artifacts it doesn't have. That honesty
+  is what keeps an auditor's trust — and it's the same evidence the report generator under
+  `tools/masvs-report/` emits.
+
+---
+
 ## Why it wins for MediToken
 
 - **Evidence, not memory.** MASVS coverage is derived from what actually shipped and tied to a

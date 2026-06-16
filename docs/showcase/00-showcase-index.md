@@ -67,6 +67,12 @@ Everything in the series was generated against a live stack:
 Two real platform defects were found and fixed **because** we insisted on driving the real
 product instead of mocking it (see [`defects-found.md`](defects-found.md)).
 
+And because "works in a screenshot" isn't proof, every chapter is backed by **measured,
+reproducible numbers** — device hot-path latency (nanoseconds to microseconds), the
+Go + Rust test suites that gate each capability, the back-tested abuse surge, and the
+bottom-up cost model. They live in one place: [Evidence & back-testing](evidence-and-backtesting.md).
+It all regenerates from a clean checkout with `make test` and `cargo bench`.
+
 ---
 
 ## The series
@@ -78,5 +84,17 @@ product instead of mocking it (see [`defects-found.md`](defects-found.md)).
 5. [ShopSwift — shipping a policy change with a seatbelt](05-shopswift-release-engineer.md)
 
 Appendices:
+- [Evidence & back-testing](evidence-and-backtesting.md) — the measured numbers behind every chapter
 - [Competitive positioning matrix](competitive-matrix.md)
 - [Defects found & fixed while making this showcase](defects-found.md)
+
+---
+
+## Want to build one?
+
+This showcase shows kseal *doing the job*. If you want to understand **how it's built** —
+the architecture, the trust protocol, the scale and privacy engineering, and the
+business decisions behind each choice versus the incumbents — see the companion
+[**How to build a continuous app-trust platform**](../build-guide/00-index.md) series.
+It's written so a technical *and* a product reader can follow the same thread from "why"
+to "how," and rebuild a system like this.
