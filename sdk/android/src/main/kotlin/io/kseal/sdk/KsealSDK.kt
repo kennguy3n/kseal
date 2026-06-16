@@ -250,8 +250,10 @@ class KsealSDK internal constructor(
             HookDetector(env),
             IntegrityChecker(env, options.integrityPolicy),
             NetworkRiskDetector(env),
-            // Wave-2 fraud-vector RASP stubs: registered for layout parity but
-            // currently emit no signals (zero runtime behaviour change).
+            // Wave-2 fraud-vector RASP probes, registered together for layout
+            // parity. Some are live and emit fusion-weighted risk signals while
+            // others are still no-op stubs pending implementation; each probe
+            // gates its own behaviour independently of the rest.
             ScreenCaptureDetector(),
             OverlayDetector(env),
             AccessibilityAbuseDetector(env),
