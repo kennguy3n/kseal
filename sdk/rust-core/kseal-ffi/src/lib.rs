@@ -562,6 +562,93 @@ pub unsafe extern "C" fn kseal_verify_config_signature(
     })
 }
 
+/// Returns the active policy's opt-in re-attestation cadence in seconds, or `0`
+/// when no policy is loaded / continuous mode is disabled. Returns `-1` for a
+/// null handle.
+///
+/// Platform SDKs poll this after loading config to decide whether to start a
+/// background heartbeat; the `0` default keeps the SDK from doing any network
+/// I/O (and thus preserves the no-launch-time-network-call invariant) until a
+/// config explicitly opts in.
+///
+/// # Safety
+/// `handle` must be valid.
+#[no_mangle]
+pub unsafe extern "C" fn kseal_reattest_interval_secs(handle: *const CoreHandle) -> i64 {
+    ffi_catch(-1i64, || {
+        let Some(handle) = handle.as_ref() else {
+            return -1;
+        };
+        i64::from(handle.core.reattest_interval_secs())
+    })
+}
+
+/// Returns the host-facing decision discriminant
+/// ([`Decision`](kseal_core::proto::request_proof_result::Decision):
+/// `1`=ALLOW, `2`=STEP_UP, `3`=DENY, `0`=UNSPECIFIED) for `risk_bits` under the
+/// active policy, mirroring the server's `risk.Decision`. Returns a negative
+/// [`Status`] value for a null handle.
+///
+/// This lets the platform SDKs surface the same decision to their
+/// `onTrustDecision` hook during continuous monitoring without re-implementing
+/// the authoritative rule.
+///
+/// # Safety
+/// `handle` must be valid.
+#[no_mangle]
+pub unsafe extern "C" fn kseal_decision(handle: *const CoreHandle, risk_bits: u64) -> i32 {
+    ffi_catch(Status::ErrPanic as i32, || {
+        let Some(handle) = handle.as_ref() else {
+            return Status::ErrNull as i32;
+        };
+        handle.core.decision(RiskBitset::from_raw(risk_bits)) as i32
+    })
+}
+
+/// Verifies and applies a server-issued `SignedKillSwitch` (protobuf bytes),
+/// returning `1` if the app is now killed, `0` if not, or a negative [`Status`]
+/// value on bad args.
+///
+/// Fail-safe: the killed state only transitions on a signature-verified
+/// command (against the core's configured public key). An undecodable payload
+/// or invalid signature is a no-op that preserves the current state, so an
+/// absent or forged command can never disable the app.
+///
+/// # Safety
+/// `handle` must be valid; `bytes` must be valid for `len` (or null with
+/// `len` 0).
+#[no_mangle]
+pub unsafe extern "C" fn kseal_apply_kill_switch(
+    handle: *const CoreHandle,
+    bytes: *const u8,
+    len: usize,
+) -> i32 {
+    ffi_catch(Status::ErrPanic as i32, || {
+        let Some(handle) = handle.as_ref() else {
+            return Status::ErrNull as i32;
+        };
+        let Some(slice) = as_slice(bytes, len) else {
+            return Status::ErrNull as i32;
+        };
+        i32::from(handle.core.apply_kill_switch(slice))
+    })
+}
+
+/// Returns `1` if a verified server kill switch is currently disabling the app,
+/// `0` otherwise, or a negative [`Status`] value for a null handle.
+///
+/// # Safety
+/// `handle` must be valid.
+#[no_mangle]
+pub unsafe extern "C" fn kseal_is_killed(handle: *const CoreHandle) -> i32 {
+    ffi_catch(Status::ErrPanic as i32, || {
+        let Some(handle) = handle.as_ref() else {
+            return Status::ErrNull as i32;
+        };
+        i32::from(handle.core.is_killed())
+    })
+}
+
 /// Compresses `data` with zstd at `level` (0 → default) into `out`.
 ///
 /// # Safety
@@ -1207,6 +1294,136 @@ mod tests {
             );
             assert_eq!(score, 55);
             kseal_core_free(handle);
+        }
+    }
+
+    fn signed_block_policy_bytes(sk: &SigningKey, reattest_interval_secs: u32) -> Vec<u8> {
+        let mut weights = HashMap::new();
+        weights.insert(0, 100u32); // ROOT -> high
+        weights.insert(4, 50u32); //  DEBUGGER -> medium
+        let mut thresholds = HashMap::new();
+        thresholds.insert("MEDIUM_RISK".to_string(), 40u32);
+        thresholds.insert("HIGH_RISK".to_string(), 90u32);
+        thresholds.insert("CRITICAL".to_string(), 130u32);
+        let policy = PolicyConfig {
+            default_mode: EnforcementMode::Block as i32,
+            signal_weights: weights,
+            risk_thresholds: thresholds,
+            policy_hash: "ph".into(),
+            reattest_interval_secs,
+            ..Default::default()
+        };
+        let config_bytes = policy.encode_to_vec();
+        let (version, ttl_seconds, key_id) = (1i64, 3600i64, "k");
+        let signature = sk
+            .sign(&kseal_core::crypto::signed_config_preimage(
+                version,
+                ttl_seconds,
+                key_id,
+                &config_bytes,
+            ))
+            .to_bytes()
+            .to_vec();
+        SignedConfig {
+            config_bytes,
+            signature,
+            key_id: key_id.into(),
+            version,
+            ttl_seconds,
+        }
+        .encode_to_vec()
+    }
+
+    fn signed_kill_switch_bytes(sk: &SigningKey, command: i32) -> Vec<u8> {
+        use kseal_core::proto::SignedKillSwitch;
+        let mut ks = SignedKillSwitch {
+            tenant_id: "tenant".into(),
+            app_id: "app".into(),
+            build_hash: "build".into(),
+            command,
+            version: 5,
+            issued_at: 1_700_000_000,
+            reason: "ffi-test".into(),
+            signature: Vec::new(),
+            key_id: "k".into(),
+        };
+        ks.signature = sk
+            .sign(&kseal_core::crypto::kill_switch_preimage(&ks))
+            .to_bytes()
+            .to_vec();
+        ks.encode_to_vec()
+    }
+
+    #[test]
+    fn reattest_decision_and_kill_switch_ffi() {
+        use kseal_core::proto::request_proof_result::Decision;
+        use kseal_core::proto::KillSwitchCommand;
+        unsafe {
+            let sk = signing_key();
+            let handle = new_core(&sk);
+            assert!(!handle.is_null());
+
+            // No policy yet: cadence 0, decisions allow, not killed.
+            assert_eq!(kseal_reattest_interval_secs(handle), 0);
+            assert_eq!(
+                kseal_decision(handle, RiskBitset::ROOT.as_u64()),
+                Decision::Allow as i32
+            );
+            assert_eq!(kseal_is_killed(handle), 0);
+
+            // Load a Block-mode policy opting into a 900s heartbeat.
+            let cfg = signed_block_policy_bytes(&sk, 900);
+            assert_eq!(
+                kseal_load_config(handle, cfg.as_ptr(), cfg.len()),
+                Status::Ok
+            );
+            assert_eq!(kseal_reattest_interval_secs(handle), 900);
+            // ROOT (100) -> HIGH_RISK -> Deny under Block mode.
+            assert_eq!(
+                kseal_decision(handle, RiskBitset::ROOT.as_u64()),
+                Decision::Deny as i32
+            );
+            // DEBUGGER (50) -> MEDIUM_RISK -> StepUp.
+            assert_eq!(
+                kseal_decision(handle, RiskBitset::DEBUGGER.as_u64()),
+                Decision::StepUp as i32
+            );
+
+            // Kill switch: a valid DISABLE kills; a wrong-key payload is a no-op.
+            let attacker = SigningKey::from_bytes(&[9u8; 32]);
+            let forged =
+                signed_kill_switch_bytes(&attacker, KillSwitchCommand::Disable as i32);
+            assert_eq!(
+                kseal_apply_kill_switch(handle, forged.as_ptr(), forged.len()),
+                0
+            );
+            assert_eq!(kseal_is_killed(handle), 0);
+
+            let disable = signed_kill_switch_bytes(&sk, KillSwitchCommand::Disable as i32);
+            assert_eq!(
+                kseal_apply_kill_switch(handle, disable.as_ptr(), disable.len()),
+                1
+            );
+            assert_eq!(kseal_is_killed(handle), 1);
+
+            let enable = signed_kill_switch_bytes(&sk, KillSwitchCommand::Enable as i32);
+            assert_eq!(
+                kseal_apply_kill_switch(handle, enable.as_ptr(), enable.len()),
+                0
+            );
+            assert_eq!(kseal_is_killed(handle), 0);
+
+            kseal_core_free(handle);
+        }
+    }
+
+    #[test]
+    fn new_ffi_exports_reject_null_handle() {
+        unsafe {
+            assert_eq!(kseal_reattest_interval_secs(std::ptr::null()), -1);
+            assert!(kseal_decision(std::ptr::null(), 0) < 0);
+            assert!(kseal_apply_kill_switch(std::ptr::null(), std::ptr::null(), 0) < 0);
+            assert!(kseal_is_killed(std::ptr::null()) < 0);
         }
     }
 }

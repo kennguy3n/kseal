@@ -40,7 +40,11 @@ pub mod transport;
 
 use crate::config::ConfigCache;
 use crate::events::{EventBatch, EventInput, PrivacyGuard};
-use crate::proto::{Compression, Platform, RequestProof, SignedConfig, TelemetryEvent, TrustLevel};
+use crate::proto::request_proof_result::Decision;
+use crate::proto::{
+    Compression, KillSwitchCommand, Platform, RequestProof, SignedConfig, SignedKillSwitch,
+    TelemetryEvent, TrustLevel,
+};
 use crate::risk::{RiskBitset, RiskScore};
 use crate::risk_engine::{FusedRisk, RiskEngine};
 use prost::Message;
@@ -174,6 +178,10 @@ struct CoreState {
     engine: Option<RiskEngine>,
     /// Active data-minimization guard applied when batching telemetry.
     privacy_guard: PrivacyGuard,
+    /// Whether a verified server kill switch is currently in effect. Defaults
+    /// to `false` and only flips on a signature-verified command, so an absent,
+    /// forged, or undecodable command can never disable the app (fail-safe).
+    killed: bool,
 }
 
 impl KsealCore {
@@ -188,6 +196,7 @@ impl KsealCore {
                 cache: ConfigCache::new(),
                 engine: None,
                 privacy_guard,
+                killed: false,
             }),
         }
     }
@@ -365,6 +374,69 @@ impl KsealCore {
         public_key: &[u8],
     ) -> bool {
         crypto::verify_ed25519(public_key, config_bytes, signature)
+    }
+
+    /// The active policy's opt-in re-attestation cadence in seconds, or `0` when
+    /// no policy is loaded or continuous mode is disabled.
+    ///
+    /// The platform SDKs read this to decide whether to start a background
+    /// heartbeat. Because it defaults to `0`, the SDK performs no scheduling —
+    /// and therefore no network I/O — until a config explicitly opts in.
+    #[must_use]
+    pub fn reattest_interval_secs(&self) -> u32 {
+        self.read_state()
+            .engine
+            .as_ref()
+            .map_or(0, |e| e.policy().reattest_interval_secs())
+    }
+
+    /// Maps `signals` to the host-facing [`Decision`] under the active policy,
+    /// mirroring the server's `risk.Decision`. Returns [`Decision::Allow`] when
+    /// no policy is loaded (nothing to enforce).
+    ///
+    /// This lets the SDK surface the same `observe → step-up → block` posture to
+    /// its `onTrustDecision` hook during continuous monitoring without
+    /// re-implementing — or diverging from — the authoritative server rule.
+    #[must_use]
+    pub fn decision(&self, signals: RiskBitset) -> Decision {
+        match self.read_state().engine.as_ref() {
+            Some(engine) => {
+                let p = engine.policy();
+                let score =
+                    RiskScore::compute(p.filter_signals(signals), &p.config().signal_weights).score;
+                policy::decision(p.trust_level_for_score(score), p.default_mode())
+            }
+            None => Decision::Allow,
+        }
+    }
+
+    /// Applies a server-issued [`SignedKillSwitch`] (protobuf bytes), updating
+    /// the [`is_killed`](Self::is_killed) state, and returns the resulting
+    /// killed flag.
+    ///
+    /// Fail-safe by construction: the state only transitions on a
+    /// signature-verified command. An undecodable payload or an invalid
+    /// signature is a no-op that preserves the current state, so an absent or
+    /// forged command can never disable the app. A verified `DISABLE` kills; a
+    /// verified `ENABLE`/`UNSPECIFIED` clears the kill (e.g. a build-scoped
+    /// re-enable resolved by the server).
+    pub fn apply_kill_switch(&self, signed_bytes: &[u8]) -> bool {
+        let Ok(ks) = SignedKillSwitch::decode(signed_bytes) else {
+            return self.is_killed();
+        };
+        if !crypto::verify_kill_switch(&self.config.config_public_key, &ks) {
+            return self.is_killed();
+        }
+        let killed = ks.command == KillSwitchCommand::Disable as i32;
+        self.write_state().killed = killed;
+        killed
+    }
+
+    /// Whether a verified server kill switch is currently disabling the app.
+    /// Defaults to `false`; see [`apply_kill_switch`](Self::apply_kill_switch).
+    #[must_use]
+    pub fn is_killed(&self) -> bool {
+        self.read_state().killed
     }
 }
 
@@ -546,5 +618,132 @@ mod tests {
     fn core_is_send_and_sync() {
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<KsealCore>();
+    }
+
+    /// Builds a signed config in `mode` with a `reattest_interval_secs` cadence
+    /// and thresholds/weights that let tests drive specific trust levels.
+    fn signed_policy_full(
+        sk: &SigningKey,
+        mode: EnforcementMode,
+        reattest_interval_secs: u32,
+    ) -> Vec<u8> {
+        let mut weights = HashMap::new();
+        weights.insert(0, 100); // ROOT -> high
+        weights.insert(4, 50); //  DEBUGGER -> medium
+        let mut thresholds = HashMap::new();
+        thresholds.insert("MEDIUM_RISK".to_string(), 40u32);
+        thresholds.insert("HIGH_RISK".to_string(), 90u32);
+        thresholds.insert("CRITICAL".to_string(), 130u32);
+        let policy = PolicyConfig {
+            default_mode: mode as i32,
+            signal_weights: weights,
+            risk_thresholds: thresholds,
+            policy_hash: "ph".into(),
+            reattest_interval_secs,
+            ..Default::default()
+        };
+        let config_bytes = policy.encode_to_vec();
+        let (version, ttl_seconds, key_id) = (1i64, 3600i64, "k1");
+        let signature = sk
+            .sign(&crypto::signed_config_preimage(
+                version,
+                ttl_seconds,
+                key_id,
+                &config_bytes,
+            ))
+            .to_bytes()
+            .to_vec();
+        SignedConfig {
+            config_bytes,
+            signature,
+            key_id: key_id.into(),
+            version,
+            ttl_seconds,
+        }
+        .encode_to_vec()
+    }
+
+    fn signed_kill_switch(sk: &SigningKey, command: KillSwitchCommand) -> Vec<u8> {
+        let mut ks = SignedKillSwitch {
+            tenant_id: "tenant".into(),
+            app_id: "app".into(),
+            build_hash: "build".into(),
+            command: command as i32,
+            version: 3,
+            issued_at: 1_700_000_000,
+            reason: "test".into(),
+            signature: Vec::new(),
+            key_id: "k1".into(),
+        };
+        ks.signature = sk
+            .sign(&crypto::kill_switch_preimage(&ks))
+            .to_bytes()
+            .to_vec();
+        ks.encode_to_vec()
+    }
+
+    #[test]
+    fn reattest_interval_secs_reflects_policy() {
+        let sk = SigningKey::from_bytes(&[1u8; 32]);
+        let core = core_with(&sk);
+        // No policy loaded -> continuous mode off.
+        assert_eq!(core.reattest_interval_secs(), 0);
+        core.load_config_at(
+            &signed_policy_full(&sk, EnforcementMode::Observe, 900),
+            100,
+        )
+        .unwrap();
+        assert_eq!(core.reattest_interval_secs(), 900);
+    }
+
+    #[test]
+    fn decision_mirrors_active_policy() {
+        let sk = SigningKey::from_bytes(&[1u8; 32]);
+        // No policy -> nothing to enforce.
+        let core = core_with(&sk);
+        assert_eq!(core.decision(RiskBitset::ROOT), Decision::Allow);
+
+        // Block mode: ROOT (100) -> HIGH_RISK -> Deny; DEBUGGER (50) -> MEDIUM -> StepUp.
+        let core = core_with(&sk);
+        core.load_config_at(&signed_policy_full(&sk, EnforcementMode::Block, 0), 100)
+            .unwrap();
+        assert_eq!(core.decision(RiskBitset::ROOT), Decision::Deny);
+        assert_eq!(core.decision(RiskBitset::DEBUGGER), Decision::StepUp);
+        assert_eq!(core.decision(RiskBitset::empty()), Decision::Allow);
+
+        // Observe mode never denies.
+        let core = core_with(&sk);
+        core.load_config_at(&signed_policy_full(&sk, EnforcementMode::Observe, 0), 100)
+            .unwrap();
+        assert_eq!(core.decision(RiskBitset::ROOT), Decision::Allow);
+    }
+
+    #[test]
+    fn kill_switch_is_fail_safe() {
+        let sk = SigningKey::from_bytes(&[1u8; 32]);
+        let core = core_with(&sk);
+        // Default: not killed.
+        assert!(!core.is_killed());
+
+        // Undecodable / absent payload: no-op (stays not killed).
+        assert!(!core.apply_kill_switch(&[0xff, 0xff, 0xff]));
+        assert!(!core.is_killed());
+
+        // A signature made by a different key never disables the app.
+        let attacker = SigningKey::from_bytes(&[2u8; 32]);
+        assert!(!core.apply_kill_switch(&signed_kill_switch(&attacker, KillSwitchCommand::Disable)));
+        assert!(!core.is_killed());
+
+        // A validly-signed DISABLE kills.
+        assert!(core.apply_kill_switch(&signed_kill_switch(&sk, KillSwitchCommand::Disable)));
+        assert!(core.is_killed());
+
+        // A forged payload can't clear an active kill either.
+        assert!(core.apply_kill_switch(&signed_kill_switch(&attacker, KillSwitchCommand::Enable)));
+        assert!(core.is_killed());
+
+        // A validly-signed ENABLE clears the kill (server re-enable).
+        assert!(!core.apply_kill_switch(&signed_kill_switch(&sk, KillSwitchCommand::Enable)));
+        assert!(!core.is_killed());
     }
 }

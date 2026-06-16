@@ -303,3 +303,38 @@ Java_io_kseal_sdk_internal_NativeBridge_nativeGenerateNonce(
     }
     return buffer_to_jbytes(env, out);
 }
+
+JNIEXPORT jlong JNICALL
+Java_io_kseal_sdk_internal_NativeBridge_nativeReattestIntervalSecs(
+    JNIEnv *env, jobject thiz, jlong handle) {
+    (void)env;
+    (void)thiz;
+    return (jlong)kseal_reattest_interval_secs(as_handle(handle));
+}
+
+JNIEXPORT jint JNICALL
+Java_io_kseal_sdk_internal_NativeBridge_nativeDecision(
+    JNIEnv *env, jobject thiz, jlong handle, jlong risk_bits) {
+    (void)env;
+    (void)thiz;
+    return (jint)kseal_decision(as_handle(handle), (uint64_t)risk_bits);
+}
+
+JNIEXPORT jint JNICALL
+Java_io_kseal_sdk_internal_NativeBridge_nativeApplyKillSwitch(
+    JNIEnv *env, jobject thiz, jlong handle, jbyteArray bytes) {
+    (void)thiz;
+    jsize len = bytes ? (*env)->GetArrayLength(env, bytes) : 0;
+    jbyte *data = len ? (*env)->GetByteArrayElements(env, bytes, NULL) : NULL;
+    int32_t result = kseal_apply_kill_switch(as_handle(handle), (const uint8_t *)data, (uintptr_t)len);
+    if (data) (*env)->ReleaseByteArrayElements(env, bytes, data, JNI_ABORT);
+    return (jint)result;
+}
+
+JNIEXPORT jint JNICALL
+Java_io_kseal_sdk_internal_NativeBridge_nativeIsKilled(
+    JNIEnv *env, jobject thiz, jlong handle) {
+    (void)env;
+    (void)thiz;
+    return (jint)kseal_is_killed(as_handle(handle));
+}

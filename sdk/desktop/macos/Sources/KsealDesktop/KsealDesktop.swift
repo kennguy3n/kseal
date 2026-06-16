@@ -72,6 +72,40 @@ public final class KsealDesktop {
     private var trustTokenId: String?
     private var policyHash: String = ""
 
+    private let reattestQueue = DispatchQueue(label: "io.kseal.reattest")
+    private var reattestTimer: DispatchSourceTimer?
+    private var _onTrustDecision: ((TrustLevel, TrustDecision) -> Void)?
+    private var _onKillSwitchChanged: ((Bool) -> Void)?
+
+    /// Active-response hook (Phase 3.2). Invoked with the trust decision — the
+    /// real server `TrustDecision` from `authorizeRequest`, or the locally
+    /// re-computed one (exact `risk.Decision` mapping) on each re-attestation
+    /// cycle. Default is a no-op: the SDK never locks, forces MFA, or wipes on
+    /// its own; the host decides what `.stepUp` / `.deny` means.
+    ///
+    /// Example — step-up on elevated risk, lock on denial:
+    /// ```swift
+    /// sdk.onTrustDecision = { level, decision in
+    ///     switch decision {
+    ///     case .stepUp: presentReauthSheet()
+    ///     case .deny:   enterReadOnlyMode()
+    ///     default:      break
+    ///     }
+    /// }
+    /// ```
+    public var onTrustDecision: ((TrustLevel, TrustDecision) -> Void)? {
+        get { lock.lock(); defer { lock.unlock() }; return _onTrustDecision }
+        set { lock.lock(); defer { lock.unlock() }; _onTrustDecision = newValue }
+    }
+
+    /// Forced-degrade hook (Phase 3.3) fired when a server-driven kill switch
+    /// takes effect or is lifted; the bool is the new `isKilled` state. Default
+    /// no-op — the host decides how to degrade (e.g. read-only mode).
+    public var onKillSwitchChanged: ((Bool) -> Void)? {
+        get { lock.lock(); defer { lock.unlock() }; return _onKillSwitchChanged }
+        set { lock.lock(); defer { lock.unlock() }; _onKillSwitchChanged = newValue }
+    }
+
     init(
         core: TrustCore,
         env: DesktopEnvironment,
@@ -175,10 +209,18 @@ public final class KsealDesktop {
     }
 
     /// Builds a request proof for `requestHash` and asks the server to validate
-    /// it, returning the ALLOW / STEP_UP / DENY decision.
+    /// it, returning the ALLOW / STEP_UP / DENY decision. The server decision is
+    /// also surfaced through `onTrustDecision` so the host can actively respond
+    /// (the SDK itself never enforces it).
     public func authorizeRequest(requestHash: Data, using client: TrustSessionClient) throws -> RequestProofDecision {
         let proof = try getRequestProof(requestHash: requestHash)
-        return try client.validateRequestProof(proof)
+        let result = try client.validateRequestProof(proof)
+        lock.lock(); let cb = _onTrustDecision; lock.unlock()
+        if let cb {
+            let level = (try? evaluateRisk().trustLevel) ?? .unspecified
+            cb(level, result.decision)
+        }
+        return result
     }
 
     /// Records a telemetry event, buffering it; a batch is compressed and handed
@@ -228,6 +270,102 @@ public final class KsealDesktop {
         let bits = RiskSignal.pinningFailure.mask | RiskSignal.networkMitm.mask
         guard let event = try? makeEvent(.networkMitm, bits: bits) else { return }
         emit([event])
+    }
+
+    // MARK: - Continuous protection & active response (Phase 3)
+
+    /// Whether a valid server-driven kill switch currently disables the app.
+    /// Reads local state only; fail-safe (false) unless an Ed25519-valid
+    /// `DISABLE` was applied via `applyKillSwitch` / `refreshKillSwitch`.
+    public var isKilled: Bool { core.isKilled() }
+
+    /// The active policy's opt-in re-attestation cadence in seconds, or 0 when
+    /// continuous mode is off. Local read — never touches the network.
+    public var reattestIntervalSecs: UInt32 { core.reattestIntervalSecs() }
+
+    /// Re-runs probes, scores them under the active policy, and returns the
+    /// trust `TrustDecision` using the exact mapping the server applies. The SDK
+    /// only surfaces this for the host's active-response hooks; never enforces it.
+    public func evaluateTrustDecision() throws -> (TrustLevel, TrustDecision) {
+        let assessment = try evaluateRisk()
+        return (assessment.trustLevel, core.decision(assessment.riskBits))
+    }
+
+    /// Verifies and applies a serialized `kseal.v1.SignedKillSwitch` (typically
+    /// obtained by the host from its own `GetConfig` response). Fail-safe: a
+    /// forged or absent command never disables the app; only an Ed25519-valid
+    /// `DISABLE` does, and a valid `ENABLE` lifts it. Returns the resulting
+    /// `isKilled` state and fires `onKillSwitchChanged` on a transition.
+    @discardableResult
+    public func applyKillSwitch(_ signedKillSwitchBytes: Data) -> Bool {
+        let before = core.isKilled()
+        let after = core.applyKillSwitch(signedKillSwitchBytes)
+        if after != before {
+            lock.lock(); let cb = _onKillSwitchChanged; lock.unlock()
+            cb?(after)
+        }
+        return after
+    }
+
+    /// Pulls the latest signed kill switch from the `ConfigProvider` (on demand —
+    /// never at launch) and applies it. Returns the resulting `isKilled` state;
+    /// a no-op returning the current state when the provider has none.
+    @discardableResult
+    public func refreshKillSwitch() -> Bool {
+        guard let bytes = configProvider.fetchKillSwitch() else { return core.isKilled() }
+        return applyKillSwitch(bytes)
+    }
+
+    /// Starts the opt-in periodic re-attestation heartbeat (Phase 3.1). No-op
+    /// returning false unless the active policy set a positive
+    /// `reattest_interval_secs`, so the "no launch-time network call" invariant
+    /// holds until the host both loads a continuous-mode policy and explicitly
+    /// opts in by calling this. Idempotent; a running timer is reused.
+    @discardableResult
+    public func startContinuousProtection() -> Bool {
+        let interval = core.reattestIntervalSecs()
+        guard interval > 0 else { return false }
+        lock.lock(); defer { lock.unlock() }
+        if reattestTimer != nil { return true }
+        let timer = DispatchSource.makeTimerSource(queue: reattestQueue)
+        // Fire after one interval (no immediate tick at start).
+        timer.schedule(deadline: .now() + .seconds(Int(interval)), repeating: .seconds(Int(interval)))
+        timer.setEventHandler { [weak self] in self?.runReattestCycle() }
+        reattestTimer = timer
+        timer.resume()
+        return true
+    }
+
+    /// Stops the periodic heartbeat. The SDK remains usable on demand.
+    public func stopContinuousProtection() {
+        lock.lock(); let timer = reattestTimer; reattestTimer = nil; lock.unlock()
+        timer?.cancel()
+    }
+
+    /// Runs one re-attestation cycle immediately. Wire this to the host's
+    /// foreground / app-activation notification so trust is re-evaluated on resume.
+    public func onAppForeground() {
+        runReattestCycle()
+    }
+
+    /// One re-attestation cycle: re-run probes, recompute and surface the trust
+    /// decision, re-validate the signed config, and — as coverage rises with
+    /// risk (mirroring the server's NextChecks escalation) — pull the latest
+    /// kill switch when the level reaches `.mediumRisk`. Internal so tests can
+    /// drive it directly without the timer.
+    func runReattestCycle() {
+        guard let assessment = try? evaluateRisk() else { return }
+        let decision = core.decision(assessment.riskBits)
+        lock.lock(); let cb = _onTrustDecision; lock.unlock()
+        cb?(assessment.trustLevel, decision)
+        // Baseline re-validation: refresh the signed config (default provider
+        // returns nil and falls back to cache — no network).
+        refreshConfig()
+        // Escalation: at .mediumRisk or above, also pull + apply the latest kill
+        // switch so a server-driven forced degrade surfaces promptly.
+        if assessment.trustLevel.rawValue >= TrustLevel.mediumRisk.rawValue {
+            _ = refreshKillSwitch()
+        }
     }
 
     // MARK: - Internals
@@ -370,6 +508,7 @@ public final class KsealDesktop {
     /// Releases the singleton (primarily for tests / process teardown).
     public static func shutdownForTesting() {
         lockSingleton.lock(); defer { lockSingleton.unlock() }
+        instance?.stopContinuousProtection()
         instance = nil
     }
 

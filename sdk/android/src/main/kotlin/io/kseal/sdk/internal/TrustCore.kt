@@ -1,6 +1,7 @@
 package io.kseal.sdk.internal
 
 import io.kseal.sdk.Confidence
+import io.kseal.sdk.Decision
 import io.kseal.sdk.EventType
 import io.kseal.sdk.KsealErrorCode
 import io.kseal.sdk.KsealException
@@ -69,6 +70,31 @@ internal interface TrustCore : AutoCloseable {
     fun compress(data: ByteArray, level: Int = 0): ByteArray
 
     fun decompress(data: ByteArray): ByteArray
+
+    /**
+     * The active policy's opt-in re-attestation cadence in seconds, or 0 when
+     * continuous mode is disabled / no policy is loaded. Reads local state
+     * only — never touches the network.
+     */
+    fun reattestIntervalSecs(): Long
+
+    /**
+     * Maps [riskBits] to a trust [Decision] using the exact mapping the server
+     * applies (`risk.Decision(level, mode)`), under the active policy. Returns
+     * [Decision.ALLOW] when no policy is loaded.
+     */
+    fun decision(riskBits: Long): Decision
+
+    /**
+     * Verifies and applies a serialized `kseal.v1.SignedKillSwitch`, returning
+     * the resulting killed state. Fail-safe: a malformed, wrongly-signed, or
+     * absent command never disables the app; only an Ed25519-valid `DISABLE`
+     * does, and a valid `ENABLE` lifts it.
+     */
+    fun applyKillSwitch(signedKillSwitchBytes: ByteArray): Boolean
+
+    /** Whether a valid kill switch currently disables the app (fail-safe state). */
+    fun isKilled(): Boolean
 
     companion object {
         /** Verifies an Ed25519 signature over `config` bytes. */
@@ -204,6 +230,31 @@ internal class NativeTrustCore private constructor(
     override fun decompress(data: ByteArray): ByteArray {
         return NativeBridge.nativeDecompress(data)
             ?: throw TrustCoreException("decompress failed")
+    }
+
+    override fun reattestIntervalSecs(): Long = coreLock.read {
+        check(!closed) { "core is closed" }
+        // A negative status means no handle/policy; treat as continuous-off.
+        NativeBridge.nativeReattestIntervalSecs(handle).coerceAtLeast(0L)
+    }
+
+    override fun decision(riskBits: Long): Decision = coreLock.read {
+        check(!closed) { "core is closed" }
+        val code = NativeBridge.nativeDecision(handle, riskBits)
+        // A negative status is an internal error; fail open (ALLOW) so the SDK
+        // never blocks the host on its own.
+        if (code < 0) Decision.ALLOW else Decision.fromCode(code)
+    }
+
+    override fun applyKillSwitch(signedKillSwitchBytes: ByteArray): Boolean = coreLock.read {
+        check(!closed) { "core is closed" }
+        // 1 = killed; 0 or a negative status leaves the app available (fail-safe).
+        NativeBridge.nativeApplyKillSwitch(handle, signedKillSwitchBytes) == 1
+    }
+
+    override fun isKilled(): Boolean = coreLock.read {
+        check(!closed) { "core is closed" }
+        NativeBridge.nativeIsKilled(handle) == 1
     }
 
     override fun close() = coreLock.write {

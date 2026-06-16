@@ -98,6 +98,18 @@ protocol TrustCore: AnyObject {
     func generateNonce(_ length: Int) throws -> Data
     func compress(_ data: Data, level: Int32) throws -> Data
     func decompress(_ data: Data) throws -> Data
+    /// The active policy's opt-in re-attestation cadence in seconds, or 0 when
+    /// continuous mode is off / no policy is loaded. Local read only.
+    func reattestIntervalSecs() -> UInt32
+    /// Maps `riskBits` to a trust `Decision` using the exact mapping the server
+    /// applies (`risk.Decision`). `.allow` when no policy is loaded.
+    func decision(_ riskBits: UInt64) -> Decision
+    /// Verifies + applies a serialized `kseal.v1.SignedKillSwitch`; returns the
+    /// resulting killed state. Fail-safe: a forged/absent command never disables
+    /// the app, only an Ed25519-valid `DISABLE` does (a valid `ENABLE` lifts it).
+    func applyKillSwitch(_ signedKillSwitchBytes: Data) -> Bool
+    /// Whether a valid kill switch currently disables the app (fail-safe state).
+    func isKilled() -> Bool
 }
 
 /// Verifies an Ed25519 signature over `config` bytes (stateless helper).
@@ -333,6 +345,37 @@ final class NativeTrustCore: TrustCore {
             throw TrustCoreError(status: status, message: "decompress failed: status=\(status)")
         }
         return Self.consume(&out)
+    }
+
+    func reattestIntervalSecs() -> UInt32 {
+        coreQueue.sync {
+            // A negative status means no handle/policy; treat as continuous-off.
+            let v = kseal_reattest_interval_secs(handle)
+            return v < 0 ? 0 : UInt32(truncatingIfNeeded: v)
+        }
+    }
+
+    func decision(_ riskBits: UInt64) -> Decision {
+        coreQueue.sync {
+            // A negative status is an internal error; fail open (.allow) so the
+            // SDK never blocks the host on its own.
+            let code = kseal_decision(handle, riskBits)
+            return code < 0 ? .allow : Decision(code: code)
+        }
+    }
+
+    func applyKillSwitch(_ signedKillSwitchBytes: Data) -> Bool {
+        // State mutation: run as a barrier, like config swaps.
+        coreQueue.sync(flags: .barrier) {
+            signedKillSwitchBytes.withUnsafeBytes { b in
+                // 1 = killed; 0 / negative leaves the app available (fail-safe).
+                kseal_apply_kill_switch(handle, b.bindMemory(to: UInt8.self).baseAddress, UInt(b.count)) == 1
+            }
+        }
+    }
+
+    func isKilled() -> Bool {
+        coreQueue.sync { kseal_is_killed(handle) == 1 }
     }
 
     /// Copies a core-owned buffer into a `Data` and releases the original.

@@ -50,6 +50,7 @@ fn policy_config() -> PolicyConfig {
         modules_enabled: vec![],
         signal_weights: weights(),
         policy_hash: "policy-hash".into(),
+        reattest_interval_secs: 0,
     }
 }
 

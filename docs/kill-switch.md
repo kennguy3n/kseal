@@ -49,6 +49,39 @@ fail-safe: any error yields no kill switch rather than failing the config fetch.
 wrong signature length, or altered field. State only flips when it returns
 `true`. Every issue is recorded in the audit trail (`killswitch.issue`).
 
+The same verification runs **on device** in the shared Rust core
+(`apply_kill_switch`), so the SDK never trusts an unsigned or forged command:
+
+- decode failure → no-op (state unchanged),
+- signature invalid under the config anchor → no-op (a forged command can't flip
+  state in *either* direction),
+- valid `DISABLE` → `is_killed = true`,
+- valid `ENABLE`/`UNSPECIFIED` → `is_killed = false` (a server re-enable lifts a
+  prior kill).
+
+This mirrors the server's default-`ENABLE` resolution byte-for-byte (a Go↔Rust
+golden preimage test pins the layout).
+
+## SDK surfacing (`isKilled`)
+
+The SDK exposes the kill switch as **first-class state**; it never disables the
+app on its own — it only surfaces the verified state so the host can degrade
+(e.g. read-only mode). The active-response safety rule holds: the SDK does not
+kill/lock/wipe by itself.
+
+| Surface | Android | iOS / macOS |
+|---|---|---|
+| Apply a serialized `SignedKillSwitch` (host-fetched from its own `GetConfig`) | `applyKillSwitch(bytes): Boolean` | `applyKillSwitch(_:) -> Bool` |
+| Pull + apply via the `ConfigProvider` (on demand — never at launch) | `refreshKillSwitch(): Boolean` | `refreshKillSwitch() -> Bool` |
+| Current verified state | `val isKilled: Boolean` | `var isKilled: Bool` |
+| Forced-degrade hook on transition (default no-op) | `var onKillSwitchChanged: ((Boolean) -> Unit)?` | `var onKillSwitchChanged: ((Bool) -> Void)?` |
+
+`ConfigProvider` gains a default-implemented `fetchKillSwitch()` returning
+`null`/`nil`, so existing providers keep compiling and stay kill-switch-free
+until they opt in. During continuous monitoring (see
+[continuous-protection.md](continuous-protection.md)), the SDK pulls the latest
+switch as risk escalates.
+
 ## RPCs (`ComplianceService`)
 
 | RPC | Request → Response | Notes |

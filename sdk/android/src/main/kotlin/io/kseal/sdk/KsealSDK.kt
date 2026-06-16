@@ -18,6 +18,10 @@ import io.kseal.sdk.probes.Probe
 import io.kseal.sdk.probes.RemoteAccessDetector
 import io.kseal.sdk.probes.RootDetector
 import io.kseal.sdk.probes.ScreenCaptureDetector
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -97,8 +101,55 @@ class KsealSDK internal constructor(
     @Volatile
     private var policyHash: String = ""
 
+    private val schedulerLock = Any()
+    private var scheduler: ScheduledExecutorService? = null
+    private var reattestTask: ScheduledFuture<*>? = null
+
+    /**
+     * Active-response hook (Phase 3.2). Invoked with the locally re-computed
+     * trust decision — using the exact mapping the server applies
+     * (`risk.Decision`) — on each re-attestation cycle and from
+     * [evaluateTrustDecision]. The default is a no-op: the SDK never locks,
+     * forces MFA, or wipes on its own; the host decides what a `STEP_UP` /
+     * `DENY` means for its UX.
+     *
+     * Example — step-up on elevated risk, lock on denial:
+     * ```
+     * sdk.onTrustDecision = { level, decision ->
+     *     when (decision) {
+     *         Decision.STEP_UP -> requireBiometricReauth()
+     *         Decision.DENY    -> lockSensitiveScreens()
+     *         else             -> Unit
+     *     }
+     * }
+     * ```
+     */
+    @Volatile
+    var onTrustDecision: ((TrustLevel, Decision) -> Unit)? = null
+
+    /**
+     * Forced-degrade hook (Phase 3.3) fired when a server-driven kill switch
+     * takes effect or is lifted; the boolean is the new [isKilled] state.
+     * Default no-op — the host decides how to degrade (e.g. read-only mode).
+     */
+    @Volatile
+    var onKillSwitchChanged: ((Boolean) -> Unit)? = null
+
     /** The Rust trust core version string. */
     val coreVersion: String get() = core.version
+
+    /**
+     * Whether a valid server-driven kill switch currently disables the app.
+     * Reads local state only; fail-safe (false) unless an Ed25519-valid
+     * `DISABLE` has been applied via [applyKillSwitch] / [refreshKillSwitch].
+     */
+    val isKilled: Boolean get() = core.isKilled()
+
+    /**
+     * The active policy's opt-in re-attestation cadence in seconds, or 0 when
+     * continuous mode is off. Local read — never touches the network.
+     */
+    val reattestIntervalSecs: Long get() = core.reattestIntervalSecs()
 
     /**
      * Sets the trust-token id minted by the server after attestation. Request
@@ -205,6 +256,110 @@ class KsealSDK internal constructor(
     /** Reports a TLS pinning failure observed by the host's transport layer. */
     fun reportPinningFailure() {
         reportEventWithBits(EventType.NETWORK_MITM, RiskSignal.PINNING_FAILURE.mask or RiskSignal.NETWORK_MITM.mask)
+    }
+
+    /**
+     * Re-runs probes, scores them under the active policy, and returns the
+     * trust [Decision] using the exact mapping the server applies. The SDK only
+     * surfaces this for the host's active-response hooks; it never enforces it.
+     */
+    fun evaluateTrustDecision(): Pair<TrustLevel, Decision> {
+        val assessment = evaluateRisk()
+        return assessment.trustLevel to core.decision(assessment.riskBits)
+    }
+
+    /**
+     * Verifies and applies a serialized `kseal.v1.SignedKillSwitch` (typically
+     * obtained by the host from its own `GetConfig` response). Fail-safe: a
+     * forged or absent command never disables the app; only an Ed25519-valid
+     * `DISABLE` does, and a valid `ENABLE` lifts it. Returns the resulting
+     * [isKilled] state and fires [onKillSwitchChanged] on a transition.
+     */
+    fun applyKillSwitch(signedKillSwitchBytes: ByteArray): Boolean {
+        val before = core.isKilled()
+        val after = core.applyKillSwitch(signedKillSwitchBytes)
+        if (after != before) onKillSwitchChanged?.invoke(after)
+        return after
+    }
+
+    /**
+     * Pulls the latest signed kill switch from the [ConfigProvider] (on demand —
+     * never at launch) and applies it. Returns the resulting [isKilled] state;
+     * a no-op returning the current state when the provider has none.
+     */
+    fun refreshKillSwitch(): Boolean {
+        val bytes = configProvider.fetchKillSwitch() ?: return core.isKilled()
+        return applyKillSwitch(bytes)
+    }
+
+    /**
+     * Starts the opt-in periodic re-attestation heartbeat (Phase 3.1). No-op
+     * returning false unless the active policy set a positive
+     * `reattest_interval_secs`, so the "no launch-time network call" invariant
+     * holds until the host both loads a continuous-mode policy and explicitly
+     * opts in by calling this. Idempotent; a running scheduler is reused.
+     */
+    fun startContinuousProtection(): Boolean {
+        val interval = core.reattestIntervalSecs()
+        if (interval <= 0L) return false
+        synchronized(schedulerLock) {
+            if (reattestTask != null) return true
+            val exec = scheduler ?: Executors.newSingleThreadScheduledExecutor { r ->
+                Thread(r, "kseal-reattest").apply { isDaemon = true }
+            }.also { scheduler = it }
+            reattestTask = exec.scheduleAtFixedRate(
+                { runCatching { runReattestCycle() } },
+                interval,
+                interval,
+                TimeUnit.SECONDS,
+            )
+        }
+        return true
+    }
+
+    /** Stops the periodic heartbeat. The SDK remains usable on demand. */
+    fun stopContinuousProtection() {
+        synchronized(schedulerLock) {
+            reattestTask?.cancel(false)
+            reattestTask = null
+        }
+    }
+
+    /**
+     * Runs one re-attestation cycle immediately. Wire this to the host's
+     * foreground lifecycle hook so trust is re-evaluated on app resume.
+     */
+    fun onAppForeground() {
+        runCatching { runReattestCycle() }
+    }
+
+    /**
+     * One re-attestation cycle: re-run probes, recompute and surface the trust
+     * decision, re-validate the signed config, and — as coverage rises with
+     * risk (mirroring the server's NextChecks escalation) — pull the latest
+     * kill switch when the level reaches `MEDIUM_RISK`. Pure and dependency-
+     * injected so tests can drive it directly without the scheduler.
+     */
+    internal fun runReattestCycle() {
+        val assessment = evaluateRisk()
+        onTrustDecision?.invoke(assessment.trustLevel, core.decision(assessment.riskBits))
+        // Baseline re-validation: refresh the signed config. The default
+        // provider returns null and falls back to cache (no network).
+        refreshConfig()
+        // Escalation: at MEDIUM_RISK or above, also pull + apply the latest
+        // kill switch so a server-driven forced degrade surfaces promptly.
+        if (assessment.trustLevel.code >= TrustLevel.MEDIUM_RISK.code) {
+            refreshKillSwitch()
+        }
+    }
+
+    private fun shutdownScheduler() {
+        synchronized(schedulerLock) {
+            reattestTask?.cancel(false)
+            reattestTask = null
+            scheduler?.shutdownNow()
+            scheduler = null
+        }
     }
 
     private fun emit(events: List<ByteArray>) {
@@ -333,7 +488,10 @@ class KsealSDK internal constructor(
         @JvmStatic
         fun shutdown() {
             synchronized(this) {
-                instance?.let { sdk -> runCatching { (sdk.core as? AutoCloseable)?.close() } }
+                instance?.let { sdk ->
+                    runCatching { sdk.shutdownScheduler() }
+                    runCatching { (sdk.core as? AutoCloseable)?.close() }
+                }
                 instance = null
             }
         }

@@ -24,6 +24,18 @@ public protocol ConfigProvider {
     func cachedConfig() -> Data?
     func fetchConfig() -> Data?
     func persist(_ config: Data)
+
+    /// Fetches the latest serialized `kseal.v1.SignedKillSwitch` (e.g. from the
+    /// host's `GetConfig` response), or `nil` when none applies. Invoked only by
+    /// the opt-in re-attestation cycle / `KsealSDK.refreshKillSwitch()` — never
+    /// at launch. The default never performs network I/O.
+    func fetchKillSwitch() -> Data?
+}
+
+/// Default: no kill switch unless the host overrides this (keeps launch
+/// network-free and preserves fail-safe behaviour when absent).
+public extension ConfigProvider {
+    func fetchKillSwitch() -> Data? { nil }
 }
 
 /// Default file-backed config cache under the app's private storage.

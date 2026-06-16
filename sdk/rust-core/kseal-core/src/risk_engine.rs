@@ -165,6 +165,7 @@ mod tests {
             modules_enabled: vec![],
             signal_weights: weights,
             policy_hash: "h".into(),
+            reattest_interval_secs: 0,
         })
     }
 

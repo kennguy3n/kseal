@@ -9,6 +9,7 @@
 //! block` decision is always made server-side; the [`crate::risk_engine`] caps
 //! the *local* response so the device never hard-blocks on its own.
 
+use crate::proto::request_proof_result::Decision;
 use crate::proto::{EnforcementMode, PolicyConfig, TrustLevel};
 use crate::risk::RiskBitset;
 
@@ -178,6 +179,41 @@ impl Policy {
             other => other,
         }
     }
+
+    /// Opt-in periodic re-attestation cadence (seconds) from the active policy.
+    /// `0` (the default) means continuous mode is disabled.
+    #[must_use]
+    pub fn reattest_interval_secs(&self) -> u32 {
+        self.config.reattest_interval_secs
+    }
+}
+
+/// Maps a [`TrustLevel`] and [`EnforcementMode`] to the host-facing
+/// [`Decision`], mirroring the server's `risk.Decision` exactly so the SDK can
+/// surface the same `observe → step-up → block` posture to its
+/// `onTrustDecision` hook without changing (or second-guessing) the
+/// authoritative server logic.
+///
+/// In `OBSERVE` mode nothing is ever denied. Otherwise `CRITICAL` denies,
+/// `HIGH_RISK` steps up (or denies in `BLOCK` mode), `MEDIUM_RISK` steps up, and
+/// everything else is allowed.
+#[must_use]
+pub fn decision(level: TrustLevel, mode: EnforcementMode) -> Decision {
+    if mode == EnforcementMode::Observe {
+        return Decision::Allow;
+    }
+    match level {
+        TrustLevel::Critical => Decision::Deny,
+        TrustLevel::HighRisk => {
+            if mode == EnforcementMode::Block {
+                Decision::Deny
+            } else {
+                Decision::StepUp
+            }
+        }
+        TrustLevel::MediumRisk => Decision::StepUp,
+        _ => Decision::Allow,
+    }
 }
 
 #[cfg(test)]
@@ -226,6 +262,7 @@ mod tests {
             modules_enabled: vec![],
             signal_weights: weights,
             policy_hash: "h1".to_string(),
+            reattest_interval_secs: 0,
         }
     }
 
@@ -279,6 +316,33 @@ mod tests {
         let p = Policy::new(base_config());
         assert!(p.is_module_enabled("anything"));
         assert_eq!(p.filter_signals(RiskBitset::all()), RiskBitset::all());
+    }
+
+    #[test]
+    fn reattest_interval_defaults_off() {
+        let p = Policy::new(base_config());
+        assert_eq!(p.reattest_interval_secs(), 0);
+        let mut cfg = base_config();
+        cfg.reattest_interval_secs = 900;
+        assert_eq!(Policy::new(cfg).reattest_interval_secs(), 900);
+    }
+
+    #[test]
+    fn decision_mirrors_server_rule() {
+        use EnforcementMode::{Block, Observe, StepUp};
+        use TrustLevel::{Critical, HighRisk, LowRisk, MediumRisk, Trusted};
+        // Observe never denies, regardless of level.
+        assert_eq!(decision(Critical, Observe), Decision::Allow);
+        // Step-up mode.
+        assert_eq!(decision(Trusted, StepUp), Decision::Allow);
+        assert_eq!(decision(LowRisk, StepUp), Decision::Allow);
+        assert_eq!(decision(MediumRisk, StepUp), Decision::StepUp);
+        assert_eq!(decision(HighRisk, StepUp), Decision::StepUp);
+        assert_eq!(decision(Critical, StepUp), Decision::Deny);
+        // Block mode escalates HIGH_RISK to deny.
+        assert_eq!(decision(HighRisk, Block), Decision::Deny);
+        assert_eq!(decision(MediumRisk, Block), Decision::StepUp);
+        assert_eq!(decision(Critical, Block), Decision::Deny);
     }
 
     #[test]
