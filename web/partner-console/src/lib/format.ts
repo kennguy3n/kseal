@@ -23,6 +23,11 @@ export const eventTypeLabels: Record<EventType, string> = {
   [EventType.HOOKING_DETECTED]: "Hooking detected",
   [EventType.APP_INTEGRITY_FAIL]: "App integrity fail",
   [EventType.ENVIRONMENT_RISK]: "Environment risk",
+  [EventType.SCREEN_CAPTURE]: "Screen capture",
+  [EventType.OVERLAY_ABUSE]: "Overlay abuse",
+  [EventType.ACCESSIBILITY_ABUSE]: "Accessibility abuse",
+  [EventType.MALICIOUS_IME]: "Malicious keyboard",
+  [EventType.REMOTE_ACCESS]: "Remote access",
 };
 
 export const trustLevelLabels: Record<TrustLevel, string> = {

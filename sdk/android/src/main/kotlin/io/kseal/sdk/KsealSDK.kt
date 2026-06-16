@@ -3,16 +3,21 @@ package io.kseal.sdk
 import android.content.Context
 import io.kseal.sdk.internal.NativeTrustCore
 import io.kseal.sdk.internal.TrustCore
+import io.kseal.sdk.probes.AccessibilityAbuseDetector
 import io.kseal.sdk.probes.AndroidDeviceEnvironment
 import io.kseal.sdk.probes.DebuggerDetector
 import io.kseal.sdk.probes.DeviceEnvironment
 import io.kseal.sdk.probes.EmulatorDetector
 import io.kseal.sdk.probes.HookDetector
+import io.kseal.sdk.probes.ImeDetector
 import io.kseal.sdk.probes.IntegrityChecker
 import io.kseal.sdk.probes.IntegrityPolicy
 import io.kseal.sdk.probes.NetworkRiskDetector
+import io.kseal.sdk.probes.OverlayDetector
 import io.kseal.sdk.probes.Probe
+import io.kseal.sdk.probes.RemoteAccessDetector
 import io.kseal.sdk.probes.RootDetector
+import io.kseal.sdk.probes.ScreenCaptureDetector
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -245,6 +250,13 @@ class KsealSDK internal constructor(
             HookDetector(env),
             IntegrityChecker(env, options.integrityPolicy),
             NetworkRiskDetector(env),
+            // Wave-2 fraud-vector RASP stubs: registered for layout parity but
+            // currently emit no signals (zero runtime behaviour change).
+            ScreenCaptureDetector(),
+            OverlayDetector(env),
+            AccessibilityAbuseDetector(env),
+            ImeDetector(env),
+            RemoteAccessDetector(env),
         )
         val enabled = options.enabledProbes ?: return all
         return all.filter { it.id in enabled }

@@ -46,7 +46,12 @@ enum class EventType(val code: Int) {
     POLICY_DECISION(6),
     HOOKING_DETECTED(7),
     APP_INTEGRITY_FAIL(8),
-    ENVIRONMENT_RISK(9);
+    ENVIRONMENT_RISK(9),
+    SCREEN_CAPTURE(10),
+    OVERLAY_ABUSE(11),
+    ACCESSIBILITY_ABUSE(12),
+    MALICIOUS_IME(13),
+    REMOTE_ACCESS(14);
 }
 
 /** Reporting platform. Mirrors `kseal.v1.Platform`. */

@@ -68,4 +68,29 @@ interface DeviceEnvironment {
 
     /** Number of user-installed (non-system) trusted CA certificates. */
     fun userInstalledCaCount(): Int
+
+    // --- Fraud-vector surfaces (consumed by the Wave-2 RASP probes) ---
+    /**
+     * Component names of the currently enabled accessibility services
+     * (`Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES`), or empty when none /
+     * unreadable. An abusive accessibility service is a common input/UI-hijack
+     * vector.
+     */
+    fun enabledAccessibilityServices(): List<String>
+
+    /** IDs of the enabled input methods (keyboards), or empty when unreadable. */
+    fun enabledInputMethodIds(): List<String>
+
+    /** ID of the currently selected default input method, or `null`. */
+    fun defaultInputMethodId(): String?
+
+    /**
+     * Packages (excluding this app) granted the "draw over other apps" overlay
+     * permission (`SYSTEM_ALERT_WINDOW`) — the precondition for tapjacking — or
+     * empty when none / unreadable.
+     */
+    fun appsWithOverlayPermission(): List<String>
+
+    /** Whether ADB (`Settings.Global.ADB_ENABLED`) is enabled on the device. */
+    fun isAdbEnabled(): Boolean
 }

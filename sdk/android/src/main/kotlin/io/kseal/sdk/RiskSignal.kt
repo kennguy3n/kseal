@@ -55,7 +55,22 @@ enum class RiskSignal(val bit: Int) {
     SECURE_HW_MISSING(14),
 
     /** Signing certificate mismatch (repackaged binary). */
-    REPACKAGED(15);
+    REPACKAGED(15),
+
+    /** The screen is being captured or recorded (credential/OTP exfiltration). */
+    SCREEN_CAPTURE(16),
+
+    /** A tapjacking/overlay window is drawn over the app (UI redress). */
+    OVERLAY_ABUSE(17),
+
+    /** An abusive accessibility service is active (input/UI hijack). */
+    ACCESSIBILITY_ABUSE(18),
+
+    /** A malicious or untrusted input method (keyboard) is active. */
+    MALICIOUS_IME(19),
+
+    /** A remote-access / screen-sharing tool is controlling the device. */
+    REMOTE_ACCESS(20);
 
     /** This signal as a single-bit mask in the packed `u64`. */
     val mask: Long get() = 1L shl bit

@@ -9,32 +9,42 @@ import "testing"
 // change must break this test deliberately.
 func TestServerBitLayoutContract(t *testing.T) {
 	want := map[string]uint64{
-		"root_jailbreak":   1 << 0,
-		"debugger":         1 << 1,
-		"emulator":         1 << 2,
-		"hooking":          1 << 3,
-		"app_tamper":       1 << 4,
-		"attestation_fail": 1 << 5,
-		"network_mitm":     1 << 6,
-		"account_risk":     1 << 7,
-		"device_integrity": 1 << 8,
-		"app_unrecognized": 1 << 9,
-		"environment_risk": 1 << 10,
-		"fleet_anomaly":    1 << 32,
+		"root_jailbreak":      1 << 0,
+		"debugger":            1 << 1,
+		"emulator":            1 << 2,
+		"hooking":             1 << 3,
+		"app_tamper":          1 << 4,
+		"attestation_fail":    1 << 5,
+		"network_mitm":        1 << 6,
+		"account_risk":        1 << 7,
+		"device_integrity":    1 << 8,
+		"app_unrecognized":    1 << 9,
+		"environment_risk":    1 << 10,
+		"screen_capture":      1 << 11,
+		"overlay_abuse":       1 << 12,
+		"accessibility_abuse": 1 << 13,
+		"malicious_ime":       1 << 14,
+		"remote_access":       1 << 15,
+		"fleet_anomaly":       1 << 32,
 	}
 	got := map[string]uint64{
-		"root_jailbreak":   BitRootJailbreak,
-		"debugger":         BitDebugger,
-		"emulator":         BitEmulator,
-		"hooking":          BitHooking,
-		"app_tamper":       BitAppTamper,
-		"attestation_fail": BitAttestationFail,
-		"network_mitm":     BitNetworkMITM,
-		"account_risk":     BitAccountRisk,
-		"device_integrity": BitDeviceIntegrity,
-		"app_unrecognized": BitAppUnrecognized,
-		"environment_risk": BitEnvironmentRisk,
-		"fleet_anomaly":    BitFleetAnomaly,
+		"root_jailbreak":      BitRootJailbreak,
+		"debugger":            BitDebugger,
+		"emulator":            BitEmulator,
+		"hooking":             BitHooking,
+		"app_tamper":          BitAppTamper,
+		"attestation_fail":    BitAttestationFail,
+		"network_mitm":        BitNetworkMITM,
+		"account_risk":        BitAccountRisk,
+		"device_integrity":    BitDeviceIntegrity,
+		"app_unrecognized":    BitAppUnrecognized,
+		"environment_risk":    BitEnvironmentRisk,
+		"screen_capture":      BitScreenCapture,
+		"overlay_abuse":       BitOverlayAbuse,
+		"accessibility_abuse": BitAccessibilityAbuse,
+		"malicious_ime":       BitMaliciousIME,
+		"remote_access":       BitRemoteAccess,
+		"fleet_anomaly":       BitFleetAnomaly,
 	}
 	for name, w := range want {
 		if got[name] != w {
@@ -44,7 +54,7 @@ func TestServerBitLayoutContract(t *testing.T) {
 }
 
 // TestFleetAnomalyBitClearOfWireRange asserts the server-derived fleet bit lives
-// well above the device-reported wire range (0..15), so a device can never
+// well above the device-reported wire range (0..20), so a device can never
 // forge it and it can never collide with a translated wire bit.
 func TestFleetAnomalyBitClearOfWireRange(t *testing.T) {
 	if BitFleetAnomaly <= (uint64(1) << maxWireBit) {
@@ -85,6 +95,11 @@ func TestWireToServerContract(t *testing.T) {
 		{"ATTESTATION_FAIL", 13, BitAttestationFail},
 		{"SECURE_HW_MISSING", 14, BitDeviceIntegrity},
 		{"REPACKAGED", 15, BitAppTamper},
+		{"SCREEN_CAPTURE", 16, BitScreenCapture},
+		{"OVERLAY_ABUSE", 17, BitOverlayAbuse},
+		{"ACCESSIBILITY_ABUSE", 18, BitAccessibilityAbuse},
+		{"MALICIOUS_IME", 19, BitMaliciousIME},
+		{"REMOTE_ACCESS", 20, BitRemoteAccess},
 	}
 	if len(cases) != maxWireBit+1 {
 		t.Fatalf("contract covers %d wire bits, expected %d", len(cases), maxWireBit+1)

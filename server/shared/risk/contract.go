@@ -29,6 +29,11 @@ var signalNames = []struct {
 	{BitDeviceIntegrity, "device_integrity"},
 	{BitAppUnrecognized, "app_unrecognized"},
 	{BitEnvironmentRisk, "environment_risk"},
+	{BitScreenCapture, "screen_capture"},
+	{BitOverlayAbuse, "overlay_abuse"},
+	{BitAccessibilityAbuse, "accessibility_abuse"},
+	{BitMaliciousIME, "malicious_ime"},
+	{BitRemoteAccess, "remote_access"},
 	{BitFleetAnomaly, "fleet_anomaly"},
 }
 

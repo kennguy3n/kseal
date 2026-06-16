@@ -4,7 +4,7 @@
 // interpreting telemetry and attestation outcomes and for scoring.
 //
 // This layout is deliberately NOT identical to the device/wire layout carried
-// in proto RiskBitset (the Rust core's RiskBitset, bits 0..15): the same numeric
+// in proto RiskBitset (the Rust core's RiskBitset, bits 0..20): the same numeric
 // position can mean different things on each side (e.g. wire bit 4 is DEBUGGER
 // but server bit 4 is BitAppTamper). Device-reported bits must therefore be
 // translated with FromWire before they are fused or scored against this layout;
@@ -38,28 +38,42 @@ const (
 	BitAppUnrecognized uint64 = 1 << 9 // app not recognized by the platform
 	BitEnvironmentRisk uint64 = 1 << 10
 
+	// Fraud-vector RASP signals. These are device-reported (translated from the
+	// wire layout via FromWire) and sit in the free server range below
+	// BitFleetAnomaly. Append-only: never renumber.
+	BitScreenCapture      uint64 = 1 << 11 // screen capture / recording in progress
+	BitOverlayAbuse       uint64 = 1 << 12 // tapjacking / overlay window over the app
+	BitAccessibilityAbuse uint64 = 1 << 13 // abusive accessibility service active
+	BitMaliciousIME       uint64 = 1 << 14 // malicious / untrusted input method active
+	BitRemoteAccess       uint64 = 1 << 15 // remote-access / screen-sharing tool active
+
 	// BitFleetAnomaly is a server-derived signal: the (tenant, app) population
 	// is currently showing a coordinated surge of an abuse signal above its
 	// learned baseline (see server/data-plane/fleet). It is never reported by a
 	// device — devices cannot see the fleet — so it is placed well clear of the
-	// device-reported bit range (0..15) to avoid colliding with any wire bit.
+	// device-reported bit range (0..20) to avoid colliding with any wire bit.
 	BitFleetAnomaly uint64 = 1 << 32
 )
 
 // defaultWeights assigns a severity weight to each known bit. Higher means more
 // dangerous. Used when a policy does not specify per-bit weights.
 var defaultWeights = map[uint64]uint32{
-	BitRootJailbreak:   40,
-	BitDebugger:        25,
-	BitEmulator:        20,
-	BitHooking:         35,
-	BitAppTamper:       60,
-	BitAttestationFail: 70,
-	BitNetworkMITM:     30,
-	BitAccountRisk:     20,
-	BitDeviceIntegrity: 45,
-	BitAppUnrecognized: 65,
-	BitEnvironmentRisk: 15,
+	BitRootJailbreak:      40,
+	BitDebugger:           25,
+	BitEmulator:           20,
+	BitHooking:            35,
+	BitAppTamper:          60,
+	BitAttestationFail:    70,
+	BitNetworkMITM:        30,
+	BitAccountRisk:        20,
+	BitDeviceIntegrity:    45,
+	BitAppUnrecognized:    65,
+	BitEnvironmentRisk:    15,
+	BitScreenCapture:      30,
+	BitOverlayAbuse:       35,
+	BitAccessibilityAbuse: 40,
+	BitMaliciousIME:       25,
+	BitRemoteAccess:       45,
 	// A fleet surge alone lands an otherwise-clean instance at MEDIUM_RISK
 	// (step-up), the graduated response; combined with any device signal it
 	// escalates further. Override per policy via signal_weights["32"].
@@ -88,11 +102,16 @@ const (
 	wireAttestationFail = 13
 	wireSecureHWMissing = 14
 	wireRepackaged      = 15
+	wireScreenCapture   = 16
+	wireOverlayAbuse    = 17
+	wireAccessibility   = 18
+	wireMaliciousIME    = 19
+	wireRemoteAccess    = 20
 
 	// maxWireBit is the highest meaningful wire bit (see MAX_SIGNAL_BIT in the
 	// Rust core). Wire bits above this carry no server meaning and are dropped
 	// by FromWire rather than being scored against an unrelated server weight.
-	maxWireBit = wireRepackaged
+	maxWireBit = wireRemoteAccess
 )
 
 // wireToServer maps each device/wire RiskBitset bit (index) to the server-side
@@ -118,6 +137,11 @@ var wireToServer = [maxWireBit + 1]uint64{
 	wireAttestationFail: BitAttestationFail,
 	wireSecureHWMissing: BitDeviceIntegrity,
 	wireRepackaged:      BitAppTamper,
+	wireScreenCapture:   BitScreenCapture,
+	wireOverlayAbuse:    BitOverlayAbuse,
+	wireAccessibility:   BitAccessibilityAbuse,
+	wireMaliciousIME:    BitMaliciousIME,
+	wireRemoteAccess:    BitRemoteAccess,
 }
 
 // FromWire translates a device-reported RiskBitset (wire/Rust-core layout) into

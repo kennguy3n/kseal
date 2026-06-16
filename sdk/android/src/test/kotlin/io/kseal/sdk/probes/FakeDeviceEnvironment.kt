@@ -33,6 +33,11 @@ internal class FakeDeviceEnvironment(
     var signingCerts: List<String> = listOf("aa".repeat(32))
     var proxyHost: String? = null
     var userCaCount: Int = 0
+    var accessibilityServices: List<String> = emptyList()
+    var inputMethodIds: List<String> = listOf("com.google.android.inputmethod.latin/.LatinIME")
+    var defaultInputMethod: String? = "com.google.android.inputmethod.latin/.LatinIME"
+    var overlayPackages: List<String> = emptyList()
+    var adbEnabled: Boolean = false
 
     override fun systemProperty(key: String): String? = systemProperties[key]
     override fun fileExists(path: String): Boolean = path in existingFiles || path in executableFiles
@@ -49,4 +54,9 @@ internal class FakeDeviceEnvironment(
     override fun signingCertificateSha256(): List<String> = signingCerts
     override fun httpProxyHost(): String? = proxyHost
     override fun userInstalledCaCount(): Int = userCaCount
+    override fun enabledAccessibilityServices(): List<String> = accessibilityServices
+    override fun enabledInputMethodIds(): List<String> = inputMethodIds
+    override fun defaultInputMethodId(): String? = defaultInputMethod
+    override fun appsWithOverlayPermission(): List<String> = overlayPackages
+    override fun isAdbEnabled(): Boolean = adbEnabled
 }

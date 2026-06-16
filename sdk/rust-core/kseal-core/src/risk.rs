@@ -27,6 +27,11 @@
 //! | 13 | `ATTESTATION_FAIL` | Platform attestation failed/unavailable |
 //! | 14 | `SECURE_HW_MISSING` | Hardware-backed keystore unavailable |
 //! | 15 | `REPACKAGED` | Signing certificate mismatch |
+//! | 16 | `SCREEN_CAPTURE` | Screen is being captured/recorded |
+//! | 17 | `OVERLAY_ABUSE` | A tapjacking/overlay window is drawn over the app |
+//! | 18 | `ACCESSIBILITY_ABUSE` | An abusive accessibility service is active |
+//! | 19 | `MALICIOUS_IME` | A malicious/untrusted input method is active |
+//! | 20 | `REMOTE_ACCESS` | A remote-access/screen-sharing tool is active |
 
 use crate::proto::Confidence;
 use std::collections::HashMap;
@@ -70,11 +75,21 @@ bitflags::bitflags! {
         const SECURE_HW_MISSING = 1 << 14;
         /// Signing certificate mismatch (repackaged binary).
         const REPACKAGED = 1 << 15;
+        /// The screen is being captured or recorded (credential/OTP exfiltration).
+        const SCREEN_CAPTURE = 1 << 16;
+        /// A tapjacking/overlay window is drawn over the app (UI redress).
+        const OVERLAY_ABUSE = 1 << 17;
+        /// An abusive accessibility service is active (input/UI hijack).
+        const ACCESSIBILITY_ABUSE = 1 << 18;
+        /// A malicious or untrusted input method (keyboard) is active.
+        const MALICIOUS_IME = 1 << 19;
+        /// A remote-access / screen-sharing tool is controlling the device.
+        const REMOTE_ACCESS = 1 << 20;
     }
 }
 
 /// Highest meaningful bit index, used to bound scoring iteration.
-pub const MAX_SIGNAL_BIT: u32 = 15;
+pub const MAX_SIGNAL_BIT: u32 = 20;
 
 /// Weight applied to a set signal bit that has no explicit policy weight.
 pub const DEFAULT_SIGNAL_WEIGHT: u32 = 10;
@@ -205,7 +220,12 @@ mod tests {
         assert_eq!(RiskBitset::ATTESTATION_FAIL.bits(), 1 << 13);
         assert_eq!(RiskBitset::SECURE_HW_MISSING.bits(), 1 << 14);
         assert_eq!(RiskBitset::REPACKAGED.bits(), 1 << 15);
-        assert_eq!(MAX_SIGNAL_BIT, 15);
+        assert_eq!(RiskBitset::SCREEN_CAPTURE.bits(), 1 << 16);
+        assert_eq!(RiskBitset::OVERLAY_ABUSE.bits(), 1 << 17);
+        assert_eq!(RiskBitset::ACCESSIBILITY_ABUSE.bits(), 1 << 18);
+        assert_eq!(RiskBitset::MALICIOUS_IME.bits(), 1 << 19);
+        assert_eq!(RiskBitset::REMOTE_ACCESS.bits(), 1 << 20);
+        assert_eq!(MAX_SIGNAL_BIT, 20);
     }
 
     #[test]

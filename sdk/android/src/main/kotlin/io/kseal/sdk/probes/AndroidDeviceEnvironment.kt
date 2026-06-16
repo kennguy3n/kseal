@@ -1,9 +1,12 @@
 package io.kseal.sdk.probes
 
+import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Debug
+import android.provider.Settings
+import android.view.inputmethod.InputMethodManager
 import java.io.File
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -157,6 +160,47 @@ internal class AndroidDeviceEnvironment(context: Context) : DeviceEnvironment {
         count
     } catch (_: Throwable) {
         0
+    }
+
+    override fun enabledAccessibilityServices(): List<String> = try {
+        val raw = Settings.Secure.getString(
+            appContext.contentResolver,
+            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
+        )
+        raw?.split(':')?.filter { it.isNotBlank() } ?: emptyList()
+    } catch (_: Throwable) {
+        emptyList()
+    }
+
+    override fun enabledInputMethodIds(): List<String> = try {
+        val imm = appContext.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+        imm?.enabledInputMethodList?.mapNotNull { it.id } ?: emptyList()
+    } catch (_: Throwable) {
+        emptyList()
+    }
+
+    override fun defaultInputMethodId(): String? = try {
+        Settings.Secure.getString(
+            appContext.contentResolver,
+            Settings.Secure.DEFAULT_INPUT_METHOD,
+        )?.takeIf { it.isNotBlank() }
+    } catch (_: Throwable) {
+        null
+    }
+
+    override fun appsWithOverlayPermission(): List<String> = try {
+        val pm = appContext.packageManager
+        pm.getPackagesHoldingPermissions(arrayOf(Manifest.permission.SYSTEM_ALERT_WINDOW), 0)
+            .mapNotNull { it.packageName }
+            .filter { it != packageName }
+    } catch (_: Throwable) {
+        emptyList()
+    }
+
+    override fun isAdbEnabled(): Boolean = try {
+        Settings.Global.getInt(appContext.contentResolver, Settings.Global.ADB_ENABLED, 0) == 1
+    } catch (_: Throwable) {
+        false
     }
 
     private fun ByteArray.toHex(): String {
