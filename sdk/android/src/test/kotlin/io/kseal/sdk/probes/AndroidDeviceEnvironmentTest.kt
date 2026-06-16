@@ -2,6 +2,7 @@ package io.kseal.sdk.probes
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -59,5 +60,11 @@ class AndroidDeviceEnvironmentTest {
     @Test
     fun installedPackagesIncludesSelf() {
         assertTrue(env.installedPackages().isNotEmpty())
+    }
+
+    @Test
+    fun isSystemPackageIsSafeForUnknownPackage() {
+        // An unknown package must resolve to false rather than throwing.
+        assertFalse(env.isSystemPackage("com.example.definitely.not.installed"))
     }
 }

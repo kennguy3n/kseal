@@ -2,6 +2,7 @@ package io.kseal.sdk.probes
 
 import android.Manifest
 import android.content.Context
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Debug
@@ -195,6 +196,14 @@ internal class AndroidDeviceEnvironment(context: Context) : DeviceEnvironment {
             .filter { it != packageName }
     } catch (_: Throwable) {
         emptyList()
+    }
+
+    override fun isSystemPackage(packageName: String): Boolean = try {
+        val pm = appContext.packageManager
+        val flags = pm.getApplicationInfo(packageName, 0).flags
+        (flags and (ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP)) != 0
+    } catch (_: Throwable) {
+        false
     }
 
     override fun isAdbEnabled(): Boolean = try {
