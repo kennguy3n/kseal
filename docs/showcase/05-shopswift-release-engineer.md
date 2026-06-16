@@ -65,6 +65,26 @@ that wasn't designed for it.
 
 ---
 
+## Back-tested evidence
+
+The seatbelt is only worth trusting if it's been crash-tested — and the canary controller is
+tested in **both** directions (full numbers in [Evidence & back-testing](evidence-and-backtesting.md)):
+
+- **Rollback fires when it should — and not when it shouldn't.** `controller_test.go`
+  asserts the guardrail rolls back **above** the block-rate threshold *and* is suppressed
+  **below** the minimum-sample count, so a few unlucky early decisions can't trigger a
+  spurious revert.
+- **Bucketing is deterministic and stable.** `bucket_test.go` proves
+  `InCanary(tenant, app, instance, percent)` is deterministic per instance, monotonic in
+  the percentage, and independent across tenants — so an instance doesn't flip cohorts
+  between requests, and one tenant's rollout can't perturb another's.
+- **Signed, cacheable config underneath.** The candidate/stable policies ride the same
+  Ed25519-signed envelope proven by `e2e_config_test.go` (verify + ETag caching + TTL +
+  version rotation) — config verification costs **≈ 49 µs** on device and only runs when a
+  new signed config actually arrives.
+
+---
+
 ## Why it wins for ShopSwift
 
 - **Ship without holding your breath.** 25% exposure, automatic guardrail, instant revert to a
