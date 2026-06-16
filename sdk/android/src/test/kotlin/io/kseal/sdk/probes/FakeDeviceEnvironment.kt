@@ -37,6 +37,7 @@ internal class FakeDeviceEnvironment(
     var inputMethodIds: List<String> = listOf("com.google.android.inputmethod.latin/.LatinIME")
     var defaultInputMethod: String? = "com.google.android.inputmethod.latin/.LatinIME"
     var overlayPackages: List<String> = emptyList()
+    var systemPackages: Set<String> = emptySet()
     var adbEnabled: Boolean = false
 
     override fun systemProperty(key: String): String? = systemProperties[key]
@@ -58,5 +59,6 @@ internal class FakeDeviceEnvironment(
     override fun enabledInputMethodIds(): List<String> = inputMethodIds
     override fun defaultInputMethodId(): String? = defaultInputMethod
     override fun appsWithOverlayPermission(): List<String> = overlayPackages
+    override fun isSystemPackage(packageName: String): Boolean = packageName in systemPackages
     override fun isAdbEnabled(): Boolean = adbEnabled
 }
