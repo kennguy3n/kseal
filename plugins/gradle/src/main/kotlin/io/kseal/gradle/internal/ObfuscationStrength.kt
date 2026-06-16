@@ -6,7 +6,9 @@ package io.kseal.gradle.internal
  * The pass is **off by default** (the task is flag-gated); when enabled it
  * defaults to [LOW], which only encrypts string constants — the safest,
  * behaviour-neutral transform. Higher levels add opaque predicates to a growing
- * share of methods. No level performs VM/dispatcher virtualization, by design.
+ * share of methods; [HIGH] additionally enables MBA substitution and
+ * dispatcher-based control-flow flattening. No level performs VM/dispatcher
+ * virtualization, by design.
  */
 internal enum class ObfuscationStrength {
     /** No transforms. */
@@ -18,11 +20,18 @@ internal enum class ObfuscationStrength {
     /** String encryption + opaque predicates on a seed-chosen subset of methods. */
     MEDIUM,
 
-    /** String encryption + opaque predicates on every eligible method. */
+    /**
+     * String encryption + opaque predicates on every eligible method, plus MBA
+     * substitution and dispatcher-based control-flow flattening (both honouring
+     * [KeepRules] and falling back to the original method on any analysis doubt).
+     */
     HIGH,
     ;
 
-    fun toOptions(keepStrings: Set<String>): BytecodeObfuscator.Options = when (this) {
+    fun toOptions(
+        keepStrings: Set<String>,
+        keepRules: KeepRules? = null,
+    ): BytecodeObfuscator.Options = when (this) {
         OFF -> BytecodeObfuscator.Options(
             encryptStrings = false, opaquePredicates = false, opaqueDensity = 0.0,
             minStringLength = Int.MAX_VALUE, keepStrings = keepStrings,
@@ -38,6 +47,8 @@ internal enum class ObfuscationStrength {
         HIGH -> BytecodeObfuscator.Options(
             encryptStrings = true, opaquePredicates = true, opaqueDensity = 1.0,
             minStringLength = 2, keepStrings = keepStrings,
+            mixedBooleanArithmetic = true, flattenControlFlow = true,
+            keepRules = keepRules,
         )
     }
 

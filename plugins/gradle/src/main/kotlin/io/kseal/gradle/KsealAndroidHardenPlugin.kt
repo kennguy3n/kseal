@@ -118,6 +118,7 @@ class KsealAndroidHardenPlugin : Plugin<Project> {
             seedFile.set(seed.flatMap { it.seedFile })
             strength.set(obfuscationStrength)
             keepStrings.set(ext.obfuscation.keepStrings)
+            keepRuleFiles.from(ext.keepRuleFiles)
             obfuscatedClassesDir.set(ksealOut.map { it.dir("hardened/obfuscated-classes") })
             reportFile.set(ksealOut.map { it.file("reports/obfuscation.json") })
         }

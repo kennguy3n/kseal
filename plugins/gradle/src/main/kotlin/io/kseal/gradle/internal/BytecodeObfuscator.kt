@@ -7,6 +7,8 @@ import org.objectweb.asm.Label
 import org.objectweb.asm.MethodVisitor
 import org.objectweb.asm.Opcodes
 import org.objectweb.asm.Type
+import org.objectweb.asm.tree.ClassNode
+import org.objectweb.asm.tree.MethodNode
 
 /**
  * Per-build, R8/mapping-aware **bytecode control-flow obfuscation** for Android
@@ -57,6 +59,17 @@ internal class BytecodeObfuscator(
         val minStringLength: Int,
         /** Literal values (exact match) never encrypted (e.g. resource lookup keys). */
         val keepStrings: Set<String> = emptySet(),
+        /** Substitute simple integer ops with MBA expressions (strongest tier only). */
+        val mixedBooleanArithmetic: Boolean = false,
+        /** Dispatcher-based control-flow flattening (strongest tier only). */
+        val flattenControlFlow: Boolean = false,
+        /**
+         * `-keep*` rules: kept/entry classes (and their members) are excluded from
+         * the MBA + flattening passes so reflection/JNI/serialization keep working.
+         * The string-encryption and opaque-predicate passes are unaffected (they are
+         * already name-preserving and honour [keepStrings]).
+         */
+        val keepRules: KeepRules? = null,
     )
 
     data class Summary(
@@ -66,8 +79,13 @@ internal class BytecodeObfuscator(
         val methodsWithOpaquePredicate: Int,
         val opaquePredicatesInserted: Int,
         val decoderClassInternalName: String?,
+        val methodsFlattened: Int = 0,
+        val flattenedBlocks: Int = 0,
+        val mbaSubstitutions: Int = 0,
     ) {
-        val applied: Boolean get() = stringLoadsRewritten > 0 || opaquePredicatesInserted > 0
+        val applied: Boolean
+            get() = stringLoadsRewritten > 0 || opaquePredicatesInserted > 0 ||
+                methodsFlattened > 0 || mbaSubstitutions > 0
     }
 
     /** The full result of an obfuscation pass over a set of classes. */
@@ -80,6 +98,7 @@ internal class BytecodeObfuscator(
     )
 
     private val masterKey: ByteArray by lazy { Crypto.deriveKey(seed, "bytecode-string/v1") }
+    private val flattener: ControlFlowFlattener by lazy { ControlFlowFlattener(masterKey) }
 
     /**
      * Obfuscates [classes] (relative path → bytecode). Non-`.class` entries must
@@ -87,17 +106,39 @@ internal class BytecodeObfuscator(
      * decoder class (when string encryption produced any entries).
      */
     fun obfuscate(classes: Map<String, ByteArray>): Result {
+        // Pass 0 (strongest tier only): MBA + control-flow flattening on the tree
+        // representation, before string encryption so the string table and decoder
+        // rewrites see the final instruction set. Purely additive — when neither is
+        // enabled the input is returned untouched, keeping lower tiers byte-identical.
+        var methodsFlattened = 0
+        var flattenedBlocks = 0
+        var mbaSubstitutions = 0
+        val pre: Map<String, ByteArray> =
+            if (options.mixedBooleanArithmetic || options.flattenControlFlow) {
+                val out = LinkedHashMap<String, ByteArray>(classes.size)
+                for ((path, bytes) in classes) {
+                    val tree = treeTransform(bytes)
+                    out[path] = tree.bytes
+                    methodsFlattened += tree.methodsFlattened
+                    flattenedBlocks += tree.flattenedBlocks
+                    mbaSubstitutions += tree.mbaSubstitutions
+                }
+                out
+            } else {
+                classes
+            }
+
         // Pass 1: collect every eligible string literal so each unique plaintext
         // gets a stable, deterministic index (sorted) shared across all classes.
-        val table = if (options.encryptStrings) buildStringTable(classes.values) else StringTable.empty()
+        val table = if (options.encryptStrings) buildStringTable(pre.values) else StringTable.empty()
 
         var classesProcessed = 0
         var rewrites = 0
         var methodsWithPredicate = 0
         var predicates = 0
 
-        val transformed = LinkedHashMap<String, ByteArray>(classes.size)
-        for ((path, bytes) in classes.toSortedMap()) {
+        val transformed = LinkedHashMap<String, ByteArray>(pre.size)
+        for ((path, bytes) in pre.toSortedMap()) {
             val perClass = transformClass(bytes, table)
             transformed[path] = perClass.bytes
             classesProcessed++
@@ -116,8 +157,84 @@ internal class BytecodeObfuscator(
             methodsWithOpaquePredicate = methodsWithPredicate,
             opaquePredicatesInserted = predicates,
             decoderClassInternalName = if (table.isNotEmpty()) DECODER_INTERNAL_NAME else null,
+            methodsFlattened = methodsFlattened,
+            flattenedBlocks = flattenedBlocks,
+            mbaSubstitutions = mbaSubstitutions,
         )
         return Result(transformed, decoder, summary)
+    }
+
+    // ---- Tree pass: MBA + control-flow flattening (strongest tier) --------
+
+    private class TreeResult(
+        val bytes: ByteArray,
+        val methodsFlattened: Int,
+        val flattenedBlocks: Int,
+        val mbaSubstitutions: Int,
+    )
+
+    private fun treeTransform(classBytes: ByteArray): TreeResult =
+        try {
+            treeTransformOrThrow(classBytes)
+        } catch (t: Throwable) {
+            // A single pathological class must never fail a tenant's build: fall
+            // back to the untransformed bytes. The downstream string-encryption /
+            // opaque-predicate pass still applies to it.
+            TreeResult(classBytes, 0, 0, 0)
+        }
+
+    private fun treeTransformOrThrow(classBytes: ByteArray): TreeResult {
+        val node = ClassNode(API)
+        ClassReader(classBytes).accept(node, ClassReader.EXPAND_FRAMES)
+
+        // KeepRules: a kept/entry class is excluded wholesale from both passes.
+        // Keep specs use the dotted, source-level class name (e.g. `com.example.Api`),
+        // so normalise ASM's `/`-separated internal name before matching.
+        if (options.keepRules?.keepsClass(node.name.replace('/', '.')) == true) {
+            return TreeResult(classBytes, 0, 0, 0)
+        }
+
+        var mba = 0
+        if (options.mixedBooleanArithmetic) {
+            for (method in node.methods) {
+                if (skipForTree(method)) continue
+                mba += MbaTransform.apply(method)
+            }
+        }
+
+        // MBA can grow max stack/locals; round-trip through COMPUTE_MAXS so the
+        // flattener's frame analysis observes correct sizes.
+        var working = node
+        if (mba > 0) {
+            val normaliser = ClassWriter(ClassWriter.COMPUTE_MAXS)
+            node.accept(normaliser)
+            working = ClassNode(API)
+            ClassReader(normaliser.toByteArray()).accept(working, ClassReader.EXPAND_FRAMES)
+        }
+
+        var methodsFlattened = 0
+        var blocks = 0
+        if (options.flattenControlFlow) {
+            for (method in working.methods) {
+                if (skipForTree(method)) continue
+                val outcome = flattener.flatten(working.name, method)
+                if (outcome.flattened) {
+                    methodsFlattened++
+                    blocks += outcome.blocks
+                }
+            }
+        }
+
+        if (mba == 0 && methodsFlattened == 0) return TreeResult(classBytes, 0, 0, 0)
+
+        val writer = ClassWriter(ClassWriter.COMPUTE_MAXS)
+        working.accept(writer)
+        return TreeResult(writer.toByteArray(), methodsFlattened, blocks, mba)
+    }
+
+    private fun skipForTree(method: MethodNode): Boolean {
+        if ((method.access and (Opcodes.ACC_ABSTRACT or Opcodes.ACC_NATIVE)) != 0) return true
+        return options.keepRules?.keepsName(method.name) == true
     }
 
     // ---- String table ----------------------------------------------------

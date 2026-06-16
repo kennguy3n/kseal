@@ -3,10 +3,12 @@ package io.kseal.gradle.tasks
 import io.kseal.gradle.internal.BytecodeObfuscator
 import io.kseal.gradle.internal.Crypto
 import io.kseal.gradle.internal.Json
+import io.kseal.gradle.internal.KeepRules
 import io.kseal.gradle.internal.ObfuscationStrength
 import java.io.File
 import org.gradle.api.DefaultTask
 import org.gradle.api.InvalidUserDataException
+import org.gradle.api.file.ConfigurableFileCollection
 import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.provider.ListProperty
@@ -15,6 +17,7 @@ import org.gradle.api.tasks.CacheableTask
 import org.gradle.api.tasks.Classpath
 import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.InputFile
+import org.gradle.api.tasks.InputFiles
 import org.gradle.api.tasks.OutputDirectory
 import org.gradle.api.tasks.OutputFile
 import org.gradle.api.tasks.PathSensitive
@@ -49,6 +52,15 @@ abstract class ObfuscateBytecodeTask : DefaultTask() {
     /** Exact string literals never encrypted (e.g. reflection/resource lookup keys). */
     @get:Input
     abstract val keepStrings: ListProperty<String>
+
+    /**
+     * ProGuard/R8 `-keep*` rule files. Kept/entry classes are excluded from the
+     * (HIGH-tier) MBA + control-flow-flattening passes so reflectively-referenced
+     * code is left structurally intact.
+     */
+    @get:InputFiles
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val keepRuleFiles: ConfigurableFileCollection
 
     @get:OutputDirectory
     abstract val obfuscatedClassesDir: DirectoryProperty
@@ -96,7 +108,10 @@ abstract class ObfuscateBytecodeTask : DefaultTask() {
             report = BytecodeObfuscator.Summary(classFiles.size, 0, 0, 0, 0, null)
         } else {
             val seed = Crypto.unhex(seedFile.get().asFile.readText().trim())
-            val options = strengthLevel.toOptions(keepStrings.getOrElse(emptyList()).toSet())
+            val keepRules = KeepRules.parse(
+                ruleText = keepRuleFiles.files.filter { it.isFile }.joinToString("\n") { it.readText() },
+            )
+            val options = strengthLevel.toOptions(keepStrings.getOrElse(emptyList()).toSet(), keepRules)
             val result = BytecodeObfuscator(seed, options).obfuscate(classFiles)
             for ((rel, bytes) in result.transformedClasses) writeClass(outDir, rel, bytes)
             result.decoderClass?.let { (rel, bytes) -> writeClass(outDir, rel, bytes) }
@@ -115,6 +130,9 @@ abstract class ObfuscateBytecodeTask : DefaultTask() {
                     "string_loads_rewritten" to report.stringLoadsRewritten,
                     "methods_with_opaque_predicate" to report.methodsWithOpaquePredicate,
                     "opaque_predicates_inserted" to report.opaquePredicatesInserted,
+                    "methods_flattened" to report.methodsFlattened,
+                    "flattened_blocks" to report.flattenedBlocks,
+                    "mba_substitutions" to report.mbaSubstitutions,
                     "decoder_class" to report.decoderClassInternalName,
                 ),
             ),
@@ -122,7 +140,9 @@ abstract class ObfuscateBytecodeTask : DefaultTask() {
         logger.lifecycle(
             "kseal: bytecode obfuscation [${strengthLevel.name.lowercase()}] " +
                 "rewrote ${report.stringLoadsRewritten} string load(s), " +
-                "inserted ${report.opaquePredicatesInserted} opaque predicate(s)",
+                "inserted ${report.opaquePredicatesInserted} opaque predicate(s), " +
+                "flattened ${report.methodsFlattened} method(s), " +
+                "substituted ${report.mbaSubstitutions} arithmetic op(s)",
         )
     }
 
