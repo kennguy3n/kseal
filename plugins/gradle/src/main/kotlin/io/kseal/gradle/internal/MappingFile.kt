@@ -29,6 +29,9 @@ internal object MappingComposer {
         val uniqueStringsEncrypted: Int,
         val stringLoadsRewritten: Int,
         val opaquePredicatesInserted: Int,
+        val methodsFlattened: Int = 0,
+        val flattenedBlocks: Int = 0,
+        val mbaSubstitutions: Int = 0,
     )
 
     fun compose(
@@ -54,6 +57,9 @@ internal object MappingComposer {
                 .append(" strings=").append(obfuscation.uniqueStringsEncrypted)
                 .append(" rewrites=").append(obfuscation.stringLoadsRewritten)
                 .append(" opaque-predicates=").append(obfuscation.opaquePredicatesInserted)
+                .append(" flattened-methods=").append(obfuscation.methodsFlattened)
+                .append(" flattened-blocks=").append(obfuscation.flattenedBlocks)
+                .append(" mba-substitutions=").append(obfuscation.mbaSubstitutions)
                 .append('\n')
             obfuscation.decoderClass?.let { sb.append("# bytecode-string-decoder: ").append(it).append('\n') }
         }

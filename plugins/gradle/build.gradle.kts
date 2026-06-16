@@ -15,6 +15,10 @@ dependencies {
     // resolved from mavenCentral; bundled into the plugin runtime classpath.
     implementation(libs.asm)
     implementation(libs.asm.commons)
+    // Tree + dataflow-analysis APIs back the HIGH-tier control-flow-flattening
+    // and MBA passes (basic-block reconstruction + frame/stack reasoning).
+    implementation(libs.asm.tree)
+    implementation(libs.asm.analysis)
 
     // AGP variant API is compile-only: the plugin soft-wires into the Android
     // build only when `com.android.application` is applied (see AgpIntegration),

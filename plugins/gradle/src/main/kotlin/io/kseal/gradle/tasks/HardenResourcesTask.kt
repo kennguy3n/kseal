@@ -155,6 +155,9 @@ abstract class HardenResourcesTask : DefaultTask() {
             uniqueStringsEncrypted = int("unique_strings_encrypted"),
             stringLoadsRewritten = int("string_loads_rewritten"),
             opaquePredicatesInserted = int("opaque_predicates_inserted"),
+            methodsFlattened = int("methods_flattened"),
+            flattenedBlocks = int("flattened_blocks"),
+            mbaSubstitutions = int("mba_substitutions"),
         )
     }
 }

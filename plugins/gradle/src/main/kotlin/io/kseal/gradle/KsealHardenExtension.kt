@@ -80,10 +80,11 @@ abstract class KsealHardenExtension @Inject constructor(objects: ObjectFactory) 
 }
 
 /**
- * Bytecode control-flow obfuscation controls (string-constant encryption +
- * opaque predicates). **Off by default** and fully fail-safe: when [enabled] is
- * false the classes pass through unchanged. The pass is name- and
- * mapping-preserving, so R8's `mapping.txt` keeps resolving for crash
+ * Bytecode control-flow obfuscation controls (string-constant encryption,
+ * opaque predicates, and — at `high` — dispatcher-based control-flow flattening
+ * plus light mixed-boolean-arithmetic). **Off by default** and fully fail-safe:
+ * when [enabled] is false the classes pass through unchanged. Every pass is name-
+ * and mapping-preserving, so R8's `mapping.txt` keeps resolving for crash
  * symbolication. kseal deliberately stops short of VM/dispatcher virtualization
  * (see `docs/build-hardening-android.md`).
  */
@@ -94,7 +95,9 @@ abstract class ObfuscationOptions {
     /**
      * Strength: `low` (string encryption only — the safe default), `medium`
      * (adds opaque predicates to a subset of methods) or `high` (opaque
-     * predicates on every eligible method). Case-insensitive.
+     * predicates on every eligible method, plus control-flow flattening and
+     * mixed-boolean-arithmetic on methods that can be flattened safely).
+     * Case-insensitive.
      */
     abstract val strength: Property<String>
 
