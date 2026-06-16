@@ -20,13 +20,17 @@ import UIKit
 /// off-device (e.g. macOS / Linux CI, where UIKit is unavailable).
 ///
 /// The capture read is injected so the platform-independent logic stays fully
-/// unit-testable on any host; production uses the `UIScreen`-backed default.
+/// unit-testable on any host. In production it reads a process-wide cache
+/// (`ScreenCaptureMonitor`) that is seeded and refreshed on the main thread via
+/// `UIScreen.capturedDidChangeNotification`, so `evaluate()` can run on any
+/// thread without touching UIKit off the main thread and without a
+/// deadlock-prone synchronous main-thread hop.
 struct RemoteAccessDetector: Probe {
     let id = "remote_access"
 
     private let isScreenCaptured: () -> Bool
 
-    /// Production initializer: reads the live `UIScreen` capture state.
+    /// Production initializer: reads the cached, main-thread-maintained capture state.
     init() {
         self.init(isScreenCaptured: RemoteAccessDetector.systemScreenCaptured)
     }
@@ -40,26 +44,75 @@ struct RemoteAccessDetector: Probe {
         isScreenCaptured() ? [.remoteAccess] : []
     }
 
-    /// Reads the live screen-capture state on-device; always `false` where UIKit
-    /// is unavailable (non-iOS hosts). `UIScreen` is a UIKit type that must be
-    /// touched on the main thread, so the read is marshalled there when invoked
-    /// from a background queue (avoids tripping the Main Thread Checker).
+    /// Last-published screen-capture state; always `false` where UIKit is
+    /// unavailable (non-iOS hosts). Reads are lock-guarded and never touch UIKit
+    /// directly, so this is safe to call from any thread.
     private static func systemScreenCaptured() -> Bool {
         #if canImport(UIKit)
-        if Thread.isMainThread {
-            return mainThreadScreenCaptured()
-        }
-        return DispatchQueue.main.sync { mainThreadScreenCaptured() }
+        return ScreenCaptureMonitor.shared.isCaptured
         #else
         return false
         #endif
     }
+}
 
-    #if canImport(UIKit)
-    /// Must be called on the main thread. Prefers the active window scene's
-    /// screen on iOS 16+ (where `UIScreen.main` is deprecated) and falls back to
+#if canImport(UIKit)
+/// Process-wide cache of `UIScreen` capture state.
+///
+/// `UIScreen` is a UIKit type that must be touched on the main thread, but a
+/// probe's `evaluate()` may run on any thread. Rather than hop to the main
+/// thread synchronously on every read — which risks a `DispatchQueue.main.sync`
+/// deadlock if the caller is a background thread the main thread is waiting on —
+/// the value is seeded once and thereafter refreshed on the main thread in
+/// response to `UIScreen.capturedDidChangeNotification`. Readers just see the
+/// last-published `Bool` behind a lock, so reads are non-blocking and thread-safe.
+///
+/// If the monitor is first touched off the main thread, setup is dispatched
+/// there asynchronously; until it runs (typically the next runloop turn) reads
+/// return the default `false`.
+private final class ScreenCaptureMonitor {
+    static let shared = ScreenCaptureMonitor()
+
+    private let lock = NSLock()
+    private var captured = false
+
+    private init() {
+        if Thread.isMainThread {
+            start()
+        } else {
+            DispatchQueue.main.async { [weak self] in self?.start() }
+        }
+    }
+
+    /// Thread-safe snapshot of the most recently published capture state.
+    var isCaptured: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return captured
+    }
+
+    /// Seeds the cache and installs the change observer. Must run on the main thread.
+    private func start() {
+        refresh()
+        NotificationCenter.default.addObserver(
+            forName: UIScreen.capturedDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in self?.refresh() }
+    }
+
+    /// Reads the live capture state (on the main thread) and publishes it.
+    private func refresh() {
+        let value = ScreenCaptureMonitor.currentScreenIsCaptured()
+        lock.lock()
+        captured = value
+        lock.unlock()
+    }
+
+    /// Must be called on the main thread. Prefers the active window scene's screen
+    /// on iOS 16+ (where `UIScreen.main` is deprecated) and falls back to
     /// `UIScreen.main` on iOS 13–15 or when no window scene is connected.
-    private static func mainThreadScreenCaptured() -> Bool {
+    private static func currentScreenIsCaptured() -> Bool {
         if #available(iOS 16.0, *) {
             let windowScenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
             let scene = windowScenes.first { $0.activationState == .foregroundActive } ?? windowScenes.first
@@ -69,5 +122,5 @@ struct RemoteAccessDetector: Probe {
         }
         return UIScreen.main.isCaptured
     }
-    #endif
 }
+#endif
