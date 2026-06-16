@@ -97,6 +97,13 @@ resolved destination. The dial-time IP guard (`guardedDialContext` /
 observes the real target and **cannot block private destinations**. Egress
 policy then lives at the proxy.
 
+Because of this, a proxied transport **disables** the in-process IP guard
+entirely (it dials via a plain `net.Dialer`). This is deliberate: an internal
+egress proxy almost always listens on a private/RFC1918 (or loopback) address,
+which the guard would otherwise reject as non-public — so leaving the guard
+enabled would make `WithProxy` unusable for its primary deployment. The guard
+adds no security in proxy mode anyway, since it cannot see past the proxy.
+
 So if you opt in, the proxy must enforce the SSRF policy that the in-process
 guard otherwise provides — e.g. an allow-listing forward proxy that refuses
 internal/metadata destinations. Leaving the proxy unset (the default) keeps the

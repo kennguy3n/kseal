@@ -39,8 +39,9 @@ codecs, rollout ordering). Pure internal refactors are out of scope.
   egress proxy (signature mirrors `http.Transport.Proxy`, e.g.
   `http.ProxyURL`/`http.ProxyFromEnvironment`). The default is unchanged
   (direct dial, no proxy). **Caveat:** with a proxy set, the dial-time IP guard
-  no longer sees the real destination, so egress policy must be enforced at the
-  proxy. New doc `docs/egress-hardening.md` covers this and the
+  no longer sees the real destination and is disabled for that transport (so the
+  proxy's own private/RFC1918 address is reachable); egress policy must then be
+  enforced at the proxy. New doc `docs/egress-hardening.md` covers this and the
   redirect-not-followed (3xx = delivery failure) behavior.
 - **Name-based egress signals (`risk_signals`).** Webhook and SIEM payloads now
   emit a stable, name-based view of the risk bits (e.g.

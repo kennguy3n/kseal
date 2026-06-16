@@ -77,9 +77,11 @@ type config struct {
 // Security trade-off: with a proxy set, this process connects to the proxy
 // rather than the resolved destination, so the dial-time IP guard
 // (guardedDialContext / IsPublicIP) no longer observes the real target address
-// and cannot block private destinations. When you opt in, egress policy must be
-// enforced at the proxy instead (e.g. an allowlisting forward proxy). Leave it
-// unset to keep the in-process SSRF guard authoritative.
+// and cannot block private destinations. The guard is therefore disabled on a
+// proxied transport — otherwise it would reject the proxy's own (typically
+// private) address. When you opt in, egress policy must be enforced at the
+// proxy instead (e.g. an allowlisting forward proxy). Leave it unset to keep
+// the in-process SSRF guard authoritative.
 func WithProxy(fn func(*http.Request) (*url.URL, error)) Option {
 	return func(c *config) { c.proxy = fn }
 }
@@ -118,9 +120,19 @@ func Client(timeout time.Duration, opts ...Option) *http.Client {
 func NewTransport(opts ...Option) *http.Transport {
 	cfg := newConfig(opts)
 	base := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
+	// With a proxy configured, http.Transport invokes DialContext to reach the
+	// proxy (often a private/RFC1918 host) rather than the destination, so the
+	// resolved-IP guard would reject the proxy itself and can no longer observe
+	// the real target anyway. Egress policy then lives at the proxy, so dial it
+	// directly; otherwise keep the in-process guard authoritative. See
+	// docs/egress-hardening.md.
+	dial := guardedDialContext(base)
+	if cfg.proxy != nil {
+		dial = base.DialContext
+	}
 	return &http.Transport{
 		Proxy:                 cfg.proxy,
-		DialContext:           guardedDialContext(base),
+		DialContext:           dial,
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          100,
 		MaxIdleConnsPerHost:   4,

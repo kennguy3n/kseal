@@ -120,6 +120,42 @@ func TestProxyOptIn(t *testing.T) {
 	}
 }
 
+// TestProxyDialReachesPrivateProxy proves the opt-in path actually works for its
+// primary use case: an egress proxy on a private/loopback address. The dial-time
+// IP guard (which TestClientBlocksLoopback shows rejects loopback) must be
+// bypassed when a proxy is configured, otherwise the proxy itself is unreachable.
+func TestProxyDialReachesPrivateProxy(t *testing.T) {
+	var seenHost string
+	// httptest binds to loopback (127.0.0.1), a non-public address the guard
+	// blocks for direct dials — here it stands in for an internal egress proxy.
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenHost = r.Host
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer proxy.Close()
+
+	proxyURL, err := url.Parse(proxy.URL)
+	if err != nil {
+		t.Fatalf("parse proxy URL: %v", err)
+	}
+
+	// The destination host is never resolved or dialed by the client: for HTTP
+	// proxying the absolute URL is sent to the proxy, so only the loopback proxy
+	// is dialed. Without the guard bypass this fails with ErrBlockedAddress.
+	c := Client(2*time.Second, WithProxy(http.ProxyURL(proxyURL)))
+	resp, err := c.Get("http://destination.example.com/path")
+	if err != nil {
+		t.Fatalf("request through private-address proxy failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("expected 204 from proxy, got %d", resp.StatusCode)
+	}
+	if seenHost != "destination.example.com" {
+		t.Fatalf("proxy saw unexpected destination Host: %q", seenHost)
+	}
+}
+
 // TestClientBlocksLoopback proves the dialer refuses to connect to a loopback
 // httptest server even though it is reachable — the SSRF guard in action.
 func TestClientBlocksLoopback(t *testing.T) {
