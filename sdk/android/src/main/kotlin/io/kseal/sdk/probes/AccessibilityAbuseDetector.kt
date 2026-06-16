@@ -55,22 +55,24 @@ internal class AccessibilityAbuseDetector(private val env: DeviceEnvironment) : 
         /**
          * Platform / major-OEM namespaces whose accessibility services are
          * first-party. Covering the large non-Pixel/Samsung OEMs (Huawei, Xiaomi,
-         * OnePlus, Oppo/ColorOS, Vivo) keeps the bit from firing on their shipped
-         * assistive services and skewing scoring calibration on those populations.
-         * Prefix trust is spoofable by a sideloaded app, but that is acceptable
-         * here for the same reason the rest of the check is — the signal is fused,
-         * not trusted in isolation (see class doc).
+         * OnePlus, Oppo/ColorOS/OPlus, Vivo) keeps the bit from firing on their
+         * shipped assistive services and skewing scoring calibration on those
+         * populations. Prefix trust is spoofable by a sideloaded app, but that is
+         * acceptable here for the same reason the rest of the check is — the signal
+         * is fused, not trusted in isolation (see class doc).
          */
         val SYSTEM_PACKAGE_PREFIXES = listOf(
             "com.android.",
             "com.google.android.",
             "com.samsung.",
-            "com.sec.android.",
+            "com.sec.",
             "com.huawei.",
             "com.xiaomi.",
+            "com.mi.",
             "com.miui.",
             "com.oneplus.",
             "com.oppo.",
+            "com.oplus.",
             "com.coloros.",
             "com.vivo.",
         )

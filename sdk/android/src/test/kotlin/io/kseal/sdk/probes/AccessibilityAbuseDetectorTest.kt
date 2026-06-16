@@ -72,6 +72,20 @@ class AccessibilityAbuseDetectorTest {
     }
 
     @Test
+    fun secondaryOemNamespacesAreBenign() {
+        val env = FakeDeviceEnvironment()
+        env.accessibilityServices = listOf(
+            // OPlus: unified newer-ColorOS namespace (Oppo/OnePlus/Realme).
+            "com.oplus.accessibility/com.oplus.accessibility.SomeService",
+            // Samsung secondary namespace without the .android. segment.
+            "com.sec.android.app.accessibility/com.sec.SomeService",
+            // Xiaomi secondary namespace without the ui suffix.
+            "com.mi.accessibility/com.mi.accessibility.SomeService",
+        )
+        assertTrue(AccessibilityAbuseDetector(env).evaluate().isEmpty())
+    }
+
+    @Test
     fun bareAndroidFrameworkPackageIsBenign() {
         val env = FakeDeviceEnvironment()
         env.accessibilityServices = listOf("android/android.SomeFrameworkService")
