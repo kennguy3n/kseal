@@ -13,6 +13,7 @@ import (
 	"time"
 
 	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
+	"github.com/kennguy3n/kseal/server/shared/safehttp"
 )
 
 // ExporterConfig tunes the async exporter. Zero values fall back to defaults.
@@ -43,6 +44,12 @@ type ExporterConfig struct {
 	// GzipMinBytes is the body size at/above which gzip is applied (when the
 	// sink supports it). Small bodies skip compression.
 	GzipMinBytes int
+
+	// HTTPClient overrides the outbound client. Production leaves this nil and
+	// gets an SSRF-hardened client (safehttp.Client) that refuses to export to
+	// private/loopback/link-local addresses; tests inject a permissive client to
+	// reach a loopback httptest sink.
+	HTTPClient *http.Client
 }
 
 func (c *ExporterConfig) withDefaults() {
@@ -105,11 +112,16 @@ type Exporter struct {
 // but production passes the Postgres store and a registered Metrics.
 func NewExporter(store ConnectorStore, cfg ExporterConfig, metrics *Metrics) *Exporter {
 	cfg.withDefaults()
-	return &Exporter{
-		store: store,
+	client := cfg.HTTPClient
+	if client == nil {
 		// No client-level timeout: each attempt is bounded by a per-request
 		// context deadline (cfg.Timeout) in send(), keeping one source of truth.
-		client:  &http.Client{},
+		// The transport's dialer rejects non-public destinations (SSRF guard).
+		client = safehttp.Client(0)
+	}
+	return &Exporter{
+		store:   store,
+		client:  client,
 		cfg:     cfg,
 		metrics: metrics,
 		now:     time.Now,

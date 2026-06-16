@@ -9,6 +9,7 @@ import (
 	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
 	"github.com/kennguy3n/kseal/server/gen/kseal/v1/ksealv1connect"
 	"github.com/kennguy3n/kseal/server/shared/auth"
+	"github.com/kennguy3n/kseal/server/shared/safehttp"
 )
 
 // Service implements the Connect SiemService: register, list, and delete
@@ -56,6 +57,9 @@ func (s *Service) RegisterConnector(ctx context.Context, req *connect.Request[ks
 	}
 	if req.Msg.AuthSecret == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("auth_secret required"))
+	}
+	if err := safehttp.ValidateURL(req.Msg.Endpoint); err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 	c, err := s.store.CreateConnector(ctx, CreateConnectorInput{
 		TenantID:               tenant,

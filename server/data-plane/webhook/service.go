@@ -12,6 +12,7 @@ import (
 	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
 	"github.com/kennguy3n/kseal/server/gen/kseal/v1/ksealv1connect"
 	"github.com/kennguy3n/kseal/server/shared/auth"
+	"github.com/kennguy3n/kseal/server/shared/safehttp"
 )
 
 // Service implements the Connect WebhookService.
@@ -51,6 +52,9 @@ func mapErr(err error) error {
 func (s *Service) RegisterWebhook(ctx context.Context, req *connect.Request[ksealv1.RegisterWebhookRequest]) (*connect.Response[ksealv1.RegisterWebhookResponse], error) {
 	if err := requireTenant(ctx, req.Msg.TenantId); err != nil {
 		return nil, err
+	}
+	if err := safehttp.ValidateURL(req.Msg.Url); err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 	wh, err := s.store.CreateWebhook(ctx, req.Msg.TenantId, req.Msg.Url, req.Msg.EventTypes)
 	if err != nil {

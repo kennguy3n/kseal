@@ -14,6 +14,14 @@ codecs, rollout ordering). Pure internal refactors are out of scope.
 
 ### Changed
 
+- **SSRF egress guard now also blocks non-routable documentation,
+  benchmarking, and 6to4-relay ranges.** `safehttp.IsPublicIP` additionally
+  rejects TEST-NET-1/2/3 (`192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`;
+  RFC 5737), benchmarking `198.18.0.0/15` (RFC 2544), 6to4 relay anycast
+  `192.88.99.0/24` (RFC 7526), and the IPv6 documentation prefix
+  `2001:db8::/32` (RFC 3849). A webhook or SIEM endpoint that resolves to one
+  of these is refused at dial time, same as the existing private/metadata
+  ranges. Real public addresses are unaffected. See `docs/egress-hardening.md`.
 - **Egress `risk_bits` is now the server scoring layout (not the device/wire
   layout).** Webhook and SIEM payloads previously leaked the raw device-reported
   bitset; both paths now normalize to the server layout before emitting, so
@@ -26,6 +34,19 @@ codecs, rollout ordering). Pure internal refactors are out of scope.
 
 ### Added
 
+- **Opt-in egress proxy for outbound webhook/SIEM delivery.**
+  `safehttp.WithProxy` lets a deployment route outbound HTTP(S) through an
+  egress proxy (signature mirrors `http.Transport.Proxy`, e.g.
+  `http.ProxyURL`/`http.ProxyFromEnvironment`). The default is unchanged
+  (direct dial, no proxy). **Caveat:** for a request the proxy func proxies, the
+  dial-time IP guard cannot see the real destination, so egress policy for
+  proxied traffic must be enforced at the proxy. The guard is **not** disabled
+  wholesale: the transport allows only the proxy's own (operator-controlled)
+  address through and still gates every direct dial — including the `NO_PROXY`
+  direct dial `http.ProxyFromEnvironment` performs when the proxy func returns
+  `nil` — so a tenant URL can't reach private/metadata addresses via the
+  no-proxy fallback. New doc `docs/egress-hardening.md` covers this and the
+  redirect-not-followed (3xx = delivery failure) behavior.
 - **Name-based egress signals (`risk_signals`).** Webhook and SIEM payloads now
   emit a stable, name-based view of the risk bits (e.g.
   `["debugger","app_tamper"]`) alongside the raw integer. Names are the external
