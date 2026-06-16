@@ -41,7 +41,7 @@ internal class OverlayDetector(private val env: DeviceEnvironment) : Probe {
 
     private companion object {
         /** Exact first-party packages that routinely hold `SYSTEM_ALERT_WINDOW`. */
-        val SYSTEM_PACKAGES = hashSetOf(
+        val SYSTEM_PACKAGES = setOf(
             "android",
         )
 
