@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 )
@@ -38,7 +39,8 @@ func TestValidateURL(t *testing.T) {
 }
 
 func TestIsPublicIP(t *testing.T) {
-	public := []string{"1.1.1.1", "8.8.8.8", "203.0.113.10", "2606:4700:4700::1111"}
+	// Real, globally routable addresses must stay reachable.
+	public := []string{"1.1.1.1", "8.8.8.8", "2606:4700:4700::1111"}
 	for _, s := range public {
 		if !IsPublicIP(net.ParseIP(s)) {
 			t.Errorf("IsPublicIP(%s) = false, want true", s)
@@ -58,6 +60,12 @@ func TestIsPublicIP(t *testing.T) {
 		"fd00::1",         // ULA
 		"fe80::1",         // link-local v6
 		"224.0.0.1",       // multicast
+		"192.0.2.1",       // TEST-NET-1 (RFC 5737)
+		"198.51.100.1",    // TEST-NET-2 (RFC 5737)
+		"203.0.113.10",    // TEST-NET-3 (RFC 5737) — was previously asserted public
+		"198.18.0.1",      // benchmarking 198.18.0.0/15 (RFC 2544), low end
+		"198.19.255.255",  // benchmarking 198.18.0.0/15 (RFC 2544), high end
+		"192.88.99.1",     // 6to4 relay anycast (RFC 7526)
 	}
 	for _, s := range blocked {
 		if IsPublicIP(net.ParseIP(s)) {
@@ -66,6 +74,48 @@ func TestIsPublicIP(t *testing.T) {
 	}
 	if IsPublicIP(nil) {
 		t.Error("IsPublicIP(nil) = true, want false")
+	}
+}
+
+// TestProxyOptIn proves egress proxying is off by default and that WithProxy
+// wires the caller's proxy func into the transport's request path. The stub
+// returns an error so the request short-circuits before any dial, keeping the
+// test deterministic and free of real network access.
+func TestProxyOptIn(t *testing.T) {
+	// Default: no proxy, behaviour unchanged from a direct-dial transport.
+	if tr := NewTransport(); tr.Proxy != nil {
+		t.Fatal("NewTransport() must not set a proxy by default")
+	}
+	if tr, ok := Client(time.Second).Transport.(*http.Transport); !ok || tr.Proxy != nil {
+		t.Fatal("Client(timeout) must not set a proxy by default")
+	}
+
+	// Opt-in: WithProxy installs the func and the transport consults it.
+	sentinel := errors.New("stub proxy consulted")
+	var seen *url.URL
+	stub := func(r *http.Request) (*url.URL, error) {
+		seen = r.URL
+		return nil, sentinel
+	}
+
+	tr := NewTransport(WithProxy(stub))
+	if tr.Proxy == nil {
+		t.Fatal("WithProxy must set transport.Proxy")
+	}
+
+	c := &http.Client{Transport: tr}
+	_, err := c.Get("http://destination.example.com/path")
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("expected the proxy func to be consulted (sentinel error), got %v", err)
+	}
+	if seen == nil || seen.Host != "destination.example.com" {
+		t.Fatalf("proxy func saw unexpected request URL: %v", seen)
+	}
+
+	// Opt-in also propagates through the Client wrapper.
+	ct, ok := Client(time.Second, WithProxy(stub)).Transport.(*http.Transport)
+	if !ok || ct.Proxy == nil {
+		t.Fatal("Client(timeout, WithProxy(...)) must propagate the proxy to its transport")
 	}
 }
 
