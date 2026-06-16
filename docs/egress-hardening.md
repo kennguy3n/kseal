@@ -91,21 +91,32 @@ callers (`safehttp.Client(timeout)`) are unchanged.
 
 ### Security trade-off when a proxy is set
 
-When a proxy is configured, this process connects to the **proxy**, not the
-resolved destination. The dial-time IP guard (`guardedDialContext` /
-`IsPublicIP`) therefore only ever sees the proxy's address — it no longer
-observes the real target and **cannot block private destinations**. Egress
-policy then lives at the proxy.
+When the proxy func returns a URL for a request, this process connects to the
+**proxy**, not the resolved destination. The dial-time IP guard
+(`guardedDialContext` / `IsPublicIP`) therefore cannot observe the real target
+for that request, so egress policy for proxied traffic lives at the proxy. If
+you opt in, the proxy must enforce the SSRF policy the in-process guard
+otherwise provides — e.g. an allow-listing forward proxy that refuses
+internal/metadata destinations.
 
-Because of this, a proxied transport **disables** the in-process IP guard
-entirely (it dials via a plain `net.Dialer`). This is deliberate: an internal
-egress proxy almost always listens on a private/RFC1918 (or loopback) address,
-which the guard would otherwise reject as non-public — so leaving the guard
-enabled would make `WithProxy` unusable for its primary deployment. The guard
-adds no security in proxy mode anyway, since it cannot see past the proxy.
+The guard is **not** disabled wholesale, however. An internal egress proxy
+almost always listens on a private/RFC1918 (or loopback) address, which the
+guard would otherwise reject as non-public. Rather than turning the guard off
+for the whole transport, the transport learns the proxy's own host:port (by
+observing what the proxy func returns) and allows **only that exact address**
+through the guard. Every other dial — in particular a **direct** dial, which is
+what `http.Transport` performs when the proxy func returns `nil` for a request
+(e.g. `http.ProxyFromEnvironment` honoring `NO_PROXY`) — is still gated by the
+resolved-IP check.
 
-So if you opt in, the proxy must enforce the SSRF policy that the in-process
-guard otherwise provides — e.g. an allow-listing forward proxy that refuses
-internal/metadata destinations. Leaving the proxy unset (the default) keeps the
-in-process guard authoritative and is the recommended posture unless your
-network design specifically requires a proxy.
+This distinction matters: a transport configured with `http.ProxyFromEnvironment`
+will dial some hosts through the proxy and others directly depending on
+`NO_PROXY`. Disabling the guard for the whole transport would let a
+tenant-controlled URL that matches `NO_PROXY` reach `169.254.169.254`, loopback,
+or an RFC1918 address via the un-proxied direct dial. Keeping the guard active
+for direct dials closes that gap while still letting the (operator-controlled)
+proxy address through.
+
+Leaving the proxy unset (the default) keeps the in-process guard authoritative
+for all traffic and is the recommended posture unless your network design
+specifically requires a proxy.

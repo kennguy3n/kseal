@@ -38,10 +38,14 @@ codecs, rollout ordering). Pure internal refactors are out of scope.
   `safehttp.WithProxy` lets a deployment route outbound HTTP(S) through an
   egress proxy (signature mirrors `http.Transport.Proxy`, e.g.
   `http.ProxyURL`/`http.ProxyFromEnvironment`). The default is unchanged
-  (direct dial, no proxy). **Caveat:** with a proxy set, the dial-time IP guard
-  no longer sees the real destination and is disabled for that transport (so the
-  proxy's own private/RFC1918 address is reachable); egress policy must then be
-  enforced at the proxy. New doc `docs/egress-hardening.md` covers this and the
+  (direct dial, no proxy). **Caveat:** for a request the proxy func proxies, the
+  dial-time IP guard cannot see the real destination, so egress policy for
+  proxied traffic must be enforced at the proxy. The guard is **not** disabled
+  wholesale: the transport allows only the proxy's own (operator-controlled)
+  address through and still gates every direct dial — including the `NO_PROXY`
+  direct dial `http.ProxyFromEnvironment` performs when the proxy func returns
+  `nil` — so a tenant URL can't reach private/metadata addresses via the
+  no-proxy fallback. New doc `docs/egress-hardening.md` covers this and the
   redirect-not-followed (3xx = delivery failure) behavior.
 - **Name-based egress signals (`risk_signals`).** Webhook and SIEM payloads now
   emit a stable, name-based view of the risk bits (e.g.

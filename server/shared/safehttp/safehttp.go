@@ -30,6 +30,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 )
 
@@ -65,8 +66,8 @@ type Option func(*config)
 // config holds the resolved option values for a Client/Transport.
 type config struct {
 	// proxy mirrors http.Transport.Proxy: nil means dial destinations
-	// directly (the default), which is the only mode in which the dial-time
-	// IP guard is authoritative.
+	// directly (the default). When set, the guard still gates direct dials;
+	// only the proxy's own address is allowed through it.
 	proxy func(*http.Request) (*url.URL, error)
 }
 
@@ -74,14 +75,16 @@ type config struct {
 // http.Transport.Proxy (return a nil *url.URL to dial a given request directly).
 // Passing fn == nil is a no-op and keeps the direct-dial default.
 //
-// Security trade-off: with a proxy set, this process connects to the proxy
-// rather than the resolved destination, so the dial-time IP guard
-// (guardedDialContext / IsPublicIP) no longer observes the real target address
-// and cannot block private destinations. The guard is therefore disabled on a
-// proxied transport — otherwise it would reject the proxy's own (typically
-// private) address. When you opt in, egress policy must be enforced at the
-// proxy instead (e.g. an allowlisting forward proxy). Leave it unset to keep
-// the in-process SSRF guard authoritative.
+// Security model: the resolved-IP guard stays active for every dial. When fn
+// returns a proxy URL, this process connects to the proxy rather than the
+// resolved destination, so the guard can no longer observe the real target and
+// egress policy must be enforced at the proxy instead (e.g. an allowlisting
+// forward proxy). To make that reachable, the transport allows the proxy's own
+// (typically private/RFC1918) address through the guard — but only that exact
+// address. Crucially, when fn returns nil for a request (a direct dial, e.g.
+// http.ProxyFromEnvironment honoring NO_PROXY), that dial is still guarded, so
+// a tenant-controlled destination can never reach a private address by riding
+// the no-proxy fallback. Leave it unset to keep the guard fully authoritative.
 func WithProxy(fn func(*http.Request) (*url.URL, error)) Option {
 	return func(c *config) { c.proxy = fn }
 }
@@ -113,25 +116,46 @@ func Client(timeout time.Duration, opts ...Option) *http.Client {
 }
 
 // NewTransport builds an *http.Transport whose DialContext rejects connections
-// to non-public addresses. By default it sets no Proxy: the IP guard is only
-// authoritative when this process dials the destination directly, since routing
-// through a proxy would hide the real target IP from the guard. Pass WithProxy
-// to opt into an egress proxy, accepting that trade-off.
+// to non-public addresses. By default it sets no Proxy. Pass WithProxy to opt
+// into an egress proxy: the guard then continues to gate every direct dial and
+// allows through only the proxy's own (operator-controlled) address, since a
+// dial to the proxy can no longer observe the real target. See WithProxy and
+// docs/egress-hardening.md for the trade-off.
 func NewTransport(opts ...Option) *http.Transport {
 	cfg := newConfig(opts)
 	base := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
-	// With a proxy configured, http.Transport invokes DialContext to reach the
-	// proxy (often a private/RFC1918 host) rather than the destination, so the
-	// resolved-IP guard would reject the proxy itself and can no longer observe
-	// the real target anyway. Egress policy then lives at the proxy, so dial it
-	// directly; otherwise keep the in-process guard authoritative. See
-	// docs/egress-hardening.md.
-	dial := guardedDialContext(base)
-	if cfg.proxy != nil {
-		dial = base.DialContext
+	guarded := guardedDialContext(base)
+
+	proxy := cfg.proxy
+	dial := guarded
+	if proxy != nil {
+		// http.Transport calls DialContext with the proxy's host:port when the
+		// proxy function returns a URL, and with the destination's host:port
+		// when it returns nil (a direct dial, e.g. NO_PROXY). The guard must
+		// stay active for those direct dials — otherwise a tenant URL could
+		// reach a private address via the no-proxy fallback — so we keep the
+		// guard on every dial and allow through only the proxy's own address,
+		// which is operator-controlled and typically private. We learn proxy
+		// addresses by wrapping the proxy function: http.Transport always calls
+		// it before dialing, so the address is recorded before the guard runs.
+		allow := &proxyAddrSet{seen: make(map[string]struct{})}
+		proxy = func(req *http.Request) (*url.URL, error) {
+			u, err := cfg.proxy(req)
+			if err == nil && u != nil {
+				allow.add(proxyDialAddr(u))
+			}
+			return u, err
+		}
+		dial = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			if allow.has(addr) {
+				return base.DialContext(ctx, network, addr)
+			}
+			return guarded(ctx, network, addr)
+		}
 	}
+
 	return &http.Transport{
-		Proxy:                 cfg.proxy,
+		Proxy:                 proxy,
 		DialContext:           dial,
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          100,
@@ -140,6 +164,48 @@ func NewTransport(opts ...Option) *http.Transport {
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: time.Second,
 	}
+}
+
+// proxyAddrSet records the host:port of every proxy URL a user proxy function
+// returns, so the dialer can tell a dial to the proxy (allowed even when the
+// proxy is on a private address) from a direct dial to a tenant-controlled
+// destination (which must still pass the resolved-IP guard). The set of proxy
+// endpoints is operator-defined and tiny, so the map stays small.
+type proxyAddrSet struct {
+	mu   sync.RWMutex
+	seen map[string]struct{}
+}
+
+func (p *proxyAddrSet) add(addr string) {
+	p.mu.Lock()
+	p.seen[addr] = struct{}{}
+	p.mu.Unlock()
+}
+
+func (p *proxyAddrSet) has(addr string) bool {
+	p.mu.RLock()
+	_, ok := p.seen[addr]
+	p.mu.RUnlock()
+	return ok
+}
+
+// proxyDialAddr mirrors net/http's canonicalAddr: the host:port string that
+// http.Transport passes to DialContext when connecting to this proxy URL. The
+// default port is filled in from the scheme so the value matches the address
+// the transport actually dials.
+func proxyDialAddr(u *url.URL) string {
+	port := u.Port()
+	if port == "" {
+		switch u.Scheme {
+		case "http":
+			port = "80"
+		case "https":
+			port = "443"
+		case "socks5", "socks5h":
+			port = "1080"
+		}
+	}
+	return net.JoinHostPort(u.Hostname(), port)
 }
 
 // guardedDialContext resolves the host, refuses the dial if any resolved

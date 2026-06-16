@@ -122,8 +122,8 @@ func TestProxyOptIn(t *testing.T) {
 
 // TestProxyDialReachesPrivateProxy proves the opt-in path actually works for its
 // primary use case: an egress proxy on a private/loopback address. The dial-time
-// IP guard (which TestClientBlocksLoopback shows rejects loopback) must be
-// bypassed when a proxy is configured, otherwise the proxy itself is unreachable.
+// IP guard (which TestClientBlocksLoopback shows rejects loopback) must allow
+// the proxy's own address through, otherwise the proxy itself is unreachable.
 func TestProxyDialReachesPrivateProxy(t *testing.T) {
 	var seenHost string
 	// httptest binds to loopback (127.0.0.1), a non-public address the guard
@@ -153,6 +153,39 @@ func TestProxyDialReachesPrivateProxy(t *testing.T) {
 	}
 	if seenHost != "destination.example.com" {
 		t.Fatalf("proxy saw unexpected destination Host: %q", seenHost)
+	}
+}
+
+// TestProxyNilFallbackStillGuardsDirectDial proves the guard stays active for
+// direct dials even when a proxy func is configured. A proxy func returning nil
+// means "dial directly" (the http.ProxyFromEnvironment + NO_PROXY case); such a
+// dial to a private/loopback destination must still be blocked, otherwise a
+// tenant URL could reach internal addresses via the no-proxy fallback.
+func TestProxyNilFallbackStillGuardsDirectDial(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	// A proxy func that always returns nil routes every request to a direct
+	// dial — the proxy address allow-list stays empty, so the guard applies.
+	var consulted bool
+	direct := func(*http.Request) (*url.URL, error) {
+		consulted = true
+		return nil, nil
+	}
+
+	c := Client(2*time.Second, WithProxy(direct))
+	resp, err := c.Get(srv.URL) // srv.URL is a loopback (non-public) address
+	if err == nil {
+		_ = resp.Body.Close()
+		t.Fatalf("expected direct dial under nil-proxy fallback to be blocked, got status %d", resp.StatusCode)
+	}
+	if !errors.Is(err, ErrBlockedAddress) {
+		t.Fatalf("expected ErrBlockedAddress for guarded direct dial, got %v", err)
+	}
+	if !consulted {
+		t.Fatal("proxy func was never consulted")
 	}
 }
 
