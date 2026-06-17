@@ -79,7 +79,10 @@ abstract class HardenNativeLibrariesTask : DefaultTask() {
         )
 
         for ((logicalPath, file) in collectLibraries().toSortedMap()) {
-            val result = ElfInspector.inspect(file)
+            // Read each .so once and share the bytes across both inspectors; a
+            // release library is large, so re-reading per inspector doubled I/O.
+            val bytes = file.readBytes()
+            val result = ElfInspector.inspect(bytes)
             file.copyTo(File(outDir, logicalPath).also { it.parentFile?.mkdirs() }, overwrite = true)
 
             tally(summary, "cfi", result.cfi)
@@ -93,7 +96,7 @@ abstract class HardenNativeLibrariesTask : DefaultTask() {
             tally(summary, "fortify", result.fortify)
             if (result.cfi == ElfInspector.Status.INDETERMINATE) summary["indeterminate"] = summary.getValue("indeterminate") + 1
 
-            val strings = NativeStringObfuscationInspector.inspect(file)
+            val strings = NativeStringObfuscationInspector.inspectBytes(bytes)
             val stringsKey = "string_obfuscation_${strings.status.name.lowercase()}"
             summary[stringsKey] = summary.getValue(stringsKey) + 1
 
