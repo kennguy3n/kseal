@@ -1,11 +1,15 @@
 #if canImport(Darwin)
 import Foundation
 import Darwin
+import CKseal
 #if canImport(Security)
 import Security
 #endif
 #if canImport(MachO)
 import MachO
+#endif
+#if canImport(CryptoKit)
+import CryptoKit
 #endif
 
 /// Production `DesktopEnvironment` reading the real macOS process using only
@@ -72,6 +76,27 @@ final class MacDesktopEnvironment: DesktopEnvironment {
         let result = sysctl(&mib, u_int(mib.count), &info, &size, nil, 0)
         guard result == 0 else { return false }
         return (info.kp_proc.p_flag & P_TRACED) != 0
+    }
+
+    func nativeDebuggerPresent() -> Int32 {
+        // Native (Rust) sysctl `P_TRACED` check over the trust-core C ABI.
+        // Returns 1/0/-1; the SDK is fail-safe on the negative sentinel.
+        kseal_native_debugger_present()
+    }
+
+    func nativeHookPresent() -> Int32 {
+        // Native (Rust) dyld-image scan for injected instrumentation.
+        kseal_native_hook_present()
+    }
+
+    func sha256OfFile(_ path: String) -> String? {
+        #if canImport(CryptoKit)
+        let url = URL(fileURLWithPath: path)
+        guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return nil }
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        #else
+        return nil
+        #endif
     }
 
     var bundleIdentifier: String? { bundle.bundleIdentifier }

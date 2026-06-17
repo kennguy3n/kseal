@@ -131,6 +131,18 @@ final class IntegrityProbeTests: XCTestCase {
         XCTAssertTrue(DylibInjectionProbe(env).evaluate().isEmpty)
     }
 
+    func testNativeHookPresentRaisesHooking() {
+        let env = FakeDesktopEnvironment()
+        env.nativeHook = 1
+        XCTAssertEqual(DylibInjectionProbe(env).evaluate(), [.hooking])
+    }
+
+    func testNativeHookUnavailableIsClean() {
+        let env = FakeDesktopEnvironment()
+        env.nativeHook = -1
+        XCTAssertTrue(DylibInjectionProbe(env).evaluate().isEmpty)
+    }
+
     // MARK: - Debugger (opt-in)
 
     func testDebuggerProbeDetectsTrace() {
@@ -141,5 +153,74 @@ final class IntegrityProbeTests: XCTestCase {
 
     func testDebuggerProbeCleanWhenUntraced() {
         XCTAssertTrue(DebuggerProbe(FakeDesktopEnvironment()).evaluate().isEmpty)
+    }
+
+    func testDebuggerProbeDetectsNativeTracer() {
+        let env = FakeDesktopEnvironment()
+        env.nativeDebugger = 1
+        XCTAssertEqual(DebuggerProbe(env).evaluate(), [.debugger])
+    }
+
+    func testDebuggerProbeNativeUnavailableIsClean() {
+        let env = FakeDesktopEnvironment()
+        env.nativeDebugger = -1
+        XCTAssertTrue(DebuggerProbe(env).evaluate().isEmpty)
+    }
+
+    // MARK: - Self-integrity (digest baseline)
+
+    private let codePath = "/Applications/App.app/Contents/MacOS/App"
+    private let artifactPath = "/Applications/App.app/Contents/Info.plist"
+    private let baseline = String(repeating: "ab", count: 32)
+
+    func testSelfIntegrityEmptyPolicyIsSilent() {
+        let env = FakeDesktopEnvironment()
+        XCTAssertTrue(SelfIntegrityProbe(env, policy: DesktopTamperPolicy()).evaluate().isEmpty)
+    }
+
+    func testSelfIntegrityMatchingCodeDigestIsClean() {
+        let env = FakeDesktopEnvironment()
+        env.fileDigests[codePath] = baseline
+        let policy = DesktopTamperPolicy(expectedCodeSha256: [codePath: baseline])
+        XCTAssertTrue(SelfIntegrityProbe(env, policy: policy).evaluate().isEmpty)
+    }
+
+    func testSelfIntegrityCaseInsensitiveCodeDigestIsClean() {
+        let env = FakeDesktopEnvironment()
+        env.fileDigests[codePath] = baseline.uppercased()
+        let policy = DesktopTamperPolicy(expectedCodeSha256: [codePath: baseline])
+        XCTAssertTrue(SelfIntegrityProbe(env, policy: policy).evaluate().isEmpty)
+    }
+
+    func testSelfIntegrityMismatchedCodeDigestRaisesTamper() {
+        let env = FakeDesktopEnvironment()
+        env.fileDigests[codePath] = String(repeating: "cd", count: 32)
+        let policy = DesktopTamperPolicy(expectedCodeSha256: [codePath: baseline])
+        XCTAssertEqual(SelfIntegrityProbe(env, policy: policy).evaluate(), [.tamper])
+    }
+
+    func testSelfIntegrityMismatchedArtifactDigestRaisesAppIntegrity() {
+        let env = FakeDesktopEnvironment()
+        env.fileDigests[artifactPath] = String(repeating: "cd", count: 32)
+        let policy = DesktopTamperPolicy(expectedArtifactSha256: [artifactPath: baseline])
+        XCTAssertEqual(SelfIntegrityProbe(env, policy: policy).evaluate(), [.appIntegrity])
+    }
+
+    func testSelfIntegrityBothMismatchesRaiseBothSignals() {
+        let env = FakeDesktopEnvironment()
+        env.fileDigests[codePath] = String(repeating: "cd", count: 32)
+        env.fileDigests[artifactPath] = String(repeating: "cd", count: 32)
+        let policy = DesktopTamperPolicy(
+            expectedCodeSha256: [codePath: baseline],
+            expectedArtifactSha256: [artifactPath: baseline]
+        )
+        XCTAssertEqual(SelfIntegrityProbe(env, policy: policy).evaluate(), [.tamper, .appIntegrity])
+    }
+
+    func testSelfIntegrityUnmeasurableFileIsSilent() {
+        // A file whose digest cannot be computed (nil) must never raise a signal.
+        let env = FakeDesktopEnvironment()
+        let policy = DesktopTamperPolicy(expectedCodeSha256: [codePath: baseline])
+        XCTAssertTrue(SelfIntegrityProbe(env, policy: policy).evaluate().isEmpty)
     }
 }

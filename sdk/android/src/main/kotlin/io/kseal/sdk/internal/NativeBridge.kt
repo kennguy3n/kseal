@@ -121,4 +121,17 @@ internal object NativeBridge {
 
     /** Returns 1 (killed) / 0 (not killed), or a negative status on bad args. */
     external fun nativeIsKilled(handle: Long): Int
+
+    /**
+     * Native debugger/tracer check (reads `TracerPid` on Android). Returns 1
+     * (attached), 0 (clean), or -1 (unavailable). Stateless — inspects the
+     * current process — so it takes no handle.
+     */
+    external fun nativeDebuggerPresent(): Int
+
+    /**
+     * Native hooking-framework check (scans `/proc/self/maps` and thread names
+     * for Frida/Substrate). Returns 1 (present), 0 (clean), or -1 (unavailable).
+     */
+    external fun nativeHookPresent(): Int
 }

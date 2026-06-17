@@ -660,6 +660,7 @@ dependencies = [
  "cbindgen",
  "ed25519-dalek",
  "kseal-core",
+ "libc",
  "prost",
 ]
 

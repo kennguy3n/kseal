@@ -3,7 +3,9 @@ import Foundation
 /// Detects dynamic-library injection: the `DYLD_INSERT_LIBRARIES` /
 /// `DYLD_FRAMEWORK_PATH` insertion vectors and foreign Mach-O images loaded from
 /// outside the app bundle and the OS. Injection is the macOS analogue of the
-/// mobile hooking signal.
+/// mobile hooking signal. Also consults the native (Rust) dyld-image scan over
+/// the trust-core C ABI; the native result raises a signal only on an explicit
+/// `== 1` and an unavailable check (negative sentinel) contributes nothing.
 struct DylibInjectionProbe: Probe {
     let id = "macos.dylibInjection"
     private let env: DesktopEnvironment
@@ -33,6 +35,9 @@ struct DylibInjectionProbe: Probe {
             }
         }
         if env.foreignLoadedImagePaths().contains(where: { !isAllowed($0) }) {
+            return [.hooking]
+        }
+        if env.nativeHookPresent() == 1 {
             return [.hooking]
         }
         return []

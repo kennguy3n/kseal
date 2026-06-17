@@ -20,6 +20,7 @@ getrandom = "0.2"
 bitflags = "2"
 thiserror = "1"
 serde = { version = "1", features = ["derive"] }
+libc = "0.2"
 
 [profile.release]
 opt-level = 3

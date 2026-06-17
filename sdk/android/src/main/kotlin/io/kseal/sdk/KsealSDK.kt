@@ -31,6 +31,7 @@ import java.util.concurrent.atomic.AtomicLong
  * @property configPublicKey Ed25519 public key (32 bytes) used to verify signed configs.
  * @property buildHash content hash of the protected build (from the Gradle hardening plugin).
  * @property integrityPolicy expected signing certs / installers for the integrity probe.
+ * @property tamperPolicy expected code/artifact SHA-256 baseline for the runtime self-integrity probe.
  * @property enabledProbes the probe ids to run; null runs all (tenants include only what they need).
  * @property maxBatchEvents telemetry events buffered before a batch is flushed.
  */
@@ -38,6 +39,7 @@ data class KsealOptions(
     val configPublicKey: ByteArray = ByteArray(32),
     val buildHash: String = "",
     val integrityPolicy: IntegrityPolicy = IntegrityPolicy(),
+    val tamperPolicy: TamperPolicy = TamperPolicy(),
     val enabledProbes: Set<String>? = null,
     val maxBatchEvents: Int = 32,
 ) {
@@ -47,6 +49,7 @@ data class KsealOptions(
         return configPublicKey.contentEquals(other.configPublicKey) &&
             buildHash == other.buildHash &&
             integrityPolicy == other.integrityPolicy &&
+            tamperPolicy == other.tamperPolicy &&
             enabledProbes == other.enabledProbes &&
             maxBatchEvents == other.maxBatchEvents
     }
@@ -55,6 +58,7 @@ data class KsealOptions(
         var result = configPublicKey.contentHashCode()
         result = 31 * result + buildHash.hashCode()
         result = 31 * result + integrityPolicy.hashCode()
+        result = 31 * result + tamperPolicy.hashCode()
         result = 31 * result + (enabledProbes?.hashCode() ?: 0)
         result = 31 * result + maxBatchEvents
         return result
@@ -424,6 +428,7 @@ class KsealSDK internal constructor(
             DebuggerDetector(env),
             HookDetector(env),
             IntegrityChecker(env, options.integrityPolicy),
+            SelfIntegrityDetector(env, options.tamperPolicy),
             NetworkRiskDetector(env),
             // Wave-2 fraud-vector RASP probes, registered together for layout
             // parity. Some are live and emit fusion-weighted risk signals while

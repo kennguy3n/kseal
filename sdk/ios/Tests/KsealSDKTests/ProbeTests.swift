@@ -67,6 +67,19 @@ final class DebuggerDetectorTests: XCTestCase {
         env.traced = true
         XCTAssertEqual(DebuggerDetector(env).evaluate(), [.debugger])
     }
+
+    func testNativeDebuggerIsDebugger() {
+        let env = FakeDeviceEnvironment()
+        env.nativeDebugger = 1
+        XCTAssertEqual(DebuggerDetector(env).evaluate(), [.debugger])
+    }
+
+    func testNativeDebuggerUnavailableIsClean() {
+        // The "unavailable" sentinel (-1) must never raise a signal.
+        let env = FakeDeviceEnvironment()
+        env.nativeDebugger = -1
+        XCTAssertTrue(DebuggerDetector(env).evaluate().isEmpty)
+    }
 }
 
 final class HookDetectorTests: XCTestCase {
@@ -96,6 +109,19 @@ final class HookDetectorTests: XCTestCase {
         let env = FakeDeviceEnvironment()
         env.openPorts.insert(27042)
         XCTAssertTrue(HookDetector(env).evaluate().contains(.hooking))
+    }
+
+    func testNativeHookIsHooking() {
+        let env = FakeDeviceEnvironment()
+        env.nativeHook = 1
+        XCTAssertEqual(HookDetector(env).evaluate(), [.hooking])
+    }
+
+    func testNativeHookUnavailableIsClean() {
+        // The "unavailable" sentinel (-1) must never raise a signal.
+        let env = FakeDeviceEnvironment()
+        env.nativeHook = -1
+        XCTAssertTrue(HookDetector(env).evaluate().isEmpty)
     }
 }
 
@@ -134,6 +160,63 @@ final class IntegrityCheckerTests: XCTestCase {
         let env = FakeDeviceEnvironment()
         env.bundleId = "com.attacker.clone"
         XCTAssertTrue(IntegrityChecker(env, policy: IntegrityPolicy()).evaluate().isEmpty)
+    }
+}
+
+final class SelfIntegrityDetectorTests: XCTestCase {
+    private let codePath = "/var/containers/Bundle/Application/App.app/App"
+    private let artifactPath = "/var/containers/Bundle/Application/App.app/Info.plist"
+    private let baseline = String(repeating: "ab", count: 32)
+
+    func testEmptyPolicyIsSilent() {
+        let env = FakeDeviceEnvironment()
+        XCTAssertTrue(SelfIntegrityDetector(env, policy: TamperPolicy()).evaluate().isEmpty)
+    }
+
+    func testMatchingCodeDigestIsClean() {
+        let env = FakeDeviceEnvironment()
+        env.fileDigests[codePath] = baseline
+        let policy = TamperPolicy(expectedCodeSha256: [codePath: baseline])
+        XCTAssertTrue(SelfIntegrityDetector(env, policy: policy).evaluate().isEmpty)
+    }
+
+    func testCaseInsensitiveCodeDigestIsClean() {
+        let env = FakeDeviceEnvironment()
+        env.fileDigests[codePath] = baseline.uppercased()
+        let policy = TamperPolicy(expectedCodeSha256: [codePath: baseline])
+        XCTAssertTrue(SelfIntegrityDetector(env, policy: policy).evaluate().isEmpty)
+    }
+
+    func testMismatchedCodeDigestRaisesTamper() {
+        let env = FakeDeviceEnvironment()
+        env.fileDigests[codePath] = String(repeating: "cd", count: 32)
+        let policy = TamperPolicy(expectedCodeSha256: [codePath: baseline])
+        XCTAssertEqual(SelfIntegrityDetector(env, policy: policy).evaluate(), [.tamper])
+    }
+
+    func testMismatchedArtifactDigestRaisesAppIntegrity() {
+        let env = FakeDeviceEnvironment()
+        env.fileDigests[artifactPath] = String(repeating: "cd", count: 32)
+        let policy = TamperPolicy(expectedArtifactSha256: [artifactPath: baseline])
+        XCTAssertEqual(SelfIntegrityDetector(env, policy: policy).evaluate(), [.appIntegrity])
+    }
+
+    func testBothMismatchesRaiseBothSignals() {
+        let env = FakeDeviceEnvironment()
+        env.fileDigests[codePath] = String(repeating: "cd", count: 32)
+        env.fileDigests[artifactPath] = String(repeating: "cd", count: 32)
+        let policy = TamperPolicy(
+            expectedCodeSha256: [codePath: baseline],
+            expectedArtifactSha256: [artifactPath: baseline]
+        )
+        XCTAssertEqual(SelfIntegrityDetector(env, policy: policy).evaluate(), [.tamper, .appIntegrity])
+    }
+
+    func testUnmeasurableFileIsSilent() {
+        // A file whose digest cannot be computed (nil) must never raise a signal.
+        let env = FakeDeviceEnvironment()
+        let policy = TamperPolicy(expectedCodeSha256: [codePath: baseline])
+        XCTAssertTrue(SelfIntegrityDetector(env, policy: policy).evaluate().isEmpty)
     }
 }
 

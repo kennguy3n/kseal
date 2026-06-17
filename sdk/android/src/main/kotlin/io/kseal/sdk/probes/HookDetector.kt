@@ -6,13 +6,21 @@ import io.kseal.sdk.RiskSignal
  * Detects dynamic-instrumentation frameworks: Frida (mapped libraries, gadget,
  * default control port 27042), Xposed/EdXposed/LSPosed, and Substrate, by
  * scanning `/proc/self/maps`, loaded packages, and on-disk agent artifacts.
+ *
+ * In addition to these Kotlin heuristics it consults the native (Rust) hook
+ * check via the trust-core C ABI ([DeviceEnvironment.nativeHookPresent]), which
+ * scans the in-process maps and thread names below the JVM layer. The native
+ * result raises a signal only on an explicit `== 1`; an unavailable check
+ * (negative) contributes nothing, so it can never cause a false positive.
  */
 internal class HookDetector(private val env: DeviceEnvironment) : Probe {
 
     override val id: String = "hook"
 
     override fun evaluate(): Set<RiskSignal> =
-        if (mapsContainHooks() || hasFridaArtifacts() || fridaPortOpen() || hasHookPackage()) {
+        if (mapsContainHooks() || hasFridaArtifacts() || fridaPortOpen() || hasHookPackage() ||
+            env.nativeHookPresent() == 1
+        ) {
             setOf(RiskSignal.HOOKING)
         } else {
             emptySet()
