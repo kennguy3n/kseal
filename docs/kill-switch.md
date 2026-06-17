@@ -23,7 +23,13 @@ sig = Ed25519_sign( tenant_signing_key,
   empty `build_hash` covers all builds. The **most specific** matching switch
   wins, so an app/build `ENABLE` can override a tenant-wide `DISABLE`.
 - **Anti-rollback**: `version` increases monotonically per scope; re-issuing the
-  same scope bumps it. Clients reject a lower version than last seen.
+  same scope bumps it. The server folds `(command, version)` into the config
+  `ETag` (see [Delivery](#delivery)), and the on-device core rejects a verified
+  command whose version is below the highest already accepted for its scope — a
+  replayed older command is a no-op. Equal versions are idempotent re-applies.
+  Scopes are tracked independently and in-memory for the process lifetime; a
+  cold start re-fetches config, where the `ETag` already excludes a superseded
+  command.
 - **Same trust anchor as config**: kill switches are signed with the per-tenant
   key that signs policy config, so the SDK verifies both with one anchor.
 - **Default**: with no applicable switch, the effective command is `ENABLE`
@@ -55,6 +61,9 @@ The same verification runs **on device** in the shared Rust core
 - decode failure → no-op (state unchanged),
 - signature invalid under the config anchor → no-op (a forged command can't flip
   state in *either* direction),
+- valid command with a stale `version` (below the highest already accepted for
+  its `(tenant_id, app_id, build_hash)` scope) → no-op (anti-rollback: a replayed
+  older command can't flip state),
 - valid `DISABLE` → `is_killed = true`,
 - valid `ENABLE`/`UNSPECIFIED` → `is_killed = false` (a server re-enable lifts a
   prior kill).

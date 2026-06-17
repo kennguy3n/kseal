@@ -182,6 +182,14 @@ struct CoreState {
     /// to `false` and only flips on a signature-verified command, so an absent,
     /// forged, or undecodable command can never disable the app (fail-safe).
     killed: bool,
+    /// Highest kill-switch `version` accepted per scope
+    /// `(tenant_id, app_id, build_hash)`, for client-side anti-rollback. A
+    /// verified command whose version is below the last seen for its scope is
+    /// rejected as a replay; see [`apply_kill_switch`](KsealCore::apply_kill_switch).
+    /// In-memory for the process lifetime — the server folds `(command, version)`
+    /// into the config `ETag`, so a superseded command is not re-served on a
+    /// cold start.
+    kill_switch_versions: HashMap<(String, String, String), i64>,
 }
 
 impl KsealCore {
@@ -197,6 +205,7 @@ impl KsealCore {
                 engine: None,
                 privacy_guard,
                 killed: false,
+                kill_switch_versions: HashMap::new(),
             }),
         }
     }
@@ -445,6 +454,15 @@ impl KsealCore {
     /// forged command can never disable the app. A verified `DISABLE` kills; a
     /// verified `ENABLE`/`UNSPECIFIED` clears the kill (e.g. a build-scoped
     /// re-enable resolved by the server).
+    ///
+    /// Anti-rollback: each scope `(tenant_id, app_id, build_hash)` carries a
+    /// monotonically increasing `version`. A verified command whose version is
+    /// below the highest already accepted for its scope is rejected as a replay
+    /// — a no-op that preserves the current state. The version is covered by the
+    /// authenticated preimage, so an attacker cannot forge a newer one, and
+    /// equal versions are accepted as idempotent re-applies of the same command.
+    /// Scopes track versions independently, so a low-version command for one
+    /// scope is still honored even if another scope has advanced.
     pub fn apply_kill_switch(&self, signed_bytes: &[u8]) -> bool {
         let Ok(ks) = SignedKillSwitch::decode(signed_bytes) else {
             return self.is_killed();
@@ -452,8 +470,18 @@ impl KsealCore {
         if !crypto::verify_kill_switch(&self.config.config_public_key, &ks) {
             return self.is_killed();
         }
+        let scope = (ks.tenant_id, ks.app_id, ks.build_hash);
+        let mut state = self.write_state();
+        if state
+            .kill_switch_versions
+            .get(&scope)
+            .is_some_and(|&last| ks.version < last)
+        {
+            return state.killed;
+        }
+        state.kill_switch_versions.insert(scope, ks.version);
         let killed = ks.command == KillSwitchCommand::Disable as i32;
-        self.write_state().killed = killed;
+        state.killed = killed;
         killed
     }
 
@@ -707,6 +735,30 @@ mod tests {
         ks.encode_to_vec()
     }
 
+    fn signed_kill_switch_scoped(
+        sk: &SigningKey,
+        command: KillSwitchCommand,
+        version: i64,
+        build_hash: &str,
+    ) -> Vec<u8> {
+        let mut ks = SignedKillSwitch {
+            tenant_id: "tenant".into(),
+            app_id: "app".into(),
+            build_hash: build_hash.into(),
+            command: command as i32,
+            version,
+            issued_at: 1_700_000_000,
+            reason: "test".into(),
+            signature: Vec::new(),
+            key_id: "k1".into(),
+        };
+        ks.signature = sk
+            .sign(&crypto::kill_switch_preimage(&ks))
+            .to_bytes()
+            .to_vec();
+        ks.encode_to_vec()
+    }
+
     #[test]
     fn reattest_interval_secs_reflects_policy() {
         let sk = SigningKey::from_bytes(&[1u8; 32]);
@@ -789,6 +841,60 @@ mod tests {
 
         // A validly-signed ENABLE clears the kill (server re-enable).
         assert!(!core.apply_kill_switch(&signed_kill_switch(&sk, KillSwitchCommand::Enable)));
+        assert!(!core.is_killed());
+    }
+
+    #[test]
+    fn kill_switch_rejects_rollback() {
+        let sk = SigningKey::from_bytes(&[1u8; 32]);
+        let core = core_with(&sk);
+
+        // DISABLE at version 5 for the build scope -> killed.
+        assert!(core.apply_kill_switch(&signed_kill_switch_scoped(
+            &sk,
+            KillSwitchCommand::Disable,
+            5,
+            "build",
+        )));
+        assert!(core.is_killed());
+
+        // A higher-version ENABLE (6) is accepted and lifts the kill.
+        assert!(!core.apply_kill_switch(&signed_kill_switch_scoped(
+            &sk,
+            KillSwitchCommand::Enable,
+            6,
+            "build",
+        )));
+        assert!(!core.is_killed());
+
+        // Replaying the old DISABLE (version 5) is rejected as a rollback: the
+        // verified-but-stale command is a no-op and the app stays enabled.
+        assert!(!core.apply_kill_switch(&signed_kill_switch_scoped(
+            &sk,
+            KillSwitchCommand::Disable,
+            5,
+            "build",
+        )));
+        assert!(!core.is_killed());
+
+        // The same version (6) is idempotent and still applies; a genuinely new
+        // DISABLE must advance the version (7) to take effect.
+        assert!(core.apply_kill_switch(&signed_kill_switch_scoped(
+            &sk,
+            KillSwitchCommand::Disable,
+            7,
+            "build",
+        )));
+        assert!(core.is_killed());
+
+        // A different scope (build2) tracks its version independently: a
+        // version-1 ENABLE is honored even though "build" has advanced to 7.
+        assert!(!core.apply_kill_switch(&signed_kill_switch_scoped(
+            &sk,
+            KillSwitchCommand::Enable,
+            1,
+            "build2",
+        )));
         assert!(!core.is_killed());
     }
 }

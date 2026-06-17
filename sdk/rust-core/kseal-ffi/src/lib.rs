@@ -1371,13 +1371,17 @@ mod tests {
     }
 
     fn signed_kill_switch_bytes(sk: &SigningKey, command: i32) -> Vec<u8> {
+        signed_kill_switch_bytes_v(sk, command, 5)
+    }
+
+    fn signed_kill_switch_bytes_v(sk: &SigningKey, command: i32, version: i64) -> Vec<u8> {
         use kseal_core::proto::SignedKillSwitch;
         let mut ks = SignedKillSwitch {
             tenant_id: "tenant".into(),
             app_id: "app".into(),
             build_hash: "build".into(),
             command,
-            version: 5,
+            version,
             issued_at: 1_700_000_000,
             reason: "ffi-test".into(),
             signature: Vec::new(),
@@ -1461,6 +1465,15 @@ mod tests {
             let enable = signed_kill_switch_bytes(&sk, KillSwitchCommand::Enable as i32);
             assert_eq!(
                 kseal_apply_kill_switch(handle, enable.as_ptr(), enable.len()),
+                0
+            );
+            assert_eq!(kseal_is_killed(handle), 0);
+
+            // Anti-rollback: a verified DISABLE at a stale version (4 < 5) is
+            // rejected as a replay and leaves the app enabled.
+            let rollback = signed_kill_switch_bytes_v(&sk, KillSwitchCommand::Disable as i32, 4);
+            assert_eq!(
+                kseal_apply_kill_switch(handle, rollback.as_ptr(), rollback.len()),
                 0
             );
             assert_eq!(kseal_is_killed(handle), 0);
