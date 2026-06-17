@@ -18,6 +18,8 @@ import io.kseal.sdk.probes.Probe
 import io.kseal.sdk.probes.RemoteAccessDetector
 import io.kseal.sdk.probes.RootDetector
 import io.kseal.sdk.probes.ScreenCaptureDetector
+import io.kseal.sdk.probes.SelfIntegrityDetector
+import io.kseal.sdk.probes.TamperPolicy
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.ScheduledFuture
