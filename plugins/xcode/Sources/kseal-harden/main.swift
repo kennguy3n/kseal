@@ -211,10 +211,18 @@ func runIntegrity(_ opts: Args) {
 
     let integrity: BuildProofManifest.Integrity
     let posture: MachOInspector.Posture
+    let stringObfuscation: MachOInspector.StringObfuscation
     do {
+        guard FileManager.default.fileExists(atPath: binary.path) else {
+            fail("\(MachOInspectorError.binaryMissing(binary.path))")
+        }
         let inspector = MachOInspector()
-        integrity = try inspector.inspect(binaryAt: binary)
-        posture = try inspector.posture(binaryAt: binary)
+        // Read the binary once and share it across all inspectors; a release
+        // Mach-O is tens of MB, so re-reading per inspector tripled I/O.
+        let binaryData = try Data(contentsOf: binary)
+        integrity = try inspector.inspect(data: binaryData)
+        posture = try inspector.posture(data: binaryData)
+        stringObfuscation = inspector.stringObfuscation(data: binaryData)
     } catch {
         fail("\(error)")
     }
@@ -226,7 +234,11 @@ func runIntegrity(_ opts: Args) {
     // Enriching an existing manifest brings it up to the current revision.
     manifest.manifestRevision = BuildProofManifest.currentManifestRevision
     // Record the transforms idempotently so re-running doesn't duplicate them.
-    manifest.transforms.removeAll { $0.kind == "macho-section-integrity" || $0.kind == "macho-binary-posture" }
+    manifest.transforms.removeAll {
+        $0.kind == "macho-section-integrity"
+            || $0.kind == "macho-binary-posture"
+            || $0.kind == "macho-string-obfuscation"
+    }
     manifest.transforms.append(
         BuildProofManifest.Transform(
             kind: "macho-section-integrity",
@@ -244,7 +256,20 @@ func runIntegrity(_ opts: Args) {
             detail: ["all_hardened": String(posture.allHardened), "slices_with_findings": String(findings)]
         )
     )
-    for module in ["macho-section-integrity", "macho-binary-posture"] where !manifest.modules.contains(module) {
+    manifest.transforms.append(
+        BuildProofManifest.Transform(
+            kind: "macho-string-obfuscation",
+            algorithm: "ascii-scan",
+            count: stringObfuscation.markersFound.count,
+            detail: [
+                "status": stringObfuscation.status.rawValue,
+                "kseal_core": String(stringObfuscation.isKsealCore),
+                "markers_found": stringObfuscation.markersFound.joined(separator: ","),
+            ]
+        )
+    )
+    for module in ["macho-section-integrity", "macho-binary-posture", "macho-string-obfuscation"]
+    where !manifest.modules.contains(module) {
         manifest.modules = (manifest.modules + [module]).sorted()
     }
 
@@ -255,7 +280,7 @@ func runIntegrity(_ opts: Args) {
     }
     let archs = integrity.slices.map { $0.arch }.joined(separator: ",")
     let postureSummary = posture.allHardened ? "all slices hardened" : "\(findings) slice(s) with findings"
-    print("baked Mach-O integrity for \(binary.lastPathComponent): \(integrity.slices.count) slice(s) [\(archs)], \(sectionCount) section hash(es); posture: \(postureSummary)")
+    print("baked Mach-O integrity for \(binary.lastPathComponent): \(integrity.slices.count) slice(s) [\(archs)], \(sectionCount) section hash(es); posture: \(postureSummary); string-obfuscation: \(stringObfuscation.status.rawValue)")
 }
 
 func runHardenBinary(_ opts: Args) {

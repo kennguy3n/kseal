@@ -42,8 +42,9 @@ build-server: ## Build the Go server binary.
 	cd server && go build -o bin/kseal-server ./cmd/kseal-server
 
 .PHONY: build-rust
-build-rust: ## Build the Rust trust core + FFI (release).
+build-rust: ## Build the Rust trust core + FFI (release): default artifacts in target/release, hardened (obfuscated) verification build in target/obfuscated.
 	cd sdk/rust-core && cargo build --release
+	cd sdk/rust-core && cargo build --release --features obfuscate-strings --target-dir target/obfuscated
 
 .PHONY: build-console
 build-console: ## Build the React dashboard.
@@ -59,8 +60,9 @@ test-server: ## Run Go tests.
 	cd server && go test ./...
 
 .PHONY: test-rust
-test-rust: ## Run Rust tests.
+test-rust: ## Run Rust tests (default + hardened string-obfuscation feature).
 	cd sdk/rust-core && cargo test
+	cd sdk/rust-core && cargo test --features obfuscate-strings
 
 .PHONY: test-integration
 test-integration: ## Run end-to-end integration tests.
@@ -75,6 +77,7 @@ test: test-server test-rust ## Run server + rust unit tests.
 lint: proto-lint ## Run all linters.
 	cd server && go vet ./...
 	cd sdk/rust-core && cargo clippy --all-targets -- -D warnings
+	cd sdk/rust-core && cargo clippy --all-targets --features obfuscate-strings -- -D warnings
 
 ## ---- docker (prod-mirroring local stack) ----
 

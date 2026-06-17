@@ -40,6 +40,20 @@ fi
 
 mkdir -p "$JNILIBS_DIR"
 
+# Phase 5.2: opt-in compile-time string obfuscation for the shipped .so. Off by
+# default so standard builds stay debuggable; set KSEAL_OBFUSCATE_STRINGS=1 for
+# hardened release artifacts.
+FEATURE_ARGS=()
+case "${KSEAL_OBFUSCATE_STRINGS:-0}" in
+    1 | true | yes | on)
+        echo "[build-rust-android] string obfuscation: ON (--features obfuscate-strings)"
+        FEATURE_ARGS+=(--features obfuscate-strings)
+        ;;
+    *)
+        echo "[build-rust-android] string obfuscation: off (set KSEAL_OBFUSCATE_STRINGS=1 to enable)"
+        ;;
+esac
+
 echo "[build-rust-android] cargo-ndk -> $JNILIBS_DIR"
 cargo ndk \
     --manifest-path "$RUST_CORE/Cargo.toml" \
@@ -47,7 +61,7 @@ cargo ndk \
     -t armeabi-v7a \
     -t x86_64 \
     -o "$JNILIBS_DIR" \
-    build --release -p kseal-ffi
+    build --release -p kseal-ffi ${FEATURE_ARGS[@]+"${FEATURE_ARGS[@]}"}
 
 echo "[build-rust-android] done. ABIs:"
 ls -1 "$JNILIBS_DIR"

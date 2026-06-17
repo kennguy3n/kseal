@@ -19,11 +19,24 @@ HEADERS_DIR="$OUT_DIR/headers"
 
 TARGETS=(aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios)
 
+# Phase 5.2: opt-in compile-time string obfuscation. Off by default; set
+# KSEAL_OBFUSCATE_STRINGS=1 for hardened release artifacts.
+FEATURE_ARGS=()
+case "${KSEAL_OBFUSCATE_STRINGS:-0}" in
+    1 | true | yes | on)
+        echo "[xcframework] string obfuscation: ON (--features obfuscate-strings)"
+        FEATURE_ARGS+=(--features obfuscate-strings)
+        ;;
+    *)
+        echo "[xcframework] string obfuscation: off (set KSEAL_OBFUSCATE_STRINGS=1 to enable)"
+        ;;
+esac
+
 mkdir -p "$HEADERS_DIR"
 
 for target in "${TARGETS[@]}"; do
     echo "[xcframework] cargo build --release --target $target"
-    cargo build --manifest-path "$RUST_CORE/Cargo.toml" -p kseal-ffi --release --target "$target"
+    cargo build --manifest-path "$RUST_CORE/Cargo.toml" -p kseal-ffi --release --target "$target" ${FEATURE_ARGS[@]+"${FEATURE_ARGS[@]}"}
 done
 
 # Stage the cbindgen header + module map for the framework.
