@@ -31,6 +31,7 @@ internal class FakeDeviceEnvironment(
     var packages: List<String> = listOf("com.android.vending", "com.example.host")
     var installer: String? = "com.android.vending"
     var signingCerts: List<String> = listOf("aa".repeat(32))
+    val fileDigests: MutableMap<String, String> = HashMap()
     var proxyHost: String? = null
     var userCaCount: Int = 0
     var accessibilityServices: List<String> = emptyList()
@@ -39,6 +40,8 @@ internal class FakeDeviceEnvironment(
     var overlayPackages: List<String> = emptyList()
     var systemPackages: Set<String> = emptySet()
     var adbEnabled: Boolean = false
+    var nativeDebugger: Int = -1
+    var nativeHook: Int = -1
 
     override fun systemProperty(key: String): String? = systemProperties[key]
     override fun fileExists(path: String): Boolean = path in existingFiles || path in executableFiles
@@ -50,9 +53,12 @@ internal class FakeDeviceEnvironment(
     override fun isDebuggerConnected(): Boolean = debuggerConnected
     override fun processMaps(): List<String> = maps
     override fun isLoopbackPortOpen(port: Int): Boolean = port in openPorts
+    override fun nativeDebuggerPresent(): Int = nativeDebugger
+    override fun nativeHookPresent(): Int = nativeHook
     override fun installedPackages(): List<String> = packages
     override fun installerPackageName(): String? = installer
     override fun signingCertificateSha256(): List<String> = signingCerts
+    override fun sha256OfFile(path: String): String? = fileDigests[path]
     override fun httpProxyHost(): String? = proxyHost
     override fun userInstalledCaCount(): Int = userCaCount
     override fun enabledAccessibilityServices(): List<String> = accessibilityServices

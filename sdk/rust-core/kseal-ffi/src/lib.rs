@@ -24,6 +24,8 @@ use kseal_core::{transport, CoreConfig, KsealCore};
 use prost::Message;
 use std::os::raw::c_char;
 
+mod native_probes;
+
 /// Status codes returned across the FFI boundary. `Ok` is 0; every failure is a
 /// distinct negative value so C callers can branch on the cause.
 #[repr(i32)]
@@ -762,6 +764,47 @@ pub unsafe extern "C" fn kseal_generate_nonce(len: usize, out: *mut Buffer) -> S
     })
 }
 
+/// Returns `1` when a debugger/tracer is attached to this process, `0` when the
+/// process looks clean, or `-1` when the check is unavailable on this platform
+/// (or the OS surface could not be read).
+///
+/// This is the native (Rust) counterpart to the platform SDKs' `DebuggerDetector`
+/// heuristics: on Linux/Android it reads `TracerPid` from `/proc/self/status`;
+/// on Darwin it tests the `P_TRACED` flag via `sysctl(KERN_PROC)`. It is
+/// side-effect-free and repeatable — it deliberately does **not** call
+/// `ptrace(PTRACE_TRACEME)`/`ptrace(PT_DENY_ATTACH)` (one-shot, irreversible) —
+/// so it is safe to run on every post-launch trust evaluation.
+///
+/// Fail-safe: only a `1` result should raise the DEBUGGER signal; `0`/`-1`
+/// contribute nothing, so an unavailable check can never cause a false positive.
+///
+/// # Safety
+/// Takes no pointer arguments; always safe to call.
+#[no_mangle]
+pub extern "C" fn kseal_native_debugger_present() -> i32 {
+    ffi_catch(native_probes::UNAVAILABLE, native_probes::debugger_present)
+}
+
+/// Returns `1` when an injected instrumentation framework (Frida, Substrate, …)
+/// is observed in this process, `0` when nothing suspicious is found, or `-1`
+/// when the check is unavailable on this platform.
+///
+/// This is the native counterpart to the platform SDKs' `HookDetector`: on
+/// Linux/Android it scans `/proc/self/maps` and thread names
+/// (`/proc/self/task/<tid>/comm`); on Darwin it scans the loaded dyld images.
+/// Both code paths are independent of the managed (Kotlin/Swift) layer, raising
+/// the bar for an attacker who hooks only the managed heuristics.
+///
+/// Fail-safe: only a `1` result should raise the HOOKING signal; `0`/`-1`
+/// contribute nothing.
+///
+/// # Safety
+/// Takes no pointer arguments; always safe to call.
+#[no_mangle]
+pub extern "C" fn kseal_native_hook_present() -> i32 {
+    ffi_catch(native_probes::UNAVAILABLE, native_probes::hook_present)
+}
+
 /// Releases a [`Buffer`] previously produced by this library. Empty/null
 /// buffers are a no-op. Double-free is undefined behavior.
 ///
@@ -1495,5 +1538,17 @@ mod tests {
             assert!(kseal_apply_kill_switch(std::ptr::null(), std::ptr::null(), 0) < 0);
             assert!(kseal_is_killed(std::ptr::null()) < 0);
         }
+    }
+
+    #[test]
+    fn native_probes_are_safe_and_silent_on_a_clean_host() {
+        // The CI host is not traced and runs no instrumentation framework, so a
+        // supported platform must report "clean" (0) and an unsupported one
+        // "unavailable" (-1). Crucially the result must never be PRESENT (1) on
+        // a clean build, and the calls must never panic across the boundary.
+        let dbg = kseal_native_debugger_present();
+        let hook = kseal_native_hook_present();
+        assert!(dbg == 0 || dbg == -1, "debugger present on clean host: {dbg}");
+        assert!(hook == 0 || hook == -1, "hook present on clean host: {hook}");
     }
 }

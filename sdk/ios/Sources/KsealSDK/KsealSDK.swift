@@ -9,6 +9,8 @@ public struct KsealOptions {
     public var buildHash: String
     /// Expected distribution / bundle id for the integrity probe.
     public var integrityPolicy: IntegrityPolicy
+    /// Expected code/artifact SHA-256 baseline for the runtime self-integrity probe.
+    public var tamperPolicy: TamperPolicy
     /// Probe ids to run; nil runs all (tenants include only what they need).
     public var enabledProbes: Set<String>?
     /// Telemetry events buffered before a batch is flushed.
@@ -18,12 +20,14 @@ public struct KsealOptions {
         configPublicKey: Data = Data(repeating: 0, count: 32),
         buildHash: String = "",
         integrityPolicy: IntegrityPolicy = IntegrityPolicy(),
+        tamperPolicy: TamperPolicy = TamperPolicy(),
         enabledProbes: Set<String>? = nil,
         maxBatchEvents: Int = 32
     ) {
         self.configPublicKey = configPublicKey
         self.buildHash = buildHash
         self.integrityPolicy = integrityPolicy
+        self.tamperPolicy = tamperPolicy
         self.enabledProbes = enabledProbes
         self.maxBatchEvents = maxBatchEvents
     }
@@ -363,6 +367,7 @@ public final class KsealSDK {
             DebuggerDetector(env),
             HookDetector(env),
             IntegrityChecker(env, policy: options.integrityPolicy),
+            SelfIntegrityDetector(env, policy: options.tamperPolicy),
             NetworkRiskDetector(env),
             // Wave-2 fraud-vector RASP stubs: registered for cross-platform
             // parity but currently emit no signals (zero runtime behaviour

@@ -63,6 +63,23 @@ final class EnterprisePolicyWiringTests: XCTestCase {
         XCTAssertTrue(assessment.signals.contains(.hooking))
     }
 
+    func testStrictPolicyConsultsNativeHook() throws {
+        let env = FakeDesktopEnvironment()
+        env.nativeHook = 1 // no allowlist configured → native scan is consulted
+        let assessment = try makeSDK(env: env, enterprise: .strict).evaluateRisk()
+        XCTAssertTrue(assessment.signals.contains(.hooking))
+    }
+
+    func testInjectionAllowlistSuppressesNativeHook() throws {
+        let env = FakeDesktopEnvironment()
+        env.nativeHook = 1 // allowlist-unaware native scan would fire ...
+        let policy = EnterprisePolicy(injectionAllowlist: ["/Library/Acme/"])
+        let assessment = try makeSDK(env: env, enterprise: policy).evaluateRisk()
+        // ... but a configured allowlist defers to the allowlist-aware managed
+        // checks, so the native scan is not consulted.
+        XCTAssertFalse(assessment.signals.contains(.hooking))
+    }
+
     func testPermitDebuggerDropsDebuggerProbeEvenWhenEnabled() throws {
         let env = FakeDesktopEnvironment()
         env.traced = true

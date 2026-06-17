@@ -18,6 +18,9 @@ struct UnavailableDesktopEnvironment: DesktopEnvironment {
     func environmentVariable(_ name: String) -> String? { nil }
     func foreignLoadedImagePaths() -> [String] { [] }
     func isTraced() -> Bool { false }
+    func nativeDebuggerPresent() -> Int32 { -1 }
+    func nativeHookPresent() -> Int32 { -1 }
+    func sha256OfFile(_ path: String) -> String? { nil }
     var bundleIdentifier: String? { nil }
 }
 #endif

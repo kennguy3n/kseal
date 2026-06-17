@@ -53,6 +53,22 @@ interface DeviceEnvironment {
     /** Whether a TCP port is accepting connections on loopback (e.g. Frida 27042). */
     fun isLoopbackPortOpen(port: Int): Boolean
 
+    /**
+     * Result of the native (Rust) debugger/tracer check, run in-process via the
+     * trust core's C ABI: `1` (a debugger/tracer is attached), `0` (clean), or a
+     * negative value when the native library is unavailable / the check could
+     * not run. Fail-safe: callers raise a signal only on a strict `== 1`, so an
+     * unavailable check contributes nothing.
+     */
+    fun nativeDebuggerPresent(): Int
+
+    /**
+     * Result of the native (Rust) hooking-framework check (maps + thread-name
+     * scanning): `1` (instrumentation present), `0` (clean), or negative when
+     * unavailable. Same fail-safe contract as [nativeDebuggerPresent].
+     */
+    fun nativeHookPresent(): Int
+
     // --- Package / signing ---
     fun installedPackages(): List<String>
 
@@ -61,6 +77,15 @@ interface DeviceEnvironment {
 
     /** SHA-256 (hex, lowercase) of each of this app's signing certificates. */
     fun signingCertificateSha256(): List<String>
+
+    /**
+     * SHA-256 (hex, lowercase) of the file at [path], computed by streaming its
+     * bytes, or `null` when the file is missing / unreadable / cannot be
+     * digested. Used by the runtime self-integrity check to compare a packaged
+     * artifact or code file against a build-time baseline. Fail-safe: a `null`
+     * result means "could not measure" and never raises a tamper signal.
+     */
+    fun sha256OfFile(path: String): String?
 
     // --- Network posture ---
     /** Configured system HTTP proxy host, or `null`/empty when none. */

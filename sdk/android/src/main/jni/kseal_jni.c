@@ -349,6 +349,24 @@ Java_io_kseal_sdk_internal_NativeBridge_nativeApplyKillSwitch(
     return (jint)result;
 }
 
+/* Native anti-debug / anti-Frida probes (no handle: they inspect the current
+ * process). Return 1 (present), 0 (clean), or -1 (unavailable); the Kotlin
+ * detectors raise a signal only on a strict `== 1` so an unavailable check
+ * contributes nothing. */
+JNIEXPORT jint JNICALL
+Java_io_kseal_sdk_internal_NativeBridge_nativeDebuggerPresent(JNIEnv *env, jobject thiz) {
+    (void)env;
+    (void)thiz;
+    return (jint)kseal_native_debugger_present();
+}
+
+JNIEXPORT jint JNICALL
+Java_io_kseal_sdk_internal_NativeBridge_nativeHookPresent(JNIEnv *env, jobject thiz) {
+    (void)env;
+    (void)thiz;
+    return (jint)kseal_native_hook_present();
+}
+
 JNIEXPORT jint JNICALL
 Java_io_kseal_sdk_internal_NativeBridge_nativeIsKilled(
     JNIEnv *env, jobject thiz, jlong handle) {

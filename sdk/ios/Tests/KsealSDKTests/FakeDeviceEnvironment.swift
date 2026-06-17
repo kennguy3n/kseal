@@ -14,7 +14,10 @@ final class FakeDeviceEnvironment: DeviceEnvironment {
     var traced = false
     var images: [String] = ["/usr/lib/libSystem.B.dylib", "/usr/lib/libobjc.A.dylib"]
     var openPorts: Set<UInt16> = []
+    var nativeDebugger: Int32 = -1
+    var nativeHook: Int32 = -1
     var proxy: String?
+    var fileDigests: [String: String] = [:]
     var bundleId: String? = "com.example.app"
     var embeddedMobileProvision = false
     var appStoreReceipt = true
@@ -27,7 +30,10 @@ final class FakeDeviceEnvironment: DeviceEnvironment {
     func isTraced() -> Bool { traced }
     func loadedLibraryNames() -> [String] { images }
     func isLoopbackPortOpen(_ port: UInt16) -> Bool { openPorts.contains(port) }
+    func nativeDebuggerPresent() -> Int32 { nativeDebugger }
+    func nativeHookPresent() -> Int32 { nativeHook }
     func proxyHost() -> String? { proxy }
+    func sha256OfFile(_ path: String) -> String? { fileDigests[path] }
     var bundleIdentifier: String? { bundleId }
     var hasEmbeddedMobileProvision: Bool { embeddedMobileProvision }
     var hasAppStoreReceipt: Bool { appStoreReceipt }

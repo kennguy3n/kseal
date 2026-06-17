@@ -34,8 +34,27 @@ protocol DeviceEnvironment {
     /// Whether a TCP port accepts connections on loopback (e.g. Frida 27042).
     func isLoopbackPortOpen(_ port: UInt16) -> Bool
 
+    /// Result of the native (Rust) tracer check, run in-process via the trust
+    /// core's C ABI: `1` (a debugger/tracer is attached), `0` (clean), or a
+    /// negative value when the native library is unavailable. Fail-safe:
+    /// callers raise a signal only on a strict `== 1`, so an unavailable check
+    /// contributes nothing and can never cause a false positive.
+    func nativeDebuggerPresent() -> Int32
+
+    /// Result of the native (Rust) hooking-framework check (dyld image scan):
+    /// `1` (instrumentation present), `0` (clean), or negative when
+    /// unavailable. Same fail-safe contract as `nativeDebuggerPresent()`.
+    func nativeHookPresent() -> Int32
+
     /// Configured system HTTP proxy host, or nil when none.
     func proxyHost() -> String?
+
+    /// SHA-256 (hex, lowercase) of the file at `path`, computed by streaming its
+    /// bytes, or nil when the file is missing / unreadable / cannot be digested.
+    /// Used by the runtime self-integrity check to compare a packaged artifact
+    /// or code file against a build-time baseline. Fail-safe: a nil result means
+    /// "could not measure" and never raises a tamper signal.
+    func sha256OfFile(_ path: String) -> String?
 
     /// The running bundle's identifier.
     var bundleIdentifier: String? { get }

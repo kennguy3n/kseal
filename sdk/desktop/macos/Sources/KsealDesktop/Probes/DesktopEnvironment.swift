@@ -74,6 +74,25 @@ protocol DesktopEnvironment {
     /// Whether the process is being traced by a debugger (`sysctl` `P_TRACED`).
     func isTraced() -> Bool
 
+    /// Result of the native (Rust) tracer check, run in-process via the trust
+    /// core's C ABI: `1` (a debugger/tracer is attached), `0` (clean), or a
+    /// negative value when the native library is unavailable. Fail-safe:
+    /// callers raise a signal only on a strict `== 1`, so an unavailable check
+    /// contributes nothing and can never cause a false positive.
+    func nativeDebuggerPresent() -> Int32
+
+    /// Result of the native (Rust) hooking-framework check (dyld image scan):
+    /// `1` (instrumentation present), `0` (clean), or negative when
+    /// unavailable. Same fail-safe contract as `nativeDebuggerPresent()`.
+    func nativeHookPresent() -> Int32
+
+    /// SHA-256 (hex, lowercase) of the file at [path], or `nil` when the file
+    /// is missing / unreadable / cannot be digested. Fail-safe: a `nil` result
+    /// means "could not measure" and never raises a tamper signal — only a
+    /// successfully computed digest that differs from the registered baseline
+    /// does.
+    func sha256OfFile(_ path: String) -> String?
+
     /// The running app's bundle identifier, when available.
     var bundleIdentifier: String? { get }
 }

@@ -29,4 +29,17 @@ class DebuggerDetectorTest {
         val env = FakeDeviceEnvironment().apply { tracerPid = 0 }
         assertTrue(DebuggerDetector(env).evaluate().isEmpty())
     }
+
+    @Test
+    fun nativeDebuggerPresentIsDebugger() {
+        val env = FakeDeviceEnvironment().apply { nativeDebugger = 1 }
+        assertEquals(setOf(RiskSignal.DEBUGGER), DebuggerDetector(env).evaluate())
+    }
+
+    @Test
+    fun nativeDebuggerUnavailableIsClean() {
+        // The "unavailable" sentinel (-1) must never raise a signal.
+        val env = FakeDeviceEnvironment().apply { nativeDebugger = -1 }
+        assertTrue(DebuggerDetector(env).evaluate().isEmpty())
+    }
 }
