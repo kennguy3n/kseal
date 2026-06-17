@@ -32,18 +32,22 @@ lib_name() {
 }
 
 LIB="$(lib_name)"
-TARGET="$RUST_CORE/target/release/$LIB"
+# Keep the two builds in separate target dirs (mirroring the Makefile's
+# build-rust target) so the workspace's default target/release/ artifact is the
+# debuggable build, not the obfuscated one, after this script runs.
+DEFAULT_TARGET="$RUST_CORE/target/release/$LIB"
+OBF_TARGET="$RUST_CORE/target/obfuscated/release/$LIB"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
 echo "[verify] building default (debuggable) cdylib"
 cargo build --manifest-path "$RUST_CORE/Cargo.toml" -p kseal-ffi --release >/dev/null
-cp "$TARGET" "$WORK/default.$LIB"
+cp "$DEFAULT_TARGET" "$WORK/default.$LIB"
 
 echo "[verify] building hardened cdylib (--features obfuscate-strings)"
 cargo build --manifest-path "$RUST_CORE/Cargo.toml" -p kseal-ffi --release \
-    --features obfuscate-strings >/dev/null
-cp "$TARGET" "$WORK/obf.$LIB"
+    --features obfuscate-strings --target-dir "$RUST_CORE/target/obfuscated" >/dev/null
+cp "$OBF_TARGET" "$WORK/obf.$LIB"
 
 default_hits="$(strings_count "$WORK/default.$LIB")"
 obf_hits="$(strings_count "$WORK/obf.$LIB")"

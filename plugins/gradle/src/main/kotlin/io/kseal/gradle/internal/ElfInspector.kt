@@ -143,8 +143,11 @@ internal object ElfInspector {
     private const val NT_MEMTAG_HEAP = 4
     private const val NT_MEMTAG_STACK = 8
 
-    fun inspect(file: File): Result {
-        val bytes = file.readBytes()
+    fun inspect(file: File): Result = inspect(file.readBytes())
+
+    /** Inspects already-read ELF [bytes], so callers that also scan the same
+     *  library (e.g. for string-obfuscation posture) can read the file once. */
+    fun inspect(bytes: ByteArray): Result {
         val sha = Crypto.sha256Hex(bytes)
         val parsed = runCatching { parse(bytes) }.getOrNull()
             ?: return Result(
