@@ -14,13 +14,23 @@ public struct DesktopTamperPolicy: Sendable {
     /// `path` → expected lowercase-hex SHA-256 of packaged resources / artifacts
     /// (e.g. `Info.plist`, bundled assets). A mismatch raises `.appIntegrity`.
     public let expectedArtifactSha256: [String: String]
+    /// Opt-in for high-security deployments. When `false` (default) a
+    /// baseline-registered file whose digest cannot be computed is skipped
+    /// (fail-safe, no signal). When `true` an unmeasurable baseline-registered
+    /// file is treated as a mismatch — raising `.tamper` for `expectedCodeSha256`
+    /// and `.appIntegrity` for `expectedArtifactSha256` — so an attacker cannot
+    /// evade the check by making a registered file unreadable. An empty map is
+    /// still fully silent.
+    public let failClosedOnUnmeasurable: Bool
 
     public init(
         expectedCodeSha256: [String: String] = [:],
-        expectedArtifactSha256: [String: String] = [:]
+        expectedArtifactSha256: [String: String] = [:],
+        failClosedOnUnmeasurable: Bool = false
     ) {
         self.expectedCodeSha256 = expectedCodeSha256
         self.expectedArtifactSha256 = expectedArtifactSha256
+        self.failClosedOnUnmeasurable = failClosedOnUnmeasurable
     }
 }
 
@@ -31,7 +41,8 @@ public struct DesktopTamperPolicy: Sendable {
 /// Complements `CodeSignatureProbe` (which validates the OS code signature) with
 /// a content-digest check the integrator can pin to specific files. Fail-safe:
 /// a file whose digest cannot be computed (missing/unreadable → `nil`) is
-/// skipped and never raises a signal; an empty policy is fully silent.
+/// skipped and never raises a signal (unless the policy opts into
+/// `failClosedOnUnmeasurable`); an empty policy is fully silent.
 struct SelfIntegrityProbe: Probe {
     let id = "macos.selfIntegrity"
     private let env: DesktopEnvironment
@@ -52,7 +63,10 @@ struct SelfIntegrityProbe: Probe {
     private func mismatchExists(_ expected: [String: String]) -> Bool {
         guard !expected.isEmpty else { return false }
         for (path, baseline) in expected {
-            guard let actual = env.sha256OfFile(path) else { continue }
+            guard let actual = env.sha256OfFile(path) else {
+                if policy.failClosedOnUnmeasurable { return true }
+                continue
+            }
             if actual.lowercased() != baseline.lowercased() { return true }
         }
         return false

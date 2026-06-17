@@ -76,4 +76,40 @@ class SelfIntegrityDetectorTest {
         )
         assertTrue(SelfIntegrityDetector(env, policy).evaluate().isEmpty())
     }
+
+    @Test
+    fun failClosedRaisesTamperForUnmeasurableCode() {
+        // Opt-in fail-closed: an unmeasurable baseline-registered code file is
+        // treated as a mismatch instead of being skipped.
+        val env = FakeDeviceEnvironment()
+        val policy = TamperPolicy(
+            expectedCodeSha256 = mapOf(codePath to baseline),
+            failClosedOnUnmeasurable = true,
+        )
+        assertEquals(setOf(RiskSignal.TAMPER), SelfIntegrityDetector(env, policy).evaluate())
+    }
+
+    @Test
+    fun failClosedRaisesAppIntegrityForUnmeasurableArtifact() {
+        val env = FakeDeviceEnvironment()
+        val policy = TamperPolicy(
+            expectedArtifactSha256 = mapOf(artifactPath to baseline),
+            failClosedOnUnmeasurable = true,
+        )
+        assertEquals(
+            setOf(RiskSignal.APP_INTEGRITY),
+            SelfIntegrityDetector(env, policy).evaluate(),
+        )
+    }
+
+    @Test
+    fun failClosedStillCleanWhenMeasurableAndMatching() {
+        // The flag must not turn a measurable, matching file into a signal.
+        val env = FakeDeviceEnvironment().apply { fileDigests[codePath] = baseline }
+        val policy = TamperPolicy(
+            expectedCodeSha256 = mapOf(codePath to baseline),
+            failClosedOnUnmeasurable = true,
+        )
+        assertTrue(SelfIntegrityDetector(env, policy).evaluate().isEmpty())
+    }
 }
