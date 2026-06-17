@@ -218,6 +218,28 @@ final class SelfIntegrityDetectorTests: XCTestCase {
         let policy = TamperPolicy(expectedCodeSha256: [codePath: baseline])
         XCTAssertTrue(SelfIntegrityDetector(env, policy: policy).evaluate().isEmpty)
     }
+
+    func testFailClosedRaisesTamperForUnmeasurableCode() {
+        // Opt-in fail-closed: an unmeasurable baseline-registered code file is
+        // treated as a mismatch instead of being skipped.
+        let env = FakeDeviceEnvironment()
+        let policy = TamperPolicy(expectedCodeSha256: [codePath: baseline], failClosedOnUnmeasurable: true)
+        XCTAssertEqual(SelfIntegrityDetector(env, policy: policy).evaluate(), [.tamper])
+    }
+
+    func testFailClosedRaisesAppIntegrityForUnmeasurableArtifact() {
+        let env = FakeDeviceEnvironment()
+        let policy = TamperPolicy(expectedArtifactSha256: [artifactPath: baseline], failClosedOnUnmeasurable: true)
+        XCTAssertEqual(SelfIntegrityDetector(env, policy: policy).evaluate(), [.appIntegrity])
+    }
+
+    func testFailClosedStillCleanWhenMeasurableAndMatching() {
+        // The flag must not turn a measurable, matching file into a signal.
+        let env = FakeDeviceEnvironment()
+        env.fileDigests[codePath] = baseline
+        let policy = TamperPolicy(expectedCodeSha256: [codePath: baseline], failClosedOnUnmeasurable: true)
+        XCTAssertTrue(SelfIntegrityDetector(env, policy: policy).evaluate().isEmpty)
+    }
 }
 
 final class NetworkRiskDetectorTests: XCTestCase {

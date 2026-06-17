@@ -231,4 +231,26 @@ final class IntegrityProbeTests: XCTestCase {
         let policy = DesktopTamperPolicy(expectedCodeSha256: [codePath: baseline])
         XCTAssertTrue(SelfIntegrityProbe(env, policy: policy).evaluate().isEmpty)
     }
+
+    func testSelfIntegrityFailClosedRaisesTamperForUnmeasurableCode() {
+        // Opt-in fail-closed: an unmeasurable baseline-registered code file is
+        // treated as a mismatch instead of being skipped.
+        let env = FakeDesktopEnvironment()
+        let policy = DesktopTamperPolicy(expectedCodeSha256: [codePath: baseline], failClosedOnUnmeasurable: true)
+        XCTAssertEqual(SelfIntegrityProbe(env, policy: policy).evaluate(), [.tamper])
+    }
+
+    func testSelfIntegrityFailClosedRaisesAppIntegrityForUnmeasurableArtifact() {
+        let env = FakeDesktopEnvironment()
+        let policy = DesktopTamperPolicy(expectedArtifactSha256: [artifactPath: baseline], failClosedOnUnmeasurable: true)
+        XCTAssertEqual(SelfIntegrityProbe(env, policy: policy).evaluate(), [.appIntegrity])
+    }
+
+    func testSelfIntegrityFailClosedStillCleanWhenMeasurableAndMatching() {
+        // The flag must not turn a measurable, matching file into a signal.
+        let env = FakeDesktopEnvironment()
+        env.fileDigests[codePath] = baseline
+        let policy = DesktopTamperPolicy(expectedCodeSha256: [codePath: baseline], failClosedOnUnmeasurable: true)
+        XCTAssertTrue(SelfIntegrityProbe(env, policy: policy).evaluate().isEmpty)
+    }
 }
