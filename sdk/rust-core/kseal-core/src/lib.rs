@@ -30,6 +30,11 @@ pub mod proto {
     include!(concat!(env!("OUT_DIR"), "/kseal.v1.rs"));
 }
 
+// Declared before the modules that use `obfstr!`/`obfstr_string!` so the
+// macros are in scope crate-wide.
+#[macro_use]
+mod obfuscate;
+
 pub mod config;
 pub mod crypto;
 pub mod events;

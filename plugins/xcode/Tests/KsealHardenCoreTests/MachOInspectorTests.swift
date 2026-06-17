@@ -217,7 +217,70 @@ final class MachOInspectorTests: XCTestCase {
         XCTAssertEqual(decoded.posture, posture)
     }
 
+    // MARK: String-obfuscation posture (Phase 5.2)
+
+    func testStringObfuscationReportsHardenedKsealCore() throws {
+        // kseal core (has kseal_* exports) with none of the sensitive literals
+        // in plaintext => the obfuscate-strings build was shipped.
+        let data = ksealCore(embedding: ["kseal_attest", "kseal_evaluate", "emulator", "debugger"])
+        let report = MachOInspector().stringObfuscation(data: data)
+        XCTAssertEqual(report.status, .obfuscated)
+        XCTAssertTrue(report.isKsealCore)
+        XCTAssertTrue(report.markersFound.isEmpty)
+    }
+
+    func testStringObfuscationFlagsPlaintextTrustCore() throws {
+        let data = ksealCore(embedding: ["kseal_attest", "config signature verification failed", "network_mitm"])
+        let report = MachOInspector().stringObfuscation(data: data)
+        XCTAssertEqual(report.status, .plaintext)
+        XCTAssertTrue(report.isKsealCore)
+        XCTAssertEqual(report.markersFound, ["config signature verification failed", "network_mitm"])
+        XCTAssertFalse(report.notes.isEmpty)
+    }
+
+    func testStringObfuscationDoesNotAssertForForeignBinaries() throws {
+        // No kseal_* export marker => not ours; posture not asserted even though a
+        // sentinel-looking literal is present.
+        let data = ksealCore(embedding: ["app_integrity", "libc_start_main"], includeMarker: false)
+        let report = MachOInspector().stringObfuscation(data: data)
+        XCTAssertEqual(report.status, .notApplicable)
+        XCTAssertFalse(report.isKsealCore)
+        XCTAssertTrue(report.markersFound.isEmpty)
+    }
+
+    func testStringObfuscationIgnoresAmbiguousTaxonomyTokens() throws {
+        // Short detector tokens also appear in proto reflection metadata, so they
+        // are not sentinels; a core carrying only those is still "obfuscated".
+        let data = ksealCore(embedding: ["kseal_evaluate", "root", "debugger", "emulator"])
+        XCTAssertEqual(MachOInspector().stringObfuscation(data: data).status, .obfuscated)
+    }
+
+    func testStringObfuscationWireValuesAreStable() {
+        XCTAssertEqual(MachOInspector.StringObfuscationStatus.obfuscated.rawValue, "obfuscated")
+        XCTAssertEqual(MachOInspector.StringObfuscationStatus.plaintext.rawValue, "plaintext")
+        XCTAssertEqual(MachOInspector.StringObfuscationStatus.notApplicable.rawValue, "not-applicable")
+        XCTAssertEqual(MachOInspector.StringObfuscationStatus.indeterminate.rawValue, "indeterminate")
+    }
+
     // MARK: helpers
+
+    /// Builds a thin arm64 dylib whose `__cstring` section carries `literals`
+    /// (NUL-terminated), optionally including the kseal export marker so the
+    /// binary is recognised as the trust core.
+    private func ksealCore(embedding literals: [String], includeMarker: Bool = true) -> Data {
+        var blob: [UInt8] = []
+        if includeMarker {
+            blob.append(contentsOf: Array("kseal_".utf8))
+            blob.append(0)
+        }
+        for literal in literals {
+            blob.append(contentsOf: Array(literal.utf8))
+            blob.append(0)
+        }
+        let builder = MachOBuilder(arch: .arm64, fileType: 6, pie: false, uuid: uuid16(0x5A))
+        builder.addSegment("__TEXT", sections: [.data("__cstring", "__TEXT", blob)])
+        return builder.build()
+    }
 
     private func uuid16(_ fill: UInt8) -> [UInt8] { Array(repeating: fill, count: 16) }
     private func hex(_ bytes: [UInt8]) -> String { HexEncoding.encode(bytes) }

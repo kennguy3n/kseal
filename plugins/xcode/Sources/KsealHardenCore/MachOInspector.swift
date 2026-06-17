@@ -68,6 +68,59 @@ public struct MachOInspector {
         }
     }
 
+    // MARK: - String-obfuscation posture (Phase 5.2)
+
+    /// Verifies whether the linked kseal trust-core binary still carries its
+    /// sensitive string literals in plaintext.
+    ///
+    /// This is the Apple-side mirror of the Android plugin's
+    /// `NativeStringObfuscationInspector` and the Rust core's compile-time
+    /// `obfuscate-strings` feature (see `sdk/rust-core/kseal-core/src/obfuscate.rs`).
+    /// The Rust static library that the XCFramework links is the same trust core;
+    /// when it is built hardened (`KSEAL_OBFUSCATE_STRINGS=1`) the sensitive
+    /// literals are absent from the Mach-O image. This method *verifies* and
+    /// records that posture — it does not transform the binary — so the build
+    /// proof carries evidence of whether the hardened core was shipped.
+    ///
+    /// Detection is a pure, deterministic ASCII substring scan over the whole
+    /// file (thin or fat), exactly like the Android counterpart. The posture is
+    /// asserted only for the kseal core, identified by its exported C ABI symbol
+    /// prefix (`kseal_`, which stays plaintext by design — those names are linked
+    /// by the Swift bridge). Binaries we do not build are reported
+    /// `.notApplicable` rather than falsely "clean".
+    public func stringObfuscation(binaryAt url: URL) throws -> StringObfuscation {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            throw MachOInspectorError.binaryMissing(url.path)
+        }
+        return stringObfuscation(data: try Data(contentsOf: url))
+    }
+
+    /// Pure scanning core, exposed for unit tests.
+    public func stringObfuscation(data: Data) -> StringObfuscation {
+        let bytes = [UInt8](data)
+        guard containsAscii(bytes, Self.ksealExportMarker) else {
+            return StringObfuscation(
+                status: .notApplicable,
+                isKsealCore: false,
+                markersFound: [],
+                notes: ["no kseal_* exports; not the trust core, string posture not asserted"]
+            )
+        }
+        let found = Self.stringSentinels.filter { containsAscii(bytes, $0) }
+        if found.isEmpty {
+            return StringObfuscation(status: .obfuscated, isKsealCore: true, markersFound: [], notes: [])
+        }
+        return StringObfuscation(
+            status: .plaintext,
+            isKsealCore: true,
+            markersFound: found,
+            notes: [
+                "trust-core string literals present in plaintext; build the static library "
+                    + "with the obfuscate-strings feature (KSEAL_OBFUSCATE_STRINGS=1) to harden them"
+            ]
+        )
+    }
+
     private func postureFat(_ bytes: [UInt8], is64: Bool) throws -> Posture {
         let count = Int(readBE32(bytes, 4))
         var slices: [Posture.Slice] = []
@@ -471,6 +524,20 @@ public struct MachOInspector {
         static let execute: UInt32 = 2
     }
 
+    /// Exported C ABI symbol prefix of the kseal trust core. Its presence marks
+    /// a binary as "ours" so the string posture is asserted only for the core;
+    /// these names stay in clear by design (the Swift bridge links them).
+    private static let ksealExportMarker = "kseal_"
+    /// Literals that are unique to the trust core's obfuscatable call sites and
+    /// do *not* appear in proto-generated reflection metadata. Their absence in a
+    /// kseal binary means the hardened (obfuscate-strings) core was shipped. Kept
+    /// byte-identical to the Android `NativeStringObfuscationInspector` sentinels.
+    private static let stringSentinels = [
+        "config signature verification failed",
+        "network_mitm",
+        "app_integrity",
+    ]
+
     /// Undefined imports the compiler emits when stack-protector is on.
     private static let stackCanarySymbols = ["___stack_chk_fail", "___stack_chk_guard"]
     /// A representative set of `_FORTIFY_SOURCE` checked-builtin imports.
@@ -556,6 +623,42 @@ public struct MachOInspector {
             public var hardened: Bool {
                 ![pie, nxStack, codeSignature, restrict, stackCanary, fortify].contains(.absent)
             }
+        }
+    }
+
+    /// Outcome of the trust-core string-obfuscation check. Wire values are kept
+    /// byte-identical to the Android plugin so a build-proof reader sees a single
+    /// vocabulary across both planes.
+    public enum StringObfuscationStatus: String, Codable, Equatable {
+        /// kseal core with none of the sensitive literals in plaintext.
+        case obfuscated
+        /// kseal core that still exposes one or more sensitive literals.
+        case plaintext
+        /// Not a kseal binary; posture is not asserted.
+        case notApplicable = "not-applicable"
+        /// The binary could not be read; posture is unknown.
+        case indeterminate
+    }
+
+    /// String-obfuscation posture for one linked binary. Mirrors the Android
+    /// `NativeStringObfuscationInspector.Result` so the build proof records a
+    /// consistent, cross-platform shape.
+    public struct StringObfuscation: Codable, Equatable {
+        public var status: StringObfuscationStatus
+        public var isKsealCore: Bool
+        public var markersFound: [String]
+        public var notes: [String]
+
+        public init(
+            status: StringObfuscationStatus,
+            isKsealCore: Bool,
+            markersFound: [String],
+            notes: [String]
+        ) {
+            self.status = status
+            self.isKsealCore = isKsealCore
+            self.markersFound = markersFound
+            self.notes = notes
         }
     }
 }

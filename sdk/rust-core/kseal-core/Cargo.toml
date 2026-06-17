@@ -7,6 +7,11 @@ repository.workspace = true
 rust-version.workspace = true
 description = "kseal device trust core: policy evaluation, risk scoring, telemetry, and request proofs."
 
+[features]
+# Compile-time string-literal obfuscation (Phase 5.2). Off by default so the
+# standard build stays debuggable; turned on for hardened/release artifacts.
+obfuscate-strings = []
+
 [dependencies]
 prost.workspace = true
 zstd.workspace = true
