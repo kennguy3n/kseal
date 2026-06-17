@@ -56,6 +56,11 @@ message PolicyConfig {
   // Per-bit weights for composite risk scoring (bit index -> weight).
   map<uint32, uint32> signal_weights = 5;
   string policy_hash = 6;
+  // Opt-in periodic re-attestation cadence in seconds. 0 (default) disables
+  // continuous mode entirely, preserving the "no launch-time network call"
+  // invariant; a positive value lets the SDK schedule background heartbeats
+  // that re-run probes and re-validate, escalating coverage with risk.
+  uint32 reattest_interval_secs = 7;
 }
 
 // ConfigRequest is sent by the SDK to fetch the current signed config.

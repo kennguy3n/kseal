@@ -33,6 +33,14 @@ interface ConfigProvider {
     fun cachedConfig(): ByteArray?
     fun fetchConfig(): ByteArray?
     fun persist(config: ByteArray)
+
+    /**
+     * Fetches the latest serialized `kseal.v1.SignedKillSwitch` (e.g. from the
+     * host's `GetConfig` response), or null when none applies. Invoked only by
+     * the opt-in re-attestation cycle / [KsealSDK.refreshKillSwitch] — never at
+     * launch. The default never performs network I/O.
+     */
+    fun fetchKillSwitch(): ByteArray? = null
 }
 
 /** Default file-backed config cache under the app's private storage. */

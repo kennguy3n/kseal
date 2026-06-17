@@ -18,6 +18,17 @@ public enum TrustDecision: String, Sendable {
     case allow = "DECISION_ALLOW"
     case stepUp = "DECISION_STEP_UP"
     case deny = "DECISION_DENY"
+
+    /// Maps the `kseal.v1.RequestProofResult.Decision` discriminant (as returned
+    /// by the trust core's `decision()` FFI) to a case; unknown/negative → `.unspecified`.
+    init(code: Int32) {
+        switch code {
+        case 1: self = .allow
+        case 2: self = .stepUp
+        case 3: self = .deny
+        default: self = .unspecified
+        }
+    }
 }
 
 /// Outcome of validating a request proof.

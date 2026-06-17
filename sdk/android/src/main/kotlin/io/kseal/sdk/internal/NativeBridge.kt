@@ -103,4 +103,22 @@ internal object NativeBridge {
     external fun nativeDecompress(data: ByteArray): ByteArray?
 
     external fun nativeGenerateNonce(len: Int): ByteArray?
+
+    /** Returns the policy's reattest interval (seconds) widened to a long, or a negative status. */
+    external fun nativeReattestIntervalSecs(handle: Long): Long
+
+    /** Returns the `Decision` discriminant (0..3), or a negative status on error. */
+    external fun nativeDecision(handle: Long, riskBits: Long): Int
+
+    /**
+     * Resolves the `[trustLevel, decision]` discriminant pair atomically under a
+     * single policy read, or returns `null` on error.
+     */
+    external fun nativeDecisionWithLevel(handle: Long, riskBits: Long): IntArray?
+
+    /** Returns 1 (killed) / 0 (not killed), or a negative status on bad args. */
+    external fun nativeApplyKillSwitch(handle: Long, bytes: ByteArray): Int
+
+    /** Returns 1 (killed) / 0 (not killed), or a negative status on bad args. */
+    external fun nativeIsKilled(handle: Long): Int
 }

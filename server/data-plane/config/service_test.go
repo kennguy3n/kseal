@@ -88,6 +88,40 @@ func TestGetConfigSignsAssembledPolicy(t *testing.T) {
 	}
 }
 
+func TestGetConfigCarriesReattestInterval(t *testing.T) {
+	svc, store, tn, app := setup(t)
+	// Object-form policy doc opting into a 900s re-attestation cadence.
+	activatePolicy(t, store, tn.Id, app.Id,
+		`{"rules":[],"reattest_interval_secs":900}`, "{}")
+
+	resp, err := svc.GetConfig(context.Background(), connect.NewRequest(&ksealv1.ConfigRequest{TenantId: tn.Id, AppId: app.Id}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pc ksealv1.PolicyConfig
+	if err := proto.Unmarshal(resp.Msg.Config.ConfigBytes, &pc); err != nil {
+		t.Fatal(err)
+	}
+	if pc.ReattestIntervalSecs != 900 {
+		t.Fatalf("reattest interval not delivered: got %d", pc.ReattestIntervalSecs)
+	}
+
+	// A policy without the field keeps continuous mode off (default 0).
+	_, _, tn2, app2 := setup(t)
+	activatePolicy(t, store, tn2.Id, app2.Id, "[]", "{}")
+	resp2, err := svc.GetConfig(context.Background(), connect.NewRequest(&ksealv1.ConfigRequest{TenantId: tn2.Id, AppId: app2.Id}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pc2 ksealv1.PolicyConfig
+	if err := proto.Unmarshal(resp2.Msg.Config.ConfigBytes, &pc2); err != nil {
+		t.Fatal(err)
+	}
+	if pc2.ReattestIntervalSecs != 0 {
+		t.Fatalf("expected continuous mode off by default, got %d", pc2.ReattestIntervalSecs)
+	}
+}
+
 func TestGetConfigNoPolicyIsNotFound(t *testing.T) {
 	svc, _, tn, app := setup(t)
 	_, err := svc.GetConfig(context.Background(), connect.NewRequest(&ksealv1.ConfigRequest{TenantId: tn.Id, AppId: app.Id}))

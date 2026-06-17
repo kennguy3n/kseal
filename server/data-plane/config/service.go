@@ -197,6 +197,10 @@ func (s *Service) GetPolicy(ctx context.Context, req *connect.Request[ksealv1.Po
 type policyDoc struct {
 	Rules         []ruleDoc         `json:"rules"`
 	SignalWeights map[string]uint32 `json:"signal_weights"`
+	// ReattestIntervalSecs opts the SDK into background re-attestation at this
+	// cadence (seconds). 0 (the default / absent) keeps continuous mode off and
+	// preserves the no-launch-time-network-call invariant.
+	ReattestIntervalSecs uint32 `json:"reattest_interval_secs"`
 }
 
 type ruleDoc struct {
@@ -212,7 +216,7 @@ func parsePolicyDoc(rules string) policyDoc {
 	if rules == "" {
 		return doc
 	}
-	if err := json.Unmarshal([]byte(rules), &doc); err == nil && (doc.Rules != nil || doc.SignalWeights != nil) {
+	if err := json.Unmarshal([]byte(rules), &doc); err == nil && (doc.Rules != nil || doc.SignalWeights != nil || doc.ReattestIntervalSecs != 0) {
 		return doc
 	}
 	var arr []ruleDoc
@@ -249,12 +253,13 @@ func buildPolicyConfig(p *ksealv1.Policy) *ksealv1.PolicyConfig {
 	}
 
 	return &ksealv1.PolicyConfig{
-		Rules:          rules,
-		RiskThresholds: thresholds,
-		DefaultMode:    p.EnforcementMode,
-		ModulesEnabled: p.ModulesEnabled,
-		SignalWeights:  weights,
-		PolicyHash:     registry.HashPolicy(p.AppId, p.EnforcementMode, p.Rules, p.RiskThresholds, p.ModulesEnabled),
+		Rules:                rules,
+		RiskThresholds:       thresholds,
+		DefaultMode:          p.EnforcementMode,
+		ModulesEnabled:       p.ModulesEnabled,
+		SignalWeights:        weights,
+		PolicyHash:           registry.HashPolicy(p.AppId, p.EnforcementMode, p.Rules, p.RiskThresholds, p.ModulesEnabled),
+		ReattestIntervalSecs: doc.ReattestIntervalSecs,
 	}
 }
 

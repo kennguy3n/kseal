@@ -62,6 +62,25 @@ enum class Platform(val code: Int) {
 }
 
 /**
+ * Server-equivalent trust decision for the active policy. Mirrors
+ * `kseal.v1.RequestProofResult.Decision`.
+ *
+ * The SDK computes this locally with the exact mapping the server applies
+ * (`risk.Decision(level, mode)`) and surfaces it through
+ * [KsealSDK.onTrustDecision]; it never enforces the decision itself.
+ */
+enum class Decision(val code: Int) {
+    UNSPECIFIED(0),
+    ALLOW(1),
+    STEP_UP(2),
+    DENY(3);
+
+    companion object {
+        fun fromCode(code: Int): Decision = entries.firstOrNull { it.code == code } ?: UNSPECIFIED
+    }
+}
+
+/**
  * Result of an on-device risk evaluation.
  *
  * @property riskBits packed signal bitset (the only thing handed to the core / server).

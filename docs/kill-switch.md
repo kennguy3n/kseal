@@ -23,7 +23,13 @@ sig = Ed25519_sign( tenant_signing_key,
   empty `build_hash` covers all builds. The **most specific** matching switch
   wins, so an app/build `ENABLE` can override a tenant-wide `DISABLE`.
 - **Anti-rollback**: `version` increases monotonically per scope; re-issuing the
-  same scope bumps it. Clients reject a lower version than last seen.
+  same scope bumps it. The server folds `(command, version)` into the config
+  `ETag` (see [Delivery](#delivery)), and the on-device core rejects a verified
+  command whose version is below the highest already accepted for its scope — a
+  replayed older command is a no-op. Equal versions are idempotent re-applies.
+  Scopes are tracked independently and in-memory for the process lifetime; a
+  cold start re-fetches config, where the `ETag` already excludes a superseded
+  command.
 - **Same trust anchor as config**: kill switches are signed with the per-tenant
   key that signs policy config, so the SDK verifies both with one anchor.
 - **Default**: with no applicable switch, the effective command is `ENABLE`
@@ -48,6 +54,42 @@ fail-safe: any error yields no kill switch rather than failing the config fetch.
 `VerifyKillSwitch(pub, ks)` returns `false` (never panics) for a malformed key,
 wrong signature length, or altered field. State only flips when it returns
 `true`. Every issue is recorded in the audit trail (`killswitch.issue`).
+
+The same verification runs **on device** in the shared Rust core
+(`apply_kill_switch`), so the SDK never trusts an unsigned or forged command:
+
+- decode failure → no-op (state unchanged),
+- signature invalid under the config anchor → no-op (a forged command can't flip
+  state in *either* direction),
+- valid command with a stale `version` (below the highest already accepted for
+  its `(tenant_id, app_id, build_hash)` scope) → no-op (anti-rollback: a replayed
+  older command can't flip state),
+- valid `DISABLE` → `is_killed = true`,
+- valid `ENABLE`/`UNSPECIFIED` → `is_killed = false` (a server re-enable lifts a
+  prior kill).
+
+This mirrors the server's default-`ENABLE` resolution byte-for-byte (a Go↔Rust
+golden preimage test pins the layout).
+
+## SDK surfacing (`isKilled`)
+
+The SDK exposes the kill switch as **first-class state**; it never disables the
+app on its own — it only surfaces the verified state so the host can degrade
+(e.g. read-only mode). The active-response safety rule holds: the SDK does not
+kill/lock/wipe by itself.
+
+| Surface | Android | iOS / macOS |
+|---|---|---|
+| Apply a serialized `SignedKillSwitch` (host-fetched from its own `GetConfig`) | `applyKillSwitch(bytes): Boolean` | `applyKillSwitch(_:) -> Bool` |
+| Pull + apply via the `ConfigProvider` (on demand — never at launch) | `refreshKillSwitch(): Boolean` | `refreshKillSwitch() -> Bool` |
+| Current verified state | `val isKilled: Boolean` | `var isKilled: Bool` |
+| Forced-degrade hook on transition (default no-op) | `var onKillSwitchChanged: ((Boolean) -> Unit)?` | `var onKillSwitchChanged: ((Bool) -> Void)?` |
+
+`ConfigProvider` gains a default-implemented `fetchKillSwitch()` returning
+`null`/`nil`, so existing providers keep compiling and stay kill-switch-free
+until they opt in. During continuous monitoring (see
+[continuous-protection.md](continuous-protection.md)), the SDK pulls the latest
+switch as risk escalates.
 
 ## RPCs (`ComplianceService`)
 

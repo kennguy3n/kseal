@@ -24,7 +24,7 @@
 //! fixed-width 8-byte big-endian `i64`. The Go server (S1) recomputes this exact
 //! byte layout to verify, so any deviation breaks verification.
 
-use crate::proto::RequestProof;
+use crate::proto::{RequestProof, SignedKillSwitch};
 use crate::{Error, Result};
 use ed25519_dalek::{Signature, VerifyingKey};
 use hmac::{Hmac, Mac};
@@ -96,6 +96,11 @@ const PROOF_DOMAIN: &[u8] = b"kseal/v1/request-proof";
 /// NUL). Distinct from [`PROOF_DOMAIN`] so a request proof can never be
 /// mistaken for a config signature and vice versa.
 const SIGNED_CONFIG_DOMAIN: &[u8] = b"kseal/v1/signed-config";
+
+/// Domain-separation tag for the signed kill-switch preimage (ASCII, no NUL).
+/// Distinct from the proof and config domains so a kill-switch signature can
+/// never be confused with another signed structure.
+const KILL_SWITCH_DOMAIN: &[u8] = b"kseal/v1/kill-switch";
 
 /// Appends a 4-byte big-endian length prefix followed by `field` bytes.
 ///
@@ -243,6 +248,62 @@ pub fn verify_config_envelope(
 ) -> bool {
     let preimage = signed_config_preimage(version, ttl_seconds, key_id, config_bytes);
     verify_ed25519(public_key, &preimage, signature)
+}
+
+/// Builds the canonical, domain-separated, length-prefixed signing preimage for
+/// a [`SignedKillSwitch`]:
+///
+/// ```text
+/// preimage =
+///     u32_be(len(DOMAIN))         || DOMAIN
+///   || u32_be(len(tenant_id))     || tenant_id
+///   || u32_be(len(app_id))        || app_id
+///   || u32_be(len(build_hash))    || build_hash
+///   || u64_be(command)
+///   || u64_be(version)
+///   || u64_be(issued_at)
+///   || u32_be(len(reason))        || reason
+/// ```
+///
+/// `DOMAIN = "kseal/v1/kill-switch"`. The three scalars are fixed-width 8-byte
+/// big-endian unsigned integers (no length prefix); the variable-length scope
+/// and reason are length-prefixed so the framing is unambiguous. The Go control
+/// plane signs over the identical layout (pinned by a shared golden vector), so
+/// any divergence would make a legitimately-signed command fail verification.
+#[must_use]
+pub fn kill_switch_preimage(ks: &SignedKillSwitch) -> Vec<u8> {
+    let mut msg = Vec::with_capacity(
+        5 * core::mem::size_of::<u32>()
+            + KILL_SWITCH_DOMAIN.len()
+            + ks.tenant_id.len()
+            + ks.app_id.len()
+            + ks.build_hash.len()
+            + ks.reason.len()
+            + 3 * core::mem::size_of::<u64>(),
+    );
+    push_lp(&mut msg, KILL_SWITCH_DOMAIN);
+    push_lp(&mut msg, ks.tenant_id.as_bytes());
+    push_lp(&mut msg, ks.app_id.as_bytes());
+    push_lp(&mut msg, ks.build_hash.as_bytes());
+    // Command is a non-negative proto enum; `as u64` matches the Go server's
+    // `uint64(int32)` (and `version`/`issued_at` reinterpret their i64 bits).
+    msg.extend_from_slice(&(ks.command as u64).to_be_bytes());
+    msg.extend_from_slice(&(ks.version as u64).to_be_bytes());
+    msg.extend_from_slice(&(ks.issued_at as u64).to_be_bytes());
+    push_lp(&mut msg, ks.reason.as_bytes());
+    msg
+}
+
+/// Verifies the Ed25519 signature carried by `ks` over its canonical preimage
+/// (see [`kill_switch_preimage`]) against `public_key`.
+///
+/// This is the fail-safe gate the SDK runs before honoring a kill switch: it
+/// returns `false` (never an error) for a malformed key/signature or a failed
+/// check, so an absent, forged, or altered command can never flip the device
+/// into a killed state.
+#[must_use]
+pub fn verify_kill_switch(public_key: &[u8], ks: &SignedKillSwitch) -> bool {
+    verify_ed25519(public_key, &kill_switch_preimage(ks), &ks.signature)
 }
 
 #[cfg(test)]
@@ -470,5 +531,89 @@ mod tests {
             tag_hex, "718bb06df45dc4bbc5bf483bd65acf7609429966adba8baff66fa965857ebd0d",
             "golden HMAC tag for the fixed vector"
         );
+    }
+
+    #[test]
+    fn kill_switch_domain_is_exact() {
+        assert_eq!(KILL_SWITCH_DOMAIN, b"kseal/v1/kill-switch");
+        assert_eq!(KILL_SWITCH_DOMAIN.len(), 20);
+    }
+
+    /// Golden cross-platform vector for the kill-switch preimage. The Go control
+    /// plane's `killSwitchPreimage` MUST produce these identical bytes (a sibling
+    /// Go test pins the same vector), so an Ed25519 signature made on either side
+    /// verifies on the other. Layout: `u32_be(len)||DOMAIN ||
+    /// u32_be(len)||tenant_id || u32_be(len)||app_id || u32_be(len)||build_hash ||
+    /// u64_be(command) || u64_be(version) || u64_be(issued_at) ||
+    /// u32_be(len)||reason`.
+    #[test]
+    fn kill_switch_preimage_exact_byte_layout() {
+        let ks = SignedKillSwitch {
+            tenant_id: "t1".into(), // 2 bytes: 74 31
+            app_id: "a1".into(),    // 2 bytes: 61 31
+            build_hash: "b1".into(),// 2 bytes: 62 31
+            command: 2,             // KILL_SWITCH_COMMAND_DISABLE
+            version: 7,
+            issued_at: 3600,        // 0x0E10
+            reason: "x".into(),     // 1 byte: 78
+            signature: Vec::new(),
+            key_id: String::new(),
+        };
+
+        let mut expected = Vec::new();
+        // u32_be(20) || "kseal/v1/kill-switch"
+        expected.extend_from_slice(&[0x00, 0x00, 0x00, 0x14]);
+        expected.extend_from_slice(b"kseal/v1/kill-switch");
+        // u32_be(2) || "t1"
+        expected.extend_from_slice(&[0x00, 0x00, 0x00, 0x02, 0x74, 0x31]);
+        // u32_be(2) || "a1"
+        expected.extend_from_slice(&[0x00, 0x00, 0x00, 0x02, 0x61, 0x31]);
+        // u32_be(2) || "b1"
+        expected.extend_from_slice(&[0x00, 0x00, 0x00, 0x02, 0x62, 0x31]);
+        // u64_be(2) command
+        expected.extend_from_slice(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02]);
+        // u64_be(7) version
+        expected.extend_from_slice(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x07]);
+        // u64_be(3600) issued_at
+        expected.extend_from_slice(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0e, 0x10]);
+        // u32_be(1) || "x"
+        expected.extend_from_slice(&[0x00, 0x00, 0x00, 0x01, 0x78]);
+
+        let actual = kill_switch_preimage(&ks);
+        assert_eq!(actual, expected, "preimage byte layout must match the spec");
+        assert_eq!(actual.len(), 4 + 20 + 6 + 6 + 6 + 8 + 8 + 8 + 5);
+    }
+
+    #[test]
+    fn kill_switch_verifies_and_detects_tamper() {
+        let sk = fixed_signing_key();
+        let vk = sk.verifying_key();
+        let mut ks = SignedKillSwitch {
+            tenant_id: "tenant".into(),
+            app_id: "app".into(),
+            build_hash: "build".into(),
+            command: 2, // DISABLE
+            version: 9,
+            issued_at: 1_700_000_000,
+            reason: "incident".into(),
+            signature: Vec::new(),
+            key_id: "k1".into(),
+        };
+        ks.signature = sk.sign(&kill_switch_preimage(&ks)).to_bytes().to_vec();
+        assert!(verify_kill_switch(vk.as_bytes(), &ks));
+
+        // Tampering any authenticated field invalidates the signature.
+        let mut forged = ks.clone();
+        forged.command = 1; // ENABLE
+        assert!(!verify_kill_switch(vk.as_bytes(), &forged));
+
+        // A wrong key never verifies.
+        let other = SigningKey::from_bytes(&[9u8; 32]);
+        assert!(!verify_kill_switch(other.verifying_key().as_bytes(), &ks));
+
+        // Malformed inputs fail closed rather than panic.
+        let mut bad_sig = ks.clone();
+        bad_sig.signature = vec![0u8; 10];
+        assert!(!verify_kill_switch(vk.as_bytes(), &bad_sig));
     }
 }

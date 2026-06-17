@@ -55,6 +55,23 @@ public enum Platform: Int32, Sendable {
     case ios = 2
 }
 
+/// Server-equivalent trust decision for the active policy. Mirrors
+/// `kseal.v1.RequestProofResult.Decision`.
+///
+/// The SDK computes this locally with the exact mapping the server applies
+/// (`risk.Decision(level, mode)`) and surfaces it through
+/// `KsealSDK.onTrustDecision`; it never enforces the decision itself.
+public enum Decision: Int32, Sendable {
+    case unspecified = 0
+    case allow = 1
+    case stepUp = 2
+    case deny = 3
+
+    init(code: Int32) {
+        self = Decision(rawValue: code) ?? .unspecified
+    }
+}
+
 /// Result of an on-device risk evaluation.
 public struct RiskAssessment: Sendable {
     /// Packed signal bitset (the only thing handed to the core / server).
