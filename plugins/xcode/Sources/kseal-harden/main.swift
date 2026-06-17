@@ -213,10 +213,16 @@ func runIntegrity(_ opts: Args) {
     let posture: MachOInspector.Posture
     let stringObfuscation: MachOInspector.StringObfuscation
     do {
+        guard FileManager.default.fileExists(atPath: binary.path) else {
+            fail("\(MachOInspectorError.binaryMissing(binary.path))")
+        }
         let inspector = MachOInspector()
-        integrity = try inspector.inspect(binaryAt: binary)
-        posture = try inspector.posture(binaryAt: binary)
-        stringObfuscation = try inspector.stringObfuscation(binaryAt: binary)
+        // Read the binary once and share it across all inspectors; a release
+        // Mach-O is tens of MB, so re-reading per inspector tripled I/O.
+        let binaryData = try Data(contentsOf: binary)
+        integrity = try inspector.inspect(data: binaryData)
+        posture = try inspector.posture(data: binaryData)
+        stringObfuscation = inspector.stringObfuscation(data: binaryData)
     } catch {
         fail("\(error)")
     }

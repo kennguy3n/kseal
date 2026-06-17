@@ -42,9 +42,9 @@ build-server: ## Build the Go server binary.
 	cd server && go build -o bin/kseal-server ./cmd/kseal-server
 
 .PHONY: build-rust
-build-rust: ## Build the Rust trust core + FFI (release), default + hardened (obfuscated) feature set.
+build-rust: ## Build the Rust trust core + FFI (release): default artifacts in target/release, hardened (obfuscated) verification build in target/obfuscated.
 	cd sdk/rust-core && cargo build --release
-	cd sdk/rust-core && cargo build --release --features obfuscate-strings
+	cd sdk/rust-core && cargo build --release --features obfuscate-strings --target-dir target/obfuscated
 
 .PHONY: build-console
 build-console: ## Build the React dashboard.

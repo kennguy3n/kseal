@@ -262,6 +262,18 @@ final class MachOInspectorTests: XCTestCase {
         XCTAssertEqual(MachOInspector.StringObfuscationStatus.indeterminate.rawValue, "indeterminate")
     }
 
+    func testStringObfuscationReportsIndeterminateForUnreadableBinary() {
+        // Mirrors the Android NativeStringObfuscationInspector.inspect, which
+        // returns INDETERMINATE on a read failure instead of throwing.
+        let missing = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("kseal-does-not-exist-\(UUID().uuidString).dylib")
+        let report = MachOInspector().stringObfuscation(binaryAt: missing)
+        XCTAssertEqual(report.status, .indeterminate)
+        XCTAssertFalse(report.isKsealCore)
+        XCTAssertTrue(report.markersFound.isEmpty)
+        XCTAssertFalse(report.notes.isEmpty)
+    }
+
     // MARK: helpers
 
     /// Builds a thin arm64 dylib whose `__cstring` section carries `literals`

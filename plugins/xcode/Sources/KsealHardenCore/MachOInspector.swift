@@ -88,11 +88,21 @@ public struct MachOInspector {
     /// prefix (`kseal_`, which stays plaintext by design — those names are linked
     /// by the Swift bridge). Binaries we do not build are reported
     /// `.notApplicable` rather than falsely "clean".
-    public func stringObfuscation(binaryAt url: URL) throws -> StringObfuscation {
-        guard FileManager.default.fileExists(atPath: url.path) else {
-            throw MachOInspectorError.binaryMissing(url.path)
+    ///
+    /// A binary that cannot be read is reported `.indeterminate` (mirroring the
+    /// Android `NativeStringObfuscationInspector.inspect`, which returns
+    /// `INDETERMINATE` on a read failure) rather than throwing — string posture
+    /// is recorded evidence, not a hard build gate.
+    public func stringObfuscation(binaryAt url: URL) -> StringObfuscation {
+        guard let data = try? Data(contentsOf: url) else {
+            return StringObfuscation(
+                status: .indeterminate,
+                isKsealCore: false,
+                markersFound: [],
+                notes: ["native library could not be read"]
+            )
         }
-        return stringObfuscation(data: try Data(contentsOf: url))
+        return stringObfuscation(data: data)
     }
 
     /// Pure scanning core, exposed for unit tests.
