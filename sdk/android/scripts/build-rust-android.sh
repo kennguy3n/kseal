@@ -61,7 +61,7 @@ cargo ndk \
     -t armeabi-v7a \
     -t x86_64 \
     -o "$JNILIBS_DIR" \
-    build --release -p kseal-ffi "${FEATURE_ARGS[@]}"
+    build --release -p kseal-ffi ${FEATURE_ARGS[@]+"${FEATURE_ARGS[@]}"}
 
 echo "[build-rust-android] done. ABIs:"
 ls -1 "$JNILIBS_DIR"

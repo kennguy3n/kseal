@@ -36,7 +36,7 @@ mkdir -p "$HEADERS_DIR"
 
 for target in "${TARGETS[@]}"; do
     echo "[xcframework] cargo build --release --target $target"
-    cargo build --manifest-path "$RUST_CORE/Cargo.toml" -p kseal-ffi --release --target "$target" "${FEATURE_ARGS[@]}"
+    cargo build --manifest-path "$RUST_CORE/Cargo.toml" -p kseal-ffi --release --target "$target" ${FEATURE_ARGS[@]+"${FEATURE_ARGS[@]}"}
 done
 
 # Stage the cbindgen header + module map for the framework.
