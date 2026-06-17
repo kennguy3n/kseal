@@ -456,7 +456,11 @@ public final class KsealDesktop {
             NotarizationProbe(env, policy: policy),
             HardenedRuntimeProbe(env, policy: policy),
             SelfIntegrityProbe(env, policy: options.tamperPolicy),
-            DylibInjectionProbe(env, isAllowed: enterprise.allowsModule),
+            DylibInjectionProbe(
+                env,
+                isAllowed: enterprise.allowsModule,
+                consultNativeHook: enterprise.injectionAllowlist.isEmpty
+            ),
             DebuggerProbe(env),
         ]
         let selected: [Probe]

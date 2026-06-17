@@ -143,6 +143,14 @@ final class IntegrityProbeTests: XCTestCase {
         XCTAssertTrue(DylibInjectionProbe(env).evaluate().isEmpty)
     }
 
+    func testNativeHookNotConsultedWhenDisabled() {
+        let env = FakeDesktopEnvironment()
+        env.nativeHook = 1
+        // With an allowlist configured the SDK passes consultNativeHook: false,
+        // so the allowlist-unaware native scan must not raise the signal.
+        XCTAssertTrue(DylibInjectionProbe(env, consultNativeHook: false).evaluate().isEmpty)
+    }
+
     // MARK: - Debugger (opt-in)
 
     func testDebuggerProbeDetectsTrace() {
