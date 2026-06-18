@@ -19,11 +19,17 @@ fi
 
 # Reassemble the staging tree from scratch so deletions in docs/ are reflected.
 rm -rf .staging
-mkdir -p .staging/docs
+mkdir -p .staging/docs .staging/blog
 
 # Landing page + other site-owned Markdown (the only Markdown this dir authors).
 ln -s ../index.md .staging/index.md
 ln -s ../secure-your-app.md .staging/secure-your-app.md
+
+# Site-owned blog posts (deep-dives, all grounded in the reference deployment).
+for f in blog/*.md; do
+  base="$(basename "$f")"
+  ln -s "../../blog/$base" ".staging/blog/$base"
+done
 
 # Site-owned static assets (custom theme CSS, images).
 ln -s ../css .staging/css
@@ -43,6 +49,11 @@ for f in ../docs/*.md; do
   [[ "$base" == "README.md" ]] && continue
   ln -s "../../../docs/$base" ".staging/docs/$base"
 done
+
+# Reference docs (benchmarks, risk-signals, voice-and-style) + committed JSON
+# fixtures, mirrored under docs/reference so the README, ARCHITECTURE and feature
+# docs can link to them and the rendered site serves the same canonical numbers.
+ln -s ../../../docs/reference .staging/docs/reference
 
 if [[ "${1:-build}" == "serve" ]]; then
   exec mkdocs serve

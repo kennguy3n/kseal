@@ -1,0 +1,30 @@
+{
+  "rpc": "kseal.v1.TrustService/VerifyAttestation",
+  "request": {
+    "tenant_id": "meridian",
+    "app_id": "pay-android",
+    "nonce_hex": "aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899",
+    "platform": "PLATFORM_ANDROID",
+    "attestation_token": "<Play Integrity JWS>",
+    "reported_risk_bits_wire": 0,
+    "build_hash": "e3bb7952a304da35ff93f5ddc20aa9220c6cc9be462016ae2985af3e76a70d73"
+  },
+  "verdict": {
+    "device_recognized": true,
+    "app_recognized": true,
+    "integrity_verdict": "MEETS_DEVICE_INTEGRITY",
+    "nonce_matches": true,
+    "build_recognized": true
+  },
+  "response": {
+    "trust_token": "tt_8f6a1b2c3d4e5f60_01H...",
+    "trust_level": "TRUST_LEVEL_TRUSTED",
+    "score": 0,
+    "risk_bits_server": 0,
+    "risk_signals": [],
+    "expires_at": "2026-06-16T04:07:00Z",
+    "ttl_seconds": 300,
+    "next_checks": []
+  },
+  "notes": "Genuine install (device scenario D1). The platform verdict source is mocked in tests (Play Integrity / App Attest are external), but the real JWS parsing and verdict->risk-bit mapping run. A recognized, integral device on a registered build_hash with no reported risk bits scores 0 -> TRUSTED."
+}

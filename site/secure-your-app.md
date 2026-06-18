@@ -23,6 +23,12 @@ graph LR
     - A kseal control-plane **tenant id**, **app id** and **API key** for the
       register + verify steps. You can do steps 1–2 fully offline first.
 
+!!! example "Following Meridian Pay"
+    The examples below use the canonical reference customer **Meridian Pay** —
+    tenant `meridian`, app `pay-android`. Swap in your own tenant/app ids. The
+    committed request/response payloads for every step live in
+    [`docs/reference/fixtures/`](https://github.com/kennguy3n/kseal/tree/main/docs/reference/fixtures).
+
 ---
 
 ## Step 1 · Install the plugin
@@ -159,8 +165,8 @@ plane recognize genuine builds later.
     ksealHarden {
         registry {
             endpoint.set("https://control.kseal.io")
-            tenantId.set("acme")
-            appId.set("checkout-android")
+            tenantId.set("meridian")
+            appId.set("pay-android")
         }
     }
     ```
@@ -181,6 +187,11 @@ plane recognize genuine builds later.
     is available, so you can register the proof from a separate, network-allowed
     job. The API key is read at execution time and **never logged**.
 
+Meridian Pay's `pay-android` build records `build_hash`
+`e3bb7952…a70d73` against policy `payments-baseline/v12`. That hash is what the
+runtime proves against in Step 4 — see the
+[build-proof fixture](https://github.com/kennguy3n/kseal/tree/main/docs/reference/fixtures).
+
 [:material-book-open-variant: CLI reference](docs/cli.md)
 
 ---
@@ -199,6 +210,15 @@ or hooked app fails attestation and is refused.
   from Step 3 and issues a short-lived trust token.
 - Your API gateway requires a valid trust token, so compromised clients can't
   call your backend even with valid user credentials.
+
+The server does the scoring, and it is fast: fusing signals and evaluating a
+policy is **~48 ns** and minting a signed request proof is **~349 ns** (see the
+[benchmarks reference](https://github.com/kennguy3n/kseal/blob/main/docs/reference/benchmarks.md)).
+For Meridian Pay in `STEP_UP` mode, a genuine phone is `ALLOW`, a medium/high-risk
+session is sent to re-auth, and a repackaged build that also fails attestation
+scores **130 (CRITICAL)** and is **denied** — the full math and all five
+scenarios are in the
+[risk-signals reference](https://github.com/kennguy3n/kseal/blob/main/docs/reference/risk-signals.md).
 
 [:material-book-open-variant: Threat model](docs/threat-model.md) ·
 [:material-book-open-variant: Desktop SDK](docs/desktop-sdk.md) ·

@@ -1,0 +1,88 @@
+{
+  "description": "The five canonical device scenarios used throughout the Meridian Pay documentation. Every value here is computed by the real server logic: device wire bits are translated through risk.FromWire, fused with attestation-derived bits, scored with risk.Score against the weights in this deployment's policy, mapped to a trust level by risk.Level, and turned into a decision by risk.Decision. Meridian Pay runs in ENFORCEMENT_MODE_STEP_UP.",
+  "policy_ref": "control/policy.json",
+  "weights": {
+    "root_jailbreak": 40, "debugger": 25, "emulator": 20, "hooking": 35,
+    "app_tamper": 60, "attestation_fail": 70, "network_mitm": 30, "account_risk": 20,
+    "device_integrity": 45, "app_unrecognized": 65, "environment_risk": 15,
+    "screen_capture": 30, "overlay_abuse": 35, "accessibility_abuse": 40,
+    "malicious_ime": 25, "remote_access": 45, "fleet_anomaly": 50
+  },
+  "thresholds": { "CRITICAL": 130, "HIGH_RISK": 90, "MEDIUM_RISK": 50, "LOW_RISK": 20, "TRUSTED": 0 },
+  "scenarios": [
+    {
+      "id": "D1",
+      "title": "Genuine install on a healthy device",
+      "story": "A customer opens Meridian Pay on a stock, up-to-date phone. Play Integrity returns MEETS_DEVICE_INTEGRITY for a registered build_hash.",
+      "reported_wire_bits": [],
+      "wire_value": 0,
+      "server_bits_value": 0,
+      "risk_signals": [],
+      "score": 0,
+      "trust_level": "TRUST_LEVEL_TRUSTED",
+      "decision": "DECISION_ALLOW",
+      "next_checks": []
+    },
+    {
+      "id": "D2",
+      "title": "Rooted device, otherwise genuine app",
+      "story": "A power user runs the genuine app on a rooted phone. No tampering, no fraud overlay - just an elevated environment.",
+      "reported_wire_bits": ["wireRoot (0)"],
+      "wire_value": 1,
+      "server_bits": ["root_jailbreak"],
+      "server_bits_value": 1,
+      "risk_signals": ["root_jailbreak"],
+      "score": 40,
+      "trust_level": "TRUST_LEVEL_LOW_RISK",
+      "decision": "DECISION_ALLOW",
+      "next_checks": [],
+      "note": "Root alone is LOW_RISK and allowed; it is recorded for fleet analytics but does not gate a payment on its own."
+    },
+    {
+      "id": "D3",
+      "title": "Repackaged build with patched SDK",
+      "story": "An attacker repackages the app. On-device self-integrity sees the binary no longer matches its build baseline; server-side attestation does not recognize the build.",
+      "reported_wire_bits": ["wireTamper (6)"],
+      "wire_value": 64,
+      "attestation_derived": ["attestation_fail"],
+      "server_bits": ["app_tamper", "attestation_fail"],
+      "server_bits_value": 48,
+      "risk_signals": ["app_tamper", "attestation_fail"],
+      "score": 130,
+      "trust_level": "TRUST_LEVEL_CRITICAL",
+      "decision": "DECISION_DENY",
+      "next_checks": ["EVENT_TYPE_ROOT_RISK", "EVENT_TYPE_DEBUGGER", "EVENT_TYPE_HOOKING_DETECTED", "EVENT_TYPE_APP_INTEGRITY_FAIL"],
+      "note": "60 + 70 = 130 lands exactly on the CRITICAL threshold. This is the only scenario that is denied outright. Detailed in trust/trust-decision.json and egress/webhook-body.json."
+    },
+    {
+      "id": "D4",
+      "title": "Overlay + accessibility tapjacking during checkout",
+      "story": "A malicious accessibility service draws an overlay on top of the Meridian Pay confirm-payment screen to harvest the amount and PIN.",
+      "reported_wire_bits": ["wireOverlayAbuse (17)", "wireAccessibility (18)"],
+      "wire_value": 393216,
+      "server_bits": ["overlay_abuse", "accessibility_abuse"],
+      "server_bits_value": 12288,
+      "risk_signals": ["overlay_abuse", "accessibility_abuse"],
+      "score": 75,
+      "trust_level": "TRUST_LEVEL_MEDIUM_RISK",
+      "decision": "DECISION_STEP_UP",
+      "next_checks": ["EVENT_TYPE_ROOT_RISK", "EVENT_TYPE_DEBUGGER"],
+      "note": "35 + 40 = 75 -> MEDIUM_RISK. The payment is held for a step-up re-authentication instead of completing silently."
+    },
+    {
+      "id": "D5",
+      "title": "Remote-access scam in progress",
+      "story": "A victim is talked into a screen-sharing 'support' session while an accessibility service drives the app and a remote-access tool mirrors the screen.",
+      "reported_wire_bits": ["wireScreenCapture (16)", "wireAccessibility (18)", "wireRemoteAccess (20)"],
+      "wire_value": 1376256,
+      "server_bits": ["screen_capture", "accessibility_abuse", "remote_access"],
+      "server_bits_value": 43008,
+      "risk_signals": ["screen_capture", "accessibility_abuse", "remote_access"],
+      "score": 115,
+      "trust_level": "TRUST_LEVEL_HIGH_RISK",
+      "decision": "DECISION_STEP_UP",
+      "next_checks": ["EVENT_TYPE_ROOT_RISK", "EVENT_TYPE_DEBUGGER", "EVENT_TYPE_HOOKING_DETECTED", "EVENT_TYPE_APP_INTEGRITY_FAIL"],
+      "note": "30 + 40 + 45 = 115 -> HIGH_RISK. In STEP_UP mode this is a step-up challenge; in ENFORCEMENT_MODE_BLOCK the same level would be DECISION_DENY."
+    }
+  ]
+}

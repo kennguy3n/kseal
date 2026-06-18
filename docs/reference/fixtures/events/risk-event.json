@@ -1,0 +1,18 @@
+{
+  "description": "One privacy-minimized telemetry event as it leaves the device for scenario D5 (remote-access scam). These are the ONLY fields the SDK emits - there is no device id, IP, advertising id, or raw PII. risk_bits is already in the server layout; risk_signals is its stable name view. This is the canonical contract enforced by siem.canonicalFields.",
+  "event": {
+    "tenant_id": "meridian",
+    "app_id": "pay-android",
+    "event_type": "EVENT_TYPE_REMOTE_ACCESS",
+    "risk_level": "TRUST_LEVEL_HIGH_RISK",
+    "risk_bits": 43008,
+    "risk_signals": ["screen_capture", "accessibility_abuse", "remote_access"],
+    "confidence": "CONFIDENCE_HIGH",
+    "build_hash": "e3bb7952a304da35ff93f5ddc20aa9220c6cc9be462016ae2985af3e76a70d73",
+    "policy_hash": "62fdc9b7f2da819931d88affe6ca7c3c22fcbbf0aeb2077a68994a1d4f508c34",
+    "install_key_hash": "152c900d3185e766f9420b6b2a0287647b475ed2d1af70894296f6c05731094f",
+    "coarse_time_bucket": 1781582400,
+    "country_or_region": "SG"
+  },
+  "notes": "install_key_hash is a salted, tenant-scoped HMAC of the install key - it cannot be linked back to a person or correlated across tenants. coarse_time_bucket is unix seconds floored to the hour (1781582400 = 2026-06-16T04:00:00Z) for k-anonymity. country_or_region is optional and only present when the tenant's privacy policy permits coarse geography."
+}

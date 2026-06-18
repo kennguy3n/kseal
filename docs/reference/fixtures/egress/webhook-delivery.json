@@ -1,0 +1,24 @@
+{
+  "description": "The exact outbound HTTP request the data plane makes when delivering the D3 CRITICAL decision to Meridian's webhook endpoint. The body is egress/webhook-body.json verbatim (524 bytes); X-Kseal-Signature is HMAC-SHA256(secret, body) hex-encoded, exactly as server/data-plane/webhook/dispatcher.go computes it.",
+  "request": {
+    "method": "POST",
+    "url": "https://soc.meridian.example/hooks/kseal",
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Kseal-Signature": "0cf916c4436c3a83199be47657da539ab90ce5ed9ba804b3a53b75f277267bd2",
+      "X-Kseal-Key-Id": "wk_meridian_2026_06",
+      "X-Kseal-Event": "EVENT_TYPE_POLICY_DECISION",
+      "X-Kseal-Delivery-Attempt": "1"
+    },
+    "body_ref": "egress/webhook-body.json",
+    "body_bytes": 524
+  },
+  "signature": {
+    "algorithm": "HMAC-SHA256",
+    "secret_demo_value": "whsec_meridian_demo_v1",
+    "computed_over": "the raw response body bytes, before any transfer encoding",
+    "header": "X-Kseal-Signature (lowercase hex)"
+  },
+  "verify_recipe": "openssl dgst -sha256 -hmac 'whsec_meridian_demo_v1' egress/webhook-body.json  ->  0cf916c4436c3a83199be47657da539ab90ce5ed9ba804b3a53b75f277267bd2",
+  "notes": "The endpoint URL must be a public address: the dispatcher uses the SSRF-hardened safehttp client, so a tenant cannot point a webhook at a loopback/private/link-local host to pivot inside the network. Retries reuse the same body and signature; 408/429/5xx are retried with capped exponential backoff, other 4xx are permanent."
+}
