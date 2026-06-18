@@ -143,10 +143,10 @@ MTE on the arm64 slice) and seals 12 strings produces, among others:
 ```
 ## MASVS-CODE
 
-| MASVS objective | kseal control | Phase | Status | Evidence |
-|---|---|---|---|---|
-| Memory safety in native | Rust core; CFI/MTE … | P1/P3 | evidenced | verified 3 native library(ies): CFI enabled=2 absent=0 unsupported=1; MTE enabled=1 unsupported=1 (unsupported targets reported, not skipped) |
-| Build provenance | Build proof records hashes/manifests; runtime verifies | P3 | evidenced | build proof "kseal.build-proof/v1" with build_hash 9f86d081884c… records 4 transform(s); registrable via RegistryService.CreateBuild for runtime verification |
+| MASVS objective | kseal control | Status | Evidence |
+|---|---|---|---|
+| Memory safety in native | Rust core; CFI/MTE … | evidenced | verified 3 native library(ies): CFI enabled=2 absent=0 unsupported=1; MTE enabled=1 unsupported=1 (unsupported targets reported, not skipped) |
+| Build provenance | Build proof records hashes/manifests; runtime verifies | evidenced | build proof "kseal.build-proof/v1" with build_hash 9f86d081884c… records 4 transform(s); registrable via RegistryService.CreateBuild for runtime verification |
 ```
 
 and for an iOS build with Mach-O integrity baked:
@@ -154,7 +154,7 @@ and for an iOS build with Mach-O integrity baked:
 ```
 ## MASVS-RESILIENCE
 
-| MASVS objective | kseal control | Phase | Status | Evidence |
-|---|---|---|---|---|
-| Anti-tamper / integrity | App-integrity + … build-proof binding | P2/P3 | evidenced | Mach-O section-hash integrity baked for 1 slice(s) [arm64]; load-command hashes recorded for runtime tamper detection |
+| MASVS objective | kseal control | Status | Evidence |
+|---|---|---|---|
+| Anti-tamper / integrity | App-integrity + … build-proof binding | evidenced | Mach-O section-hash integrity baked for 1 slice(s) [arm64]; load-command hashes recorded for runtime tamper detection |
 ```

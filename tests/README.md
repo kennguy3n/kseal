@@ -44,5 +44,3 @@ independently runnable; containers are torn down after the package run.
 > suite. **Policy simulation** outcomes (observe/step-up/block) are exercised by
 > the risk-level branches in `e2e_trust_flow_test.go` and the unit tests under
 > `server/data-plane/simulator`.
-
-**Status:** delivered — see [PROGRESS.md](../PROGRESS.md).

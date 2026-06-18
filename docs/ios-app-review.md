@@ -1,11 +1,10 @@
 # kseal — iOS App Review Safety Analysis
 
-A Phase 0 review confirming that the kseal iOS SDK is **App Store safe**: it uses
+A review confirming that the kseal iOS SDK is **App Store safe**: it uses
 only public, documented APIs, performs no dynamic code download, does not
-manipulate the dynamic linker, and ships the privacy-manifest material Apple now
-requires. The goal is to retire the **"iOS App Review rejection"** risk flagged
-as *High* in the [Risk Assessment](../PROPOSAL.md#risk-assessment) *before*
-production code is written.
+manipulate the dynamic linker, and ships the privacy-manifest material Apple
+requires. It retires the **"iOS App Review rejection"** risk flagged
+as *High* in the [Risk Assessment](../PROPOSAL.md#risk-assessment).
 
 This complements the architecture's
 [Attestation & API Protection](../ARCHITECTURE.md#attestation--api-protection)
@@ -122,7 +121,7 @@ kseal does **not** manipulate the dynamic linker in any way that App Review
 penalizes:
 
 - **No `DYLD_INSERT_LIBRARIES` use.** The SDK neither sets nor relies on dyld
-  insertion. On the *desktop* (macOS) roadmap it *detects*
+  insertion. On *desktop* (macOS) it *detects*
   `DYLD_INSERT_LIBRARIES` injection as a signal
   ([macOS modules](../ARCHITECTURE.md#macos-modules)) — detection is reading the
   environment, not performing injection.

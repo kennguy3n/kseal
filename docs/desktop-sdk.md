@@ -129,7 +129,7 @@ as an interface with a **real default implementation** and a **test fake**:
 - Windows: `ICodeIntegrityAttestor` (default `LocalCodeIntegrityAttestor`) and
   the `IWindowsEnvironment` seam (default `WindowsEnvironment`).
 
-Three further external boundaries added with the Phase-5 modules follow the same
+Three further external boundaries follow the same
 real-default-plus-fake pattern:
 
 - **Secure-update feed** — `AppcastFeed` (macOS) / `IUpdateFeed` (Windows): the
