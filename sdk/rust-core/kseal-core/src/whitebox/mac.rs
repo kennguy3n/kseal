@@ -10,15 +10,18 @@
 
 use super::tables;
 use sha2::{Digest, Sha256};
+use zeroize::Zeroize;
 
 /// Computes the white-box `HMAC-SHA256` tag over `message` using the baked
 /// proof-key tables. The result is identical to
 /// `crypto::hmac_sha256(proof_key, message)`.
 ///
 /// The plaintext key blocks are reconstructed on the stack, used immediately,
-/// and best-effort scrubbed (with a [`core::hint::black_box`] fence so the
-/// writes are not elided) before returning, to shrink the in-memory window in
-/// which they exist.
+/// and scrubbed with [`Zeroize`] (volatile writes behind a compiler fence, so
+/// the clears cannot be elided) before returning, to shrink the in-memory
+/// window in which they exist. This remains *best-effort*: `sha2` copies each
+/// block into its own internal buffer, so the scrub cannot reach every transient
+/// copy — see the module banner and design-doc §3 for the dynamic-attack caveat.
 #[must_use]
 pub fn whitebox_hmac_sha256(message: &[u8]) -> [u8; 32] {
     let (mut k_ipad, mut k_opad) = tables::key_ipad_opad();
@@ -33,10 +36,8 @@ pub fn whitebox_hmac_sha256(message: &[u8]) -> [u8; 32] {
     outer.update(inner_digest);
     let digest = outer.finalize();
 
-    k_ipad.fill(0);
-    k_opad.fill(0);
-    core::hint::black_box(&k_ipad);
-    core::hint::black_box(&k_opad);
+    k_ipad.zeroize();
+    k_opad.zeroize();
 
     let mut tag = [0u8; 32];
     tag.copy_from_slice(&digest);

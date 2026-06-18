@@ -78,8 +78,9 @@ The module has three parts:
    blocks `k_ipad = K' ^ ipad` and `k_opad = K' ^ opad` (where `K'` is the proof
    key zero-padded to the 64-byte block) are the only secret-bearing inputs. For
    each of the 128 key-block byte positions we generate, from a deterministic
-   compile-time PRNG (SplitMix64 + Fisher–Yates inside `const fn`s), a random
-   byte bijection `S_i` (a 256-entry permutation). We store the **encoded** byte
+   compile-time PRNG (SplitMix64 + Fisher–Yates with rejection sampling, all
+   inside `const fn`s), a random byte bijection `S_i` (a 256-entry permutation).
+   We store the **encoded** byte
    `enc_i = S_i(b_i)` and the **inverse** table `S_i^{-1}`; at runtime the
    plaintext byte is recovered as `b_i = S_i^{-1}[enc_i]`. Because the whole
    derivation runs during const-evaluation, the raw key (given as integer byte
@@ -90,7 +91,9 @@ The module has three parts:
    `H((K' ^ opad) || H((K' ^ ipad) || m))`. For a key ≤ block size this is
    exactly `HMAC-SHA256(K, m)`, so the tag is byte-identical to
    `crypto::hmac_sha256`. The reconstructed key blocks are best-effort scrubbed
-   (`fill(0)` behind a `black_box` fence) before returning.
+   (via `zeroize` — volatile writes behind a compiler fence) before returning;
+   this is still only best-effort because `sha2` copies each block into its own
+   internal buffer (see §3).
 3. **`mod.rs` — parity surface + measurement.** `whitebox_request_proof(...)`
    builds the canonical proof preimage (mirroring `crypto::proof_preimage`'s
    domain-separated, length-prefixed layout) and signs it with the white-box

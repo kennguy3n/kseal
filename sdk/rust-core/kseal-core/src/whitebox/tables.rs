@@ -74,6 +74,24 @@ const fn pos_seed(i: usize) -> u64 {
     r
 }
 
+/// Draws an unbiased integer in `0..bound` from the SplitMix64 stream via
+/// rejection sampling, returning `(next_state, value)`. Discarding the small
+/// high tail that is not an exact multiple of `bound` removes the modulo bias a
+/// bare `r % bound` would introduce. `bound` is always `1..=256` here.
+const fn bounded(state: u64, bound: u64) -> (u64, u64) {
+    // Largest multiple of `bound` that fits in u64; outputs at/above it are the
+    // biased tail and are rejected.
+    let limit = u64::MAX - (u64::MAX % bound);
+    let mut s = state;
+    loop {
+        let (ns, r) = sm_step(s);
+        s = ns;
+        if r < limit {
+            return (s, r % bound);
+        }
+    }
+}
+
 /// Builds a random byte bijection and its inverse via const-time Fisher-Yates.
 const fn gen_perm(seed: u64) -> ([u8; 256], [u8; 256]) {
     let mut p = [0u8; 256];
@@ -85,9 +103,9 @@ const fn gen_perm(seed: u64) -> ([u8; 256], [u8; 256]) {
     let mut state = seed;
     let mut j = 255usize;
     while j >= 1 {
-        let (ns, r) = sm_step(state);
+        let (ns, r) = bounded(state, j as u64 + 1);
         state = ns;
-        let k = (r % (j as u64 + 1)) as usize;
+        let k = r as usize;
         let tmp = p[j];
         p[j] = p[k];
         p[k] = tmp;

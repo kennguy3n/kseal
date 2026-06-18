@@ -66,8 +66,13 @@ pub fn table_size_bytes() -> usize {
 }
 
 /// Appends a 4-byte big-endian length prefix followed by `field`, mirroring
-/// `crypto::push_lp`.
+/// `crypto::push_lp` — including its debug-asserted `u32` length guard, so the
+/// spike preimage layout matches the production contract exactly.
 fn push_lp(buf: &mut Vec<u8>, field: &[u8]) {
+    debug_assert!(
+        field.len() <= u32::MAX as usize,
+        "length-prefixed field exceeds u32 prefix",
+    );
     buf.extend_from_slice(&(field.len() as u32).to_be_bytes());
     buf.extend_from_slice(field);
 }
