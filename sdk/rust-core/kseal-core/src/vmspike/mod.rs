@@ -70,7 +70,7 @@ impl SpikeArtifacts {
         let build_hash = retrace::build_hash_from_seed(seed);
         SpikeArtifacts {
             bytecode: encode_with_seed(&lowered.program, seed),
-            retrace_map: encrypt_map(&lowered.retrace, seed, &build_hash),
+            retrace_map: encrypt_map(&lowered.retrace, seed, &build_hash, "native_tag_mix"),
         }
     }
 
@@ -211,7 +211,7 @@ pub mod measure {
         let bytecode = encode_with_seed(&lowered.program, &seed);
         let program = super::decode_with_seed(&bytecode, &seed).expect("demo cohort decodes");
         let retrace_map =
-            encrypt_map(&lowered.retrace, &seed, &build_hash_from_seed(&seed));
+            encrypt_map(&lowered.retrace, &seed, &build_hash_from_seed(&seed), "demo_cohort");
 
         for d in 0..1000u64 {
             black_box(demo_cohort_native(black_box(d), d ^ 0x55, d.wrapping_mul(7)));
@@ -311,20 +311,23 @@ mod tests {
         let lowered = lower_tag_mix();
         let seed = BuildSeed::from_u64(0x5151_5151);
         let build_hash = retrace::build_hash_from_seed(&seed);
-        let encrypted = encrypt_map(&lowered.retrace, &seed, &build_hash);
+        let encrypted = encrypt_map(&lowered.retrace, &seed, &build_hash, "native_tag_mix");
 
         // Force a real, deterministic fault inside the dispatch loop by starving
         // the step budget, then symbolicate the captured frame.
         let program = lowered.program.clone();
         let err = interp::run_with_fuel(&program, b"crash-here", 9, 5).unwrap_err();
-        let sym = Symbolicator::open(&encrypted, &seed, &build_hash).unwrap();
+        let sym = Symbolicator::open(&encrypted, &seed, &build_hash, "native_tag_mix").unwrap();
         let site = sym
             .resolve(err.frame)
             .expect("captured pc must resolve through the private map");
         assert_eq!(site.function, "native_tag_mix");
 
         // And nobody without the build key can read the map.
-        assert!(Symbolicator::open(&encrypted, &BuildSeed::from_u64(0x9999), &build_hash).is_err());
+        assert!(
+            Symbolicator::open(&encrypted, &BuildSeed::from_u64(0x9999), &build_hash, "native_tag_mix")
+                .is_err()
+        );
     }
 
     #[test]

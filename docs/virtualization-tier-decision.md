@@ -263,8 +263,9 @@ The 5.4 format uses a standard, vetted AEAD:
 
 - **Encryption + authentication.** The entry table is sealed with
   **ChaCha20-Poly1305** (the `chacha20poly1305` crate) under a
-  seed+`build_hash`-derived key (`derive_key(seed, build_hash, "…aead-key")`) and
-  a deterministic per-build nonce (`derive_nonce`). A single AEAD pass provides
+  `seed`+`build_hash`+`routine`-derived key
+  (`derive_key(seed, build_hash, routine, "…aead-key")`) and a deterministic
+  nonce over the same inputs (`derive_nonce`). A single AEAD pass provides
   both confidentiality (source identifiers never appear in the clear, proven by
   `entries_are_encrypted_not_plaintext`) and integrity: any tampering or a wrong
   seed fails the **constant-time Poly1305 verify** (`AuthFailed`, proven by
@@ -274,11 +275,17 @@ The 5.4 format uses a standard, vetted AEAD:
   key and nonce derivation, so a map can only be opened against the build it was
   emitted for (`BuildHashMismatch`); it cannot be paired with another build's
   frames.
-- **Nonce discipline.** Each build derives a unique key and encrypts its map
-  exactly once, so the deterministic per-build nonce never repeats under a given
-  key while keeping the artifact byte-reproducible.
+- **Nonce discipline (per-routine domain separation).** Both the key and the
+  nonce are derived from `seed ‖ build_hash ‖ routine`, so every distinct
+  `(build, routine)` map gets an **independent `(key, nonce)`**. Each map is
+  encrypted exactly once, so its deterministic nonce never repeats under its
+  key, and a build that virtualizes several routines never reuses a
+  `(key, nonce)` pair across their maps — closing the AEAD nonce-reuse hazard
+  that a build-only nonce would carry once §8.2/§8.3 emit per-routine maps — all
+  while keeping the artifact byte-reproducible (proven by
+  `distinct_routines_in_one_build_do_not_collide`).
 
-`Symbolicator::open(encrypted, seed, build_hash)` verifies, decrypts, and
+`Symbolicator::open(encrypted, seed, build_hash, routine)` verifies, decrypts, and
 resolves a captured `VmFrame`; without the key the artifact is indistinguishable
 from random and unforgeable. This mirrors Guardsquare's "retrace" workflow.
 
