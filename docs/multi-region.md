@@ -1,6 +1,6 @@
 # kseal multi-region data plane
 
-Phase 4 topology for running kseal across multiple regions: a writable primary
+The topology for running kseal across multiple regions: a writable primary
 region plus one or more read-mostly replica regions, fronted by a single global
 hostname. This serves two product tiers from the isolation model
 ([ARCHITECTURE.md](../ARCHITECTURE.md)):

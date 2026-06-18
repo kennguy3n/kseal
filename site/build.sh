@@ -26,10 +26,12 @@ ln -s ../index.md .staging/index.md
 ln -s ../secure-your-app.md .staging/secure-your-app.md
 
 # Site-owned blog posts (deep-dives, all grounded in the reference deployment).
+shopt -s nullglob
 for f in blog/*.md; do
   base="$(basename "$f")"
   ln -s "../../blog/$base" ".staging/blog/$base"
 done
+shopt -u nullglob
 
 # Site-owned static assets (custom theme CSS, images).
 ln -s ../css .staging/css

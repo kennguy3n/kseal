@@ -6,4 +6,4 @@ The control plane is **low-volume, strongly consistent, and the source of truth*
 
 **Stack:** Go, Postgres / CockroachDB, S3-compatible object storage, KMS / HSM.
 
-See [ARCHITECTURE.md](../../ARCHITECTURE.md#server-side-architecture) for the full service list. **Status:** scaffold — see [PROGRESS.md](../../PROGRESS.md) (Phase 1+).
+See [ARCHITECTURE.md](../../ARCHITECTURE.md#server-side-architecture) for the full service list.

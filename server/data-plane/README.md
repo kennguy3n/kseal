@@ -6,4 +6,4 @@ The data plane is **very high volume, eventually consistent, and stateless where
 
 **Stack:** Go, Kafka / Redpanda, ClickHouse, Redis / Dragonfly, CDN.
 
-See [ARCHITECTURE.md](../../ARCHITECTURE.md#server-side-architecture). **Status:** scaffold — see [PROGRESS.md](../../PROGRESS.md) (Phase 1+).
+See [ARCHITECTURE.md](../../ARCHITECTURE.md#server-side-architecture).
