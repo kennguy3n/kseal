@@ -12,6 +12,14 @@ description = "kseal device trust core: policy evaluation, risk scoring, telemet
 # standard build stays debuggable; turned on for hardened/release artifacts.
 obfuscate-strings = []
 
+# Phase 5.3 DECISION SPIKE — selective code-virtualization prototype (`vmspike`).
+# Off by default and never shipped: this gates a self-contained, bounded
+# proof-of-concept (custom bytecode VM + polymorphic encoder + encrypted retrace
+# map) used to produce the go/no-go evidence in
+# `docs/virtualization-tier-decision.md`. It does NOT touch the trust/crypto path
+# or the FFI surface. See `src/vmspike/mod.rs`.
+vm-spike = []
+
 [dependencies]
 prost.workspace = true
 zstd.workspace = true
