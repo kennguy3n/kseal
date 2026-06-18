@@ -21,7 +21,11 @@ use super::retrace::SourceSite;
 
 /// Number of architectural registers in the VM. A power of two so the
 /// interpreter can mask a register index into range with no bounds panic.
-pub const NUM_REGS: usize = 8;
+///
+/// The hand-lowered [`native_tag_mix`] uses only three registers; the headroom
+/// exists for the automatic [`super::ir`] lowering, whose recursive code
+/// generator may use up to one register per level of expression nesting.
+pub const NUM_REGS: usize = 16;
 
 /// Accumulator register (also the conventional return register).
 pub const REG_ACC: u8 = 0;
@@ -32,7 +36,7 @@ pub const REG_TMP: u8 = 2;
 
 /// Number of distinct opcodes; the wire opcode byte is a permutation of
 /// `0..NUM_OPS` (see [`super::encode`]).
-pub const NUM_OPS: u8 = 10;
+pub const NUM_OPS: u8 = 18;
 
 // Stable opcode tags. The *wire* byte for each is shuffled per build; these tags
 // are the build-invariant identity used by the interpreter and the encoder.
@@ -56,6 +60,28 @@ pub const TAG_LOAD_BYTE: u8 = 7;
 pub const TAG_JMP: u8 = 8;
 /// Tag: halt, returning `reg[src]`.
 pub const TAG_RET: u8 = 9;
+
+// --- general-purpose opcodes used by the automatic `super::ir` lowering ---
+//
+// These extend the ISA from the spike's hand-lowering minimum to the full
+// integer/bitwise operation set the expression IR compiles to. They are still
+// pure register operations interpreted in safe Rust (no `unsafe`).
+/// Tag: `reg[dst] = reg[dst].wrapping_sub(reg[src])`.
+pub const TAG_SUB: u8 = 10;
+/// Tag: `reg[dst] = reg[dst].wrapping_mul(reg[src])` (register × register).
+pub const TAG_MUL: u8 = 11;
+/// Tag: `reg[dst] &= reg[src]`.
+pub const TAG_AND: u8 = 12;
+/// Tag: `reg[dst] |= reg[src]`.
+pub const TAG_OR: u8 = 13;
+/// Tag: `reg[dst] <<= shift` (logical, amount masked into `0..64`).
+pub const TAG_SHL: u8 = 14;
+/// Tag: `reg[dst] >>= shift` (logical, amount masked into `0..64`).
+pub const TAG_SHR: u8 = 15;
+/// Tag: `reg[dst] = reg[dst].rotate_right(shift)`.
+pub const TAG_ROTR: u8 = 16;
+/// Tag: `reg[dst] = inputs[slot]` (read a 64-bit input word).
+pub const TAG_LOAD_INPUT: u8 = 17;
 
 /// One decoded VM instruction. Operands reference registers by index, the
 /// constant pool by index, or another instruction by index (jump target).
@@ -124,6 +150,62 @@ pub enum Instr {
         /// Register whose value is returned.
         src: u8,
     },
+    /// `reg[dst] = reg[dst].wrapping_sub(reg[src])`.
+    Sub {
+        /// Destination register.
+        dst: u8,
+        /// Source register.
+        src: u8,
+    },
+    /// `reg[dst] = reg[dst].wrapping_mul(reg[src])` (register × register).
+    Mul {
+        /// Destination register.
+        dst: u8,
+        /// Source register.
+        src: u8,
+    },
+    /// `reg[dst] &= reg[src]`.
+    And {
+        /// Destination register.
+        dst: u8,
+        /// Source register.
+        src: u8,
+    },
+    /// `reg[dst] |= reg[src]`.
+    Or {
+        /// Destination register.
+        dst: u8,
+        /// Source register.
+        src: u8,
+    },
+    /// `reg[dst] <<= shift` (logical left shift; amount masked into `0..64`).
+    Shl {
+        /// Destination register.
+        dst: u8,
+        /// Shift amount.
+        shift: u8,
+    },
+    /// `reg[dst] >>= shift` (logical right shift; amount masked into `0..64`).
+    Shr {
+        /// Destination register.
+        dst: u8,
+        /// Shift amount.
+        shift: u8,
+    },
+    /// `reg[dst] = reg[dst].rotate_right(shift)`.
+    Rotr {
+        /// Destination register.
+        dst: u8,
+        /// Rotate amount.
+        shift: u8,
+    },
+    /// `reg[dst] = inputs[slot]` — read a 64-bit input word.
+    LoadInput {
+        /// Destination register.
+        dst: u8,
+        /// Input-word slot.
+        slot: u8,
+    },
 }
 
 impl Instr {
@@ -141,6 +223,14 @@ impl Instr {
             Instr::LoadByte { .. } => TAG_LOAD_BYTE,
             Instr::Jmp { .. } => TAG_JMP,
             Instr::Ret { .. } => TAG_RET,
+            Instr::Sub { .. } => TAG_SUB,
+            Instr::Mul { .. } => TAG_MUL,
+            Instr::And { .. } => TAG_AND,
+            Instr::Or { .. } => TAG_OR,
+            Instr::Shl { .. } => TAG_SHL,
+            Instr::Shr { .. } => TAG_SHR,
+            Instr::Rotr { .. } => TAG_ROTR,
+            Instr::LoadInput { .. } => TAG_LOAD_INPUT,
         }
     }
 }
@@ -205,10 +295,16 @@ pub fn native_tag_mix(input: &[u8], domain: u64) -> u64 {
 /// site as the stand-in for a production DWARF line table).
 #[must_use]
 pub fn lower_tag_mix() -> LoweredProgram {
-    let mut b = Builder::new(vec![MIX_OFFSET, MIX_PRIME, MIX_PRIME2]);
+    let mut b = Builder::new("native_tag_mix", Vec::new());
+    let k_offset = b.intern_const(MIX_OFFSET);
+    let k_prime = b.intern_const(MIX_PRIME);
+    let k_prime2 = b.intern_const(MIX_PRIME2);
 
     b.emit(
-        Instr::LoadConst { dst: REG_ACC, k: 0 },
+        Instr::LoadConst {
+            dst: REG_ACC,
+            k: k_offset,
+        },
         "acc = MIX_OFFSET",
         line!(),
     );
@@ -241,7 +337,10 @@ pub fn lower_tag_mix() -> LoweredProgram {
         line!(),
     );
     b.emit(
-        Instr::MulConst { dst: REG_ACC, k: 1 },
+        Instr::MulConst {
+            dst: REG_ACC,
+            k: k_prime,
+        },
         "acc = acc.wrapping_mul(MIX_PRIME)",
         line!(),
     );
@@ -285,7 +384,10 @@ pub fn lower_tag_mix() -> LoweredProgram {
         line!(),
     );
     b.emit(
-        Instr::MulConst { dst: REG_ACC, k: 2 },
+        Instr::MulConst {
+            dst: REG_ACC,
+            k: k_prime2,
+        },
         "acc = acc.wrapping_mul(MIX_PRIME2)",
         line!(),
     );
@@ -297,34 +399,67 @@ pub fn lower_tag_mix() -> LoweredProgram {
 
 /// Small helper that accumulates instructions, constants, and retrace entries
 /// while lowering, and supports patching forward jump targets.
-struct Builder {
+///
+/// Visible to the rest of the module so the automatic [`super::ir`] lowering can
+/// reuse the exact same emit/retrace bookkeeping the hand-lowering uses.
+pub(super) struct Builder {
     instrs: Vec<Instr>,
     consts: Vec<u64>,
     retrace: Vec<(u32, SourceSite)>,
+    function: &'static str,
 }
 
 impl Builder {
-    fn new(consts: Vec<u64>) -> Self {
+    pub(super) fn new(function: &'static str, consts: Vec<u64>) -> Self {
         Self {
             instrs: Vec::new(),
             consts,
             retrace: Vec::new(),
+            function,
         }
     }
 
     /// Current instruction index (the pc the next emitted instruction will get).
-    fn here(&self) -> u16 {
+    pub(super) fn here(&self) -> u16 {
         self.instrs.len() as u16
     }
 
+    /// Interns `c` into the constant pool, returning its index, or `None` if a
+    /// *new* constant would overflow the pool.
+    ///
+    /// The pool is capped at 255, not 256: [`super::encode`] writes the pool
+    /// count in a single `u8`, so a 256-entry pool would serialize its count as
+    /// `0` and make the program undecodable. Already-interned constants are
+    /// deduplicated and always succeed, since returning an existing index never
+    /// grows the pool.
+    pub(super) fn intern_const_checked(&mut self, c: u64) -> Option<u8> {
+        if let Some(i) = self.consts.iter().position(|&x| x == c) {
+            return Some(i as u8);
+        }
+        if self.consts.len() >= 255 {
+            return None;
+        }
+        let i = self.consts.len();
+        self.consts.push(c);
+        Some(i as u8)
+    }
+
+    /// Interns `c` and returns its index, panicking if the pool is full. Used by
+    /// the hand-lowering, whose fixed constant set never approaches the cap;
+    /// callers that can recover should use [`Builder::intern_const_checked`].
+    pub(super) fn intern_const(&mut self, c: u64) -> u8 {
+        self.intern_const_checked(c)
+            .expect("vmspike constant pool overflow (encode writes count as u8)")
+    }
+
     /// Appends `instr`, records its source site, and returns its pc.
-    fn emit(&mut self, instr: Instr, step: &'static str, source_line: u32) -> u16 {
+    pub(super) fn emit(&mut self, instr: Instr, step: &'static str, source_line: u32) -> u16 {
         let pc = self.here();
         self.instrs.push(instr);
         self.retrace.push((
             u32::from(pc),
             SourceSite {
-                function: "native_tag_mix",
+                function: self.function,
                 step,
                 source_line,
             },
@@ -340,7 +475,7 @@ impl Builder {
         }
     }
 
-    fn finish(self) -> LoweredProgram {
+    pub(super) fn finish(self) -> LoweredProgram {
         LoweredProgram {
             program: Program {
                 instrs: self.instrs,

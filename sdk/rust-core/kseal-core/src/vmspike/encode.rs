@@ -132,11 +132,24 @@ pub fn encode(program: &Program, key: &BuildKey) -> Vec<u8> {
                 raw.push(key.reg_perm[dst as usize]);
                 raw.push(k);
             }
-            Instr::Xor { dst, src } | Instr::Add { dst, src } => {
+            Instr::LoadInput { dst, slot } => {
+                raw.push(key.reg_perm[dst as usize]);
+                raw.push(slot);
+            }
+            Instr::Xor { dst, src }
+            | Instr::Add { dst, src }
+            | Instr::Sub { dst, src }
+            | Instr::Mul { dst, src }
+            | Instr::And { dst, src }
+            | Instr::Or { dst, src } => {
                 raw.push(key.reg_perm[dst as usize]);
                 raw.push(key.reg_perm[src as usize]);
             }
-            Instr::XorShr { dst, shift } | Instr::Rotl { dst, shift } => {
+            Instr::XorShr { dst, shift }
+            | Instr::Rotl { dst, shift }
+            | Instr::Shl { dst, shift }
+            | Instr::Shr { dst, shift }
+            | Instr::Rotr { dst, shift } => {
                 raw.push(key.reg_perm[dst as usize]);
                 raw.push(shift);
             }
@@ -225,8 +238,9 @@ fn decode_instr(
     n_instrs: usize,
 ) -> Result<Instr, DecodeError> {
     use super::isa::{
-        TAG_ADD, TAG_JMP, TAG_JMP_IF_END, TAG_LOAD_BYTE, TAG_LOAD_CONST, TAG_MUL_CONST, TAG_RET,
-        TAG_ROTL, TAG_XOR, TAG_XOR_SHR,
+        TAG_ADD, TAG_AND, TAG_JMP, TAG_JMP_IF_END, TAG_LOAD_BYTE, TAG_LOAD_CONST, TAG_LOAD_INPUT,
+        TAG_MUL, TAG_MUL_CONST, TAG_OR, TAG_RET, TAG_ROTL, TAG_ROTR, TAG_SHL, TAG_SHR, TAG_SUB,
+        TAG_XOR, TAG_XOR_SHR,
     };
     let instr = match tag {
         TAG_LOAD_CONST => {
@@ -285,6 +299,46 @@ fn decode_instr(
         TAG_RET => Instr::Ret {
             src: decode_reg(r, key)?,
         },
+        TAG_SUB => {
+            let dst = decode_reg(r, key)?;
+            let src = decode_reg(r, key)?;
+            Instr::Sub { dst, src }
+        }
+        TAG_MUL => {
+            let dst = decode_reg(r, key)?;
+            let src = decode_reg(r, key)?;
+            Instr::Mul { dst, src }
+        }
+        TAG_AND => {
+            let dst = decode_reg(r, key)?;
+            let src = decode_reg(r, key)?;
+            Instr::And { dst, src }
+        }
+        TAG_OR => {
+            let dst = decode_reg(r, key)?;
+            let src = decode_reg(r, key)?;
+            Instr::Or { dst, src }
+        }
+        TAG_SHL => {
+            let dst = decode_reg(r, key)?;
+            let shift = r.u8()?;
+            Instr::Shl { dst, shift }
+        }
+        TAG_SHR => {
+            let dst = decode_reg(r, key)?;
+            let shift = r.u8()?;
+            Instr::Shr { dst, shift }
+        }
+        TAG_ROTR => {
+            let dst = decode_reg(r, key)?;
+            let shift = r.u8()?;
+            Instr::Rotr { dst, shift }
+        }
+        TAG_LOAD_INPUT => {
+            let dst = decode_reg(r, key)?;
+            let slot = r.u8()?;
+            Instr::LoadInput { dst, slot }
+        }
         _ => return Err(DecodeError::BadOpcode),
     };
     Ok(instr)

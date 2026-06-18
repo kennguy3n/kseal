@@ -32,17 +32,23 @@
 
 pub mod encode;
 pub mod interp;
+pub mod ir;
 pub mod isa;
 pub mod retrace;
+pub mod strength;
 
 #[doc(inline)]
 pub use encode::{decode_with_seed, encode_with_seed, BuildSeed};
 #[doc(inline)]
-pub use interp::{run, VmError, VmFrame};
+pub use interp::{run, run_ir, VmError, VmFrame};
+#[doc(inline)]
+pub use ir::{lower, Expr, LowerError};
 #[doc(inline)]
 pub use isa::{lower_tag_mix, native_tag_mix, LoweredProgram, Program};
 #[doc(inline)]
 pub use retrace::{encrypt_map, ResolvedSite, Symbolicator};
+#[doc(inline)]
+pub use strength::ObfuscationStrength;
 
 /// The shippable artifacts a virtualized build would emit for one function:
 /// the polymorphic bytecode (linked into the binary) and the encrypted retrace
@@ -61,9 +67,10 @@ impl SpikeArtifacts {
     #[must_use]
     pub fn build(seed: &BuildSeed) -> Self {
         let lowered = lower_tag_mix();
+        let build_hash = retrace::build_hash_from_seed(seed);
         SpikeArtifacts {
             bytecode: encode_with_seed(&lowered.program, seed),
-            retrace_map: encrypt_map(&lowered.retrace, seed),
+            retrace_map: encrypt_map(&lowered.retrace, seed, &build_hash, "native_tag_mix"),
         }
     }
 
@@ -171,6 +178,75 @@ pub mod measure {
             input_len,
         }
     }
+
+    /// Size + throughput accounting for the **IR-compiled** demo cohort routine
+    /// (Task A/C), as opposed to the hand-lowered routine measured by [`run`].
+    /// This is the number the GO doc cites for the maintained compiler path.
+    #[derive(Debug, Clone)]
+    pub struct CohortReport {
+        /// Average native nanoseconds per call.
+        pub native_ns: f64,
+        /// Average virtualized nanoseconds per call.
+        pub vm_ns: f64,
+        /// `vm_ns / native_ns` — the perf tax.
+        pub ratio: f64,
+        /// Size (bytes) of the polymorphic bytecode for the lowered routine.
+        pub bytecode_size: usize,
+        /// Size (bytes) of the encrypted+authenticated retrace map.
+        pub retrace_map_size: usize,
+        /// Number of decoded instructions the compiler emitted.
+        pub instr_count: usize,
+    }
+
+    /// Measures the IR-compiled demo cohort routine end-to-end: lower → encode →
+    /// decode → run, versus the native reference.
+    #[must_use]
+    pub fn run_cohort(iterations: u32) -> CohortReport {
+        use super::ir::{self, demo_cohort_expr, demo_cohort_native, DEMO_COHORT_INPUTS};
+        use super::retrace::{build_hash_from_seed, encrypt_map};
+
+        let seed = BuildSeed::from_u64(0x0C01_D9A7_E5EE_D001);
+        let lowered = ir::lower("demo_cohort", DEMO_COHORT_INPUTS, &demo_cohort_expr())
+            .expect("demo cohort lowers");
+        let bytecode = encode_with_seed(&lowered.program, &seed);
+        let program = super::decode_with_seed(&bytecode, &seed).expect("demo cohort decodes");
+        let retrace_map =
+            encrypt_map(&lowered.retrace, &seed, &build_hash_from_seed(&seed), "demo_cohort");
+
+        for d in 0..1000u64 {
+            black_box(demo_cohort_native(black_box(d), d ^ 0x55, d.wrapping_mul(7)));
+            let _ = black_box(super::interp::run_ir(
+                &program,
+                black_box(&[d, d ^ 0x55, d.wrapping_mul(7)]),
+            ));
+        }
+
+        let t0 = Instant::now();
+        let mut acc = 0u64;
+        for d in 0..u64::from(iterations) {
+            acc ^= demo_cohort_native(black_box(d), d ^ 0x55, d.wrapping_mul(7));
+        }
+        black_box(acc);
+        let native_ns = t0.elapsed().as_nanos() as f64 / f64::from(iterations);
+
+        let t1 = Instant::now();
+        let mut acc2 = 0u64;
+        for d in 0..u64::from(iterations) {
+            acc2 ^= super::interp::run_ir(&program, black_box(&[d, d ^ 0x55, d.wrapping_mul(7)]))
+                .expect("vm runs");
+        }
+        black_box(acc2);
+        let vm_ns = t1.elapsed().as_nanos() as f64 / f64::from(iterations);
+
+        CohortReport {
+            native_ns,
+            vm_ns,
+            ratio: vm_ns / native_ns.max(f64::MIN_POSITIVE),
+            bytecode_size: bytecode.len(),
+            retrace_map_size: retrace_map.len(),
+            instr_count: program.instrs.len(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -234,20 +310,24 @@ mod tests {
     fn captured_crash_frame_resolves_to_the_right_source_site() {
         let lowered = lower_tag_mix();
         let seed = BuildSeed::from_u64(0x5151_5151);
-        let encrypted = encrypt_map(&lowered.retrace, &seed);
+        let build_hash = retrace::build_hash_from_seed(&seed);
+        let encrypted = encrypt_map(&lowered.retrace, &seed, &build_hash, "native_tag_mix");
 
         // Force a real, deterministic fault inside the dispatch loop by starving
         // the step budget, then symbolicate the captured frame.
         let program = lowered.program.clone();
         let err = interp::run_with_fuel(&program, b"crash-here", 9, 5).unwrap_err();
-        let sym = Symbolicator::open(&encrypted, &seed).unwrap();
+        let sym = Symbolicator::open(&encrypted, &seed, &build_hash, "native_tag_mix").unwrap();
         let site = sym
             .resolve(err.frame)
             .expect("captured pc must resolve through the private map");
         assert_eq!(site.function, "native_tag_mix");
 
         // And nobody without the build key can read the map.
-        assert!(Symbolicator::open(&encrypted, &BuildSeed::from_u64(0x9999)).is_err());
+        assert!(
+            Symbolicator::open(&encrypted, &BuildSeed::from_u64(0x9999), &build_hash, "native_tag_mix")
+                .is_err()
+        );
     }
 
     #[test]
@@ -274,5 +354,20 @@ mod tests {
         assert!(report.bytecode_size > 0);
         assert!(report.retrace_map_size > 0);
         assert!(report.instr_count >= 10);
+
+        // IR-compiled demo cohort (the maintained-compiler path).
+        let cohort = measure::run_cohort(100_000);
+        println!(
+            "cohort   native={:>8.2}ns  vm={:>9.2}ns  tax={:>6.1}x  bytecode={}B  retrace={}B  instrs={}",
+            cohort.native_ns,
+            cohort.vm_ns,
+            cohort.ratio,
+            cohort.bytecode_size,
+            cohort.retrace_map_size,
+            cohort.instr_count,
+        );
+        assert!(cohort.bytecode_size > 0);
+        assert!(cohort.retrace_map_size > 0);
+        assert!(cohort.instr_count > 0);
     }
 }

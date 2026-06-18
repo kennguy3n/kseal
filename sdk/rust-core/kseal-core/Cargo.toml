@@ -18,7 +18,11 @@ obfuscate-strings = []
 # map) used to produce the go/no-go evidence in
 # `docs/virtualization-tier-decision.md`. It does NOT touch the trust/crypto path
 # or the FFI surface. See `src/vmspike/mod.rs`.
-vm-spike = []
+#
+# Pulls in the vetted `chacha20poly1305` AEAD used to encrypt+authenticate the
+# retrace map. Optional + feature-gated so the default build is unaffected and
+# links none of it.
+vm-spike = ["dep:chacha20poly1305"]
 
 # Phase 6.1 DECISION SPIKE — white-box cryptography for the proof key
 # (`whitebox`). Off by default and never shipped: this gates a self-contained,
@@ -35,6 +39,7 @@ prost.workspace = true
 zstd.workspace = true
 sha2.workspace = true
 hmac.workspace = true
+chacha20poly1305 = { workspace = true, optional = true }
 ed25519-dalek.workspace = true
 rand_core.workspace = true
 getrandom.workspace = true

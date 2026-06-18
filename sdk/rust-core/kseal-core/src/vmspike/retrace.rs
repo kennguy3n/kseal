@@ -1,5 +1,6 @@
-//! The crash-symbolication mitigation: a **private, encrypted de-virtualization
-//! / retrace map** keyed off the build seed.
+//! The crash-symbolication mitigation: a **private, encrypted and authenticated
+//! de-virtualization / retrace map**, keyed off the build seed and bound to the
+//! build's `build_hash`.
 //!
 //! Virtualization breaks ordinary symbolication — every virtualized method
 //! crashes inside the VM dispatch loop, and `mapping.txt`/dSYM cannot express
@@ -7,35 +8,67 @@
 //! to emit, at build time, a map from VM program counter to the original source
 //! site, ship it **out of band**, encrypted, and resolve crashes internally.
 //!
-//! Here that map is serialized and XOR-encrypted under a key derived from the
-//! [`BuildSeed`]. A [`Symbolicator`] opens it with the same seed and resolves a
-//! captured [`VmFrame`]; opening with the wrong seed fails the
-//! magic/checksum/seed-tag check, so an attacker who lifts the artifact without
-//! the key gets nothing.
-//! Production would replace the XOR keystream with a real AEAD under a
-//! KMS-managed key — see `docs/virtualization-tier-decision.md`.
+//! Confidentiality and integrity are both provided by a single vetted AEAD:
+//!
+//! * **ChaCha20-Poly1305** (the `chacha20poly1305` crate) encrypts the entry
+//!   table and authenticates it with a Poly1305 tag in one pass. Without the
+//!   seed-derived key the entries are indistinguishable from random, and any
+//!   tamper is rejected by the tag's constant-time verify.
+//! * **Build binding** — the cleartext header (`MAGIC ‖ VERSION ‖ build_hash`)
+//!   is passed as the AEAD associated data, and `build_hash` is also folded into
+//!   the key and nonce derivation, so a map can only be opened against the build
+//!   it was emitted for; pairing it with another build's frames is rejected.
+//! * **Nonce discipline (synthetic IV).** The key is derived from
+//!   `seed ‖ build_hash ‖ routine`, and the nonce is a **synthetic IV** —
+//!   `SHA-256(domain ‖ seed ‖ build_hash ‖ routine ‖ plaintext)` truncated to
+//!   96 bits, carried in the header and bound as AAD. Because it depends on the
+//!   plaintext, two seals of *different* entries under the same
+//!   `(seed, build_hash, routine)` get *different* nonces, so a `(key, nonce)`
+//!   pair is never reused with two different plaintexts — nonce-misuse-resistant
+//!   rather than relying on a one-seal-per-tuple convention — while identical
+//!   inputs still reproduce the same byte-for-byte artifact. The `seed` is
+//!   secret, so the carried nonce reveals nothing about the plaintext beyond the
+//!   equality that any deterministic encryption already exposes.
+//!
+//! This replaces the spike's hand-rolled SHA-256-CTR + HMAC construction with a
+//! standard, vetted AEAD primitive. Production would swap the in-process key for
+//! a KMS/HSM-managed key and ship the map through the crash pipeline — see
+//! `docs/virtualization-tier-decision.md` §6 for key custody.
 
-use super::encode::{fnv1a64, keystream_byte, subkey, BuildSeed};
+use super::encode::BuildSeed;
 use super::interp::VmFrame;
+use chacha20poly1305::aead::{Aead, KeyInit, Payload};
+use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
+use sha2::{Digest, Sha256};
 
 /// Magic prefix identifying an encrypted retrace map.
 const MAGIC: [u8; 4] = *b"KVRM";
-/// Retrace-map format version.
-const VERSION: u8 = 1;
+/// Retrace-map format version (v1: XOR + FNV checksum; v2: SHA256-CTR + HMAC;
+/// v3: ChaCha20-Poly1305 AEAD; v4: v3 + plaintext-derived synthetic-IV nonce
+/// carried in the header).
+const VERSION: u8 = 4;
+/// Length of the 96-bit ChaCha20-Poly1305 nonce, carried in the header.
+const NONCE_LEN: usize = 12;
+/// Length of the authenticated cleartext header (also the AEAD associated
+/// data): `MAGIC ‖ VERSION ‖ build_hash ‖ nonce`.
+const HEADER_LEN: usize = 4 + 1 + 32 + NONCE_LEN;
+/// Length of the trailing Poly1305 authentication tag appended by the AEAD.
+const TAG_LEN: usize = 16;
 
 /// A source site recorded at lowering time (cheap, `'static`).
 ///
 /// `source_line` is the line of the *lowering* statement that emitted the
-/// instruction. In the spike this stands in for a production DWARF line-table
-/// entry pointing at the pre-virtualization source; the symbolication mechanism
-/// is identical either way.
+/// instruction (for the hand-lowered routine) or the IR node id (for
+/// [`super::ir`]-compiled routines). In the spike this stands in for a
+/// production DWARF line-table entry pointing at the pre-virtualization source;
+/// the symbolication mechanism is identical either way.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SourceSite {
     /// Originating function name.
     pub function: &'static str,
     /// Human-readable description of the source step.
     pub step: &'static str,
-    /// Source line associated with the step.
+    /// Source line (or IR node id) associated with the step.
     pub source_line: u32,
 }
 
@@ -46,7 +79,7 @@ pub struct ResolvedSite {
     pub function: String,
     /// Human-readable description of the source step.
     pub step: String,
-    /// Source line associated with the step.
+    /// Source line (or IR node id) associated with the step.
     pub source_line: u32,
 }
 
@@ -55,47 +88,121 @@ pub struct ResolvedSite {
 pub enum RetraceError {
     /// Buffer ended before a field could be read.
     TooShort,
-    /// Magic prefix did not match (typically a wrong seed).
+    /// Magic prefix did not match.
     BadMagic,
     /// Unsupported version.
     BadVersion,
-    /// Checksum mismatch (corruption or wrong seed).
-    BadChecksum,
-    /// The embedded build-seed tag did not match the supplied seed.
-    SeedMismatch,
+    /// The authenticated `build_hash` did not match the one supplied to
+    /// [`Symbolicator::open`].
+    BuildHashMismatch,
+    /// AEAD authentication failed — corruption, tampering, or (most often) a
+    /// wrong build seed. This is the "useless without the key" outcome.
+    AuthFailed,
 }
 
-/// Serializes `entries` into a plaintext retrace map and encrypts it under the
-/// key derived from `seed`. The build seed is also folded in as a bound tag so a
-/// map cannot be silently paired with a different build's frames;
-/// [`Symbolicator::open`] verifies it and rejects a mismatch with
-/// [`RetraceError::SeedMismatch`].
+/// Derives a 32-byte sub-key for `label`, bound to `seed`, `build_hash`, and the
+/// per-map `routine`. Folding `routine` in domain-separates each virtualized
+/// routine's map, so distinct maps emitted within one build never share a key.
+fn derive_key(seed: &BuildSeed, build_hash: &[u8; 32], routine: &str, label: &[u8]) -> [u8; 32] {
+    let mut h = Sha256::new();
+    h.update(label);
+    h.update(seed.0);
+    h.update(build_hash);
+    h.update((routine.len() as u64).to_be_bytes());
+    h.update(routine.as_bytes());
+    let d = h.finalize();
+    let mut k = [0u8; 32];
+    k.copy_from_slice(&d);
+    k
+}
+
+/// Derives the 12-byte AEAD nonce as a **synthetic IV**: a deterministic
+/// function of the plaintext `pt`, keyed by the secret `seed` and bound to
+/// `build_hash` and the per-map `routine`.
+///
+/// Because the nonce depends on the plaintext, re-sealing *different* entries
+/// under the same `(seed, build_hash, routine)` yields a *different* nonce, so a
+/// `(key, nonce)` pair is never reused with two different plaintexts — the
+/// safety condition for ChaCha20-Poly1305 — even if [`encrypt_map`] is called
+/// more than once for one tuple. Identical inputs reproduce the same nonce (and
+/// thus the same artifact), so the build stays byte-reproducible. The `seed` is
+/// secret, so the nonce carried in the header reveals nothing about `pt` beyond
+/// the plaintext equality that deterministic encryption already exposes.
+fn derive_nonce(
+    seed: &BuildSeed,
+    build_hash: &[u8; 32],
+    routine: &str,
+    pt: &[u8],
+) -> [u8; NONCE_LEN] {
+    let mut h = Sha256::new();
+    h.update(b"kseal/vmspike/retrace-aead-nonce");
+    h.update(seed.0);
+    h.update(build_hash);
+    h.update((routine.len() as u64).to_be_bytes());
+    h.update(routine.as_bytes());
+    h.update(pt);
+    let d = h.finalize();
+    let mut n = [0u8; NONCE_LEN];
+    n.copy_from_slice(&d[..NONCE_LEN]);
+    n
+}
+
+/// Serializes `entries` into a retrace map and seals the entry table with
+/// ChaCha20-Poly1305 under a key derived from `seed`, `build_hash`, and the
+/// virtualized `routine` the map belongs to, binding the cleartext header as
+/// associated data.
+///
+/// The `build_hash` is carried in the clear (it is a public build identifier)
+/// but authenticated via the AEAD's associated data, so the artifact is
+/// cryptographically bound to one build. The nonce is a synthetic IV derived
+/// from the plaintext (see [`derive_nonce`]) and carried in the header, so
+/// distinct entries — whether across routines or across repeated calls for one
+/// `(seed, build_hash, routine)` — never reuse a `(key, nonce)` pair.
 #[must_use]
-pub fn encrypt_map(entries: &[(u32, SourceSite)], seed: &BuildSeed) -> Vec<u8> {
-    let seed_tag = subkey(seed, b"kseal/vmspike/retrace-tag");
-
-    let mut raw: Vec<u8> = Vec::new();
-    raw.extend_from_slice(&MAGIC);
-    raw.push(VERSION);
-    raw.extend_from_slice(&seed_tag.to_be_bytes());
-    raw.extend_from_slice(&(entries.len() as u32).to_be_bytes());
+pub fn encrypt_map(
+    entries: &[(u32, SourceSite)],
+    seed: &BuildSeed,
+    build_hash: &[u8; 32],
+    routine: &str,
+) -> Vec<u8> {
+    // Plaintext entry table.
+    let mut pt: Vec<u8> = Vec::new();
+    pt.extend_from_slice(&(entries.len() as u32).to_be_bytes());
     for (pc, site) in entries {
-        raw.extend_from_slice(&pc.to_be_bytes());
-        raw.extend_from_slice(&site.source_line.to_be_bytes());
-        put_str(&mut raw, site.function);
-        put_str(&mut raw, site.step);
+        pt.extend_from_slice(&pc.to_be_bytes());
+        pt.extend_from_slice(&site.source_line.to_be_bytes());
+        put_str(&mut pt, site.function);
+        put_str(&mut pt, site.step);
     }
-    // FNV-1a is a non-cryptographic checksum (corruption/wrong-seed detection only,
-    // not integrity/authenticity); production uses AEAD under a KMS key — see the
-    // module doc and docs/virtualization-tier-decision.md §6.
-    let checksum = fnv1a64(&raw);
-    raw.extend_from_slice(&checksum.to_be_bytes());
 
-    let key = subkey(seed, b"kseal/vmspike/retrace-key");
-    for (i, b) in raw.iter_mut().enumerate() {
-        *b ^= keystream_byte(key, i);
-    }
-    raw
+    // Encrypt-and-authenticate the entry table in one AEAD pass. The nonce is a
+    // synthetic IV over the plaintext, so re-sealing different entries under the
+    // same (seed, build_hash, routine) can never reuse a (key, nonce) pair.
+    let key = derive_key(seed, build_hash, routine, b"kseal/vmspike/retrace-aead-key");
+    let nonce = derive_nonce(seed, build_hash, routine, &pt);
+
+    // Authenticated cleartext header — also the AEAD associated data, which
+    // cryptographically binds the artifact to MAGIC / VERSION / build_hash / nonce.
+    let mut header = Vec::with_capacity(HEADER_LEN);
+    header.extend_from_slice(&MAGIC);
+    header.push(VERSION);
+    header.extend_from_slice(build_hash);
+    header.extend_from_slice(&nonce);
+    let cipher = ChaCha20Poly1305::new(Key::from_slice(&key));
+    let ct = cipher
+        .encrypt(
+            Nonce::from_slice(&nonce),
+            Payload {
+                msg: &pt,
+                aad: &header,
+            },
+        )
+        .expect("ChaCha20-Poly1305 encryption of a bounded plaintext cannot fail");
+
+    let mut out = Vec::with_capacity(HEADER_LEN + ct.len());
+    out.extend_from_slice(&header);
+    out.extend_from_slice(&ct);
+    out
 }
 
 /// Opens an encrypted retrace map and resolves captured VM frames.
@@ -105,40 +212,55 @@ pub struct Symbolicator {
 }
 
 impl Symbolicator {
-    /// Decrypts and parses an encrypted retrace map under `seed`.
+    /// Verifies and decrypts an encrypted retrace map under `seed`, requiring it
+    /// to be bound to `build_hash`.
     ///
     /// # Errors
-    /// Returns [`RetraceError`] if the buffer is truncated, if the
-    /// magic/version/checksum do not validate, or if the embedded seed tag does
-    /// not match `seed` — the expected outcome when the wrong seed (key) is
-    /// supplied.
-    pub fn open(encrypted: &[u8], seed: &BuildSeed) -> Result<Self, RetraceError> {
-        let key = subkey(seed, b"kseal/vmspike/retrace-key");
-        let mut raw = encrypted.to_vec();
-        for (i, b) in raw.iter_mut().enumerate() {
-            *b ^= keystream_byte(key, i);
-        }
-        if raw.len() < 8 {
+    /// Returns [`RetraceError`] if the buffer is truncated, the magic/version is
+    /// wrong, the `build_hash` does not match, or the AEAD (Poly1305) tag does
+    /// not verify — the last being the expected outcome for a wrong seed (no
+    /// key) or any tampering.
+    pub fn open(
+        encrypted: &[u8],
+        seed: &BuildSeed,
+        build_hash: &[u8; 32],
+        routine: &str,
+    ) -> Result<Self, RetraceError> {
+        if encrypted.len() < HEADER_LEN + TAG_LEN {
             return Err(RetraceError::TooShort);
         }
-        let split = raw.len() - 8;
-        let want = fnv1a64(&raw[..split]);
-        let got = u64::from_be_bytes(raw[split..].try_into().map_err(|_| RetraceError::TooShort)?);
-        if want != got {
-            return Err(RetraceError::BadChecksum);
-        }
+        let header = &encrypted[..HEADER_LEN];
+        let ciphertext = &encrypted[HEADER_LEN..];
 
-        let mut r = Reader::new(&raw[..split]);
-        if r.take(4)? != MAGIC {
+        if header[..4] != MAGIC {
             return Err(RetraceError::BadMagic);
         }
-        if r.u8()? != VERSION {
+        if header[4] != VERSION {
             return Err(RetraceError::BadVersion);
         }
-        let seed_tag = r.u64()?;
-        if seed_tag != subkey(seed, b"kseal/vmspike/retrace-tag") {
-            return Err(RetraceError::SeedMismatch);
+        if &header[5..5 + 32] != build_hash {
+            return Err(RetraceError::BuildHashMismatch);
         }
+        // Synthetic-IV nonce carried after the build_hash; authenticated as part
+        // of the AAD header, so tampering it fails the Poly1305 verify.
+        let nonce = &header[5 + 32..HEADER_LEN];
+
+        // Authenticated decryption: the header is bound as associated data and
+        // `build_hash` is folded into the key, so a wrong seed, any tamper, or a
+        // foreign build all fail the constant-time Poly1305 verify.
+        let key = derive_key(seed, build_hash, routine, b"kseal/vmspike/retrace-aead-key");
+        let cipher = ChaCha20Poly1305::new(Key::from_slice(&key));
+        let pt = cipher
+            .decrypt(
+                Nonce::from_slice(nonce),
+                Payload {
+                    msg: ciphertext,
+                    aad: header,
+                },
+            )
+            .map_err(|_| RetraceError::AuthFailed)?;
+
+        let mut r = Reader::new(&pt);
         let count = r.u32()? as usize;
         let mut entries = Vec::with_capacity(count);
         for _ in 0..count {
@@ -174,6 +296,20 @@ impl Symbolicator {
     }
 }
 
+/// Derives a stable, public `build_hash` from a [`BuildSeed`] for the demo /
+/// tests. Production supplies the real build identifier (e.g. the existing
+/// per-build HKDF output) instead.
+#[must_use]
+pub fn build_hash_from_seed(seed: &BuildSeed) -> [u8; 32] {
+    let mut h = Sha256::new();
+    h.update(b"kseal/vmspike/demo-build-hash");
+    h.update(seed.0);
+    let d = h.finalize();
+    let mut bh = [0u8; 32];
+    bh.copy_from_slice(&d);
+    bh
+}
+
 fn put_str(raw: &mut Vec<u8>, s: &str) {
     let b = s.as_bytes();
     raw.extend_from_slice(&(b.len() as u16).to_be_bytes());
@@ -196,9 +332,6 @@ impl<'a> Reader<'a> {
         self.pos = end;
         Ok(slice)
     }
-    fn u8(&mut self) -> Result<u8, RetraceError> {
-        Ok(self.take(1)?[0])
-    }
     fn u16(&mut self) -> Result<u16, RetraceError> {
         let b = self.take(2)?;
         Ok(u16::from_be_bytes([b[0], b[1]]))
@@ -206,12 +339,6 @@ impl<'a> Reader<'a> {
     fn u32(&mut self) -> Result<u32, RetraceError> {
         let b = self.take(4)?;
         Ok(u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
-    }
-    fn u64(&mut self) -> Result<u64, RetraceError> {
-        let b = self.take(8)?;
-        let mut a = [0u8; 8];
-        a.copy_from_slice(b);
-        Ok(u64::from_be_bytes(a))
     }
     fn string(&mut self) -> Result<String, RetraceError> {
         let n = self.u16()? as usize;
@@ -222,15 +349,16 @@ impl<'a> Reader<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::isa::lower_tag_mix;
+    use super::*;
 
     #[test]
     fn resolves_a_known_pc_through_the_encrypted_map() {
         let lowered = lower_tag_mix();
         let seed = BuildSeed::from_u64(99);
-        let enc = encrypt_map(&lowered.retrace, &seed);
-        let sym = Symbolicator::open(&enc, &seed).unwrap();
+        let bh = build_hash_from_seed(&seed);
+        let enc = encrypt_map(&lowered.retrace, &seed, &bh, "native_tag_mix");
+        let sym = Symbolicator::open(&enc, &seed, &bh, "native_tag_mix").unwrap();
         assert_eq!(sym.entry_count(), lowered.retrace.len());
 
         // Pick the multiply step and confirm it resolves to native_tag_mix.
@@ -249,7 +377,123 @@ mod tests {
     #[test]
     fn wrong_seed_cannot_open_the_map() {
         let lowered = lower_tag_mix();
-        let enc = encrypt_map(&lowered.retrace, &BuildSeed::from_u64(1));
-        assert!(Symbolicator::open(&enc, &BuildSeed::from_u64(2)).is_err());
+        let seed = BuildSeed::from_u64(1);
+        let bh = build_hash_from_seed(&seed);
+        let enc = encrypt_map(&lowered.retrace, &seed, &bh, "native_tag_mix");
+        // Wrong seed: build_hash still matches (it is public), so the failure is
+        // the Poly1305 tag — i.e. the map is useless without the key.
+        assert_eq!(
+            Symbolicator::open(&enc, &BuildSeed::from_u64(2), &bh, "native_tag_mix").err(),
+            Some(RetraceError::AuthFailed)
+        );
+    }
+
+    #[test]
+    fn tampering_any_byte_is_detected() {
+        let lowered = lower_tag_mix();
+        let seed = BuildSeed::from_u64(0x1234);
+        let bh = build_hash_from_seed(&seed);
+        let enc = encrypt_map(&lowered.retrace, &seed, &bh, "native_tag_mix");
+
+        // Flip one bit in the ciphertext region and one in the tag region.
+        for idx in [HEADER_LEN + 1, enc.len() - 1] {
+            let mut bad = enc.clone();
+            bad[idx] ^= 0x01;
+            assert_eq!(
+                Symbolicator::open(&bad, &seed, &bh, "native_tag_mix").err(),
+                Some(RetraceError::AuthFailed),
+                "tamper at {idx} must fail auth"
+            );
+        }
+    }
+
+    #[test]
+    fn map_is_bound_to_its_build_hash() {
+        let lowered = lower_tag_mix();
+        let seed = BuildSeed::from_u64(0x5151);
+        let bh = build_hash_from_seed(&seed);
+        let enc = encrypt_map(&lowered.retrace, &seed, &bh, "native_tag_mix");
+
+        let other_bh = build_hash_from_seed(&BuildSeed::from_u64(0x6262));
+        assert_eq!(
+            Symbolicator::open(&enc, &seed, &other_bh, "native_tag_mix").err(),
+            Some(RetraceError::BuildHashMismatch)
+        );
+    }
+
+    #[test]
+    fn entries_are_encrypted_not_plaintext() {
+        // The function-name strings must not appear in the clear in the artifact.
+        let lowered = lower_tag_mix();
+        let seed = BuildSeed::from_u64(0x9090);
+        let bh = build_hash_from_seed(&seed);
+        let enc = encrypt_map(&lowered.retrace, &seed, &bh, "native_tag_mix");
+        let needle = b"native_tag_mix";
+        let found = enc.windows(needle.len()).any(|w| w == needle);
+        assert!(!found, "source identifiers must be encrypted");
+    }
+
+    #[test]
+    fn distinct_routines_in_one_build_do_not_collide() {
+        // Same build (seed + build_hash), two routine maps. The per-routine key
+        // and nonce domain separation must give each map an independent
+        // (key, nonce) — so no reuse even when a single build emits many maps —
+        // and each map must open only under its own routine id.
+        let lowered = lower_tag_mix();
+        let seed = BuildSeed::from_u64(0x7A7A_7A7A);
+        let bh = build_hash_from_seed(&seed);
+
+        let map_a = encrypt_map(&lowered.retrace, &seed, &bh, "routine_a");
+        let map_b = encrypt_map(&lowered.retrace, &seed, &bh, "routine_b");
+
+        // Identical plaintext + build, different routine ids ⇒ different
+        // ciphertext (independent key+nonce), never a reused keystream.
+        assert_ne!(map_a, map_b, "distinct routines must not share key+nonce");
+        assert!(Symbolicator::open(&map_a, &seed, &bh, "routine_a").is_ok());
+        assert!(Symbolicator::open(&map_b, &seed, &bh, "routine_b").is_ok());
+        // Opening a map under the wrong routine id fails the Poly1305 verify.
+        assert_eq!(
+            Symbolicator::open(&map_a, &seed, &bh, "routine_b").err(),
+            Some(RetraceError::AuthFailed),
+            "wrong routine id must fail auth"
+        );
+    }
+
+    #[test]
+    fn same_tuple_distinct_entries_never_reuse_nonce() {
+        // Re-sealing *different* entries under the *same* (seed, build_hash,
+        // routine) must not reuse a (key, nonce) pair: the synthetic-IV nonce is
+        // derived from the plaintext, so different entries ⇒ different nonce.
+        let seed = BuildSeed::from_u64(0xBEEF_BEEF);
+        let bh = build_hash_from_seed(&seed);
+        let site = |source_line| SourceSite {
+            function: "demo_routine",
+            step: "ir:xor",
+            source_line,
+        };
+        let entries_a = [(0u32, site(1))];
+        let entries_b = [(0u32, site(2))]; // same shape, different content
+
+        let map_a = encrypt_map(&entries_a, &seed, &bh, "demo_routine");
+        let map_b = encrypt_map(&entries_b, &seed, &bh, "demo_routine");
+
+        // The synthetic-IV nonce is carried in the header after build_hash.
+        let nonce_a = &map_a[5 + 32..HEADER_LEN];
+        let nonce_b = &map_b[5 + 32..HEADER_LEN];
+        assert_ne!(nonce_a, nonce_b, "different plaintext must yield a different nonce");
+        assert_ne!(map_a, map_b, "different plaintext must yield different ciphertext");
+
+        // Both still open correctly under the same tuple.
+        assert!(Symbolicator::open(&map_a, &seed, &bh, "demo_routine").is_ok());
+        assert!(Symbolicator::open(&map_b, &seed, &bh, "demo_routine").is_ok());
+
+        // Tampering the carried nonce (part of the AAD header) fails the verify.
+        let mut bad = map_a.clone();
+        bad[5 + 32] ^= 0x01;
+        assert_eq!(
+            Symbolicator::open(&bad, &seed, &bh, "demo_routine").err(),
+            Some(RetraceError::AuthFailed),
+            "tampered nonce must fail auth"
+        );
     }
 }
