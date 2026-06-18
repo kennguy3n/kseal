@@ -335,8 +335,8 @@ sequenceDiagram
 
 The committed request/response shapes for every step are under
 [`docs/reference/fixtures/trust/`](docs/reference/fixtures/trust/), and the
-HMAC-SHA256 request-proof construction is pinned by a golden vector reproduced in
-five source files (see [benchmarks](docs/reference/benchmarks.md)).
+HMAC-SHA256 request-proof construction is pinned by a golden vector asserted in
+four source files (see [benchmarks](docs/reference/benchmarks.md)).
 
 ### Pseudonymous identifiers
 
