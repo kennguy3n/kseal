@@ -14,10 +14,11 @@
 //!   `b_i = S_i^{-1}[enc_i]`.
 //!
 //! The whole derivation runs inside `const fn`s, so the raw proof key
-//! ([`SPIKE_PROOF_KEY`]) is *consumed during const-evaluation* and never emitted
-//! as a runtime symbol. A static dump of the shipped artifact contains only the
-//! encoded byte vector and the permutation tables — never the contiguous key.
-//! See the module banner in [`super`] for the (honest) threat-model caveats.
+//! ([`PUBLIC_TEST_PROOF_KEY`]) is *consumed during const-evaluation* and never
+//! emitted as a runtime symbol. A static dump of the shipped artifact contains
+//! only the encoded byte vector and the permutation tables — never the
+//! contiguous key. See the module banner in [`super`] for the (honest)
+//! threat-model caveats.
 
 /// SHA-256 block size in bytes (HMAC key-block width).
 pub(crate) const BLOCK: usize = 64;
@@ -26,17 +27,24 @@ pub(crate) const BLOCK: usize = 64;
 /// (64).
 const POSITIONS: usize = 2 * BLOCK;
 
-/// The spike's proof key, expressed as raw byte values (the ASCII of
-/// `"kseal-test-instance-key"`) rather than a string literal so no readable
-/// string is ever placed in `.rodata`. It is referenced *only* inside the
-/// `const fn` table generator below, so const-evaluation consumes it and it is
-/// not present in the compiled binary.
+/// The project's **public, non-secret golden test key** — the ASCII of
+/// `"kseal-test-instance-key"`, the same value already published in the
+/// `proof_preimage` golden vector in `crypto.rs`. It is pinned here *only* so
+/// the spike can prove byte-for-byte parity against the shipped golden tag. It
+/// is expressed as raw byte values (not a string literal) so no readable string
+/// lands in `.rodata`, and it is referenced *only* inside the `const fn` table
+/// generator below, so const-evaluation consumes it and it is not present in the
+/// compiled binary.
 ///
-/// This is the project's golden proof-HMAC key (see the `proof_preimage`
-/// golden vector in `crypto.rs`), pinned here so the spike can prove byte-for-
-/// byte parity against the shipped golden tag. Productionizing would generate
-/// per-tenant tables in the build plane from a key that never appears in source.
-const SPIKE_PROOF_KEY: [u8; 23] = [
+/// SECURITY: this is **not** a real proof-signing secret and must never be
+/// treated as one. The `whitebox-spike` feature is default-off and is a decision
+/// spike — it must never be enabled in a distributable/shipping build, because
+/// embedding any signing key in source (CWE-321) plus shipping both the encoded
+/// bytes and their inverse tables (CWE-326, see `WbTables` below) reduces this to
+/// obfuscation, not key concealment. Productionizing would instead generate
+/// per-tenant tables in the build plane from a key that never appears in source
+/// (see `docs/whitebox-crypto-decision.md` §3, §6).
+const PUBLIC_TEST_PROOF_KEY: [u8; 23] = [
     0x6b, 0x73, 0x65, 0x61, 0x6c, 0x2d, 0x74, 0x65, 0x73, 0x74, 0x2d, 0x69, 0x6e, 0x73, 0x74, 0x61,
     0x6e, 0x63, 0x65, 0x2d, 0x6b, 0x65, 0x79,
 ];
@@ -124,8 +132,8 @@ const fn gen_perm(seed: u64) -> ([u8; 256], [u8; 256]) {
 /// positions `0..BLOCK` are `k_ipad`, `BLOCK..2*BLOCK` are `k_opad`.
 const fn key_block_byte(i: usize) -> u8 {
     let pos = i % BLOCK;
-    let kb = if pos < SPIKE_PROOF_KEY.len() {
-        SPIKE_PROOF_KEY[pos]
+    let kb = if pos < PUBLIC_TEST_PROOF_KEY.len() {
+        PUBLIC_TEST_PROOF_KEY[pos]
     } else {
         0u8
     };
@@ -185,7 +193,7 @@ mod tests {
             blob.extend_from_slice(row);
         }
 
-        let key = SPIKE_PROOF_KEY;
+        let key = PUBLIC_TEST_PROOF_KEY;
         let appears = blob.windows(key.len()).any(|w| w == key);
         assert!(!appears, "raw proof key must not appear in the baked tables");
 
