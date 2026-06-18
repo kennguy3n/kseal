@@ -5,7 +5,7 @@ applications. They are the desktop equivalent of the existing
 [Android](../sdk/android) / [iOS](../sdk/ios) SDKs: they run **local integrity
 checks** (RASP), fuse the results into the shared
 [Rust trust core](../sdk/rust-core) over its C ABI, and drive a
-[trust session](../ARCHITECTURE.md#device-plane) against the existing
+[trust session](../ARCHITECTURE.md#trust-session-flow) against the existing
 `TrustService` RPCs. As with mobile, the SDK never makes the trust decision —
 it raises attacker cost and feeds signals; the **server decides**
 ([MASVS-RESILIENCE framing](../PROPOSAL.md#standards-baseline)).
