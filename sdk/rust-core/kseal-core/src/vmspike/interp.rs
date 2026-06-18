@@ -30,6 +30,9 @@ pub enum VmFault {
     BadConstIndex,
     /// A [`Instr::LoadByte`] ran with the input cursor already exhausted.
     InputExhausted,
+    /// A [`Instr::LoadInput`] referenced an input-word slot that was not
+    /// supplied.
+    BadInputSlot,
     /// The step budget was exhausted (guards against malformed infinite loops).
     OutOfFuel,
 }
@@ -78,6 +81,42 @@ pub fn run_with_fuel(
     program: &Program,
     input: &[u8],
     domain: u64,
+    fuel: u64,
+) -> Result<u64, VmError> {
+    run_core(program, input, domain, &[], fuel)
+}
+
+/// Runs an [`super::ir`]-lowered `program` over 64-bit input `words`.
+///
+/// IR programs are straight-line (no `LoadByte`/`Jmp`), reading their inputs via
+/// [`Instr::LoadInput`] rather than the byte cursor; this entry point supplies
+/// the input-word bank. The default step budget is generous relative to the
+/// fixed instruction count of a lowered expression.
+///
+/// # Errors
+/// Returns a [`VmError`] for the same malformed-program reasons as [`run`], plus
+/// [`VmFault::BadInputSlot`] if an instruction reads an unsupplied input slot.
+pub fn run_ir(program: &Program, words: &[u64]) -> Result<u64, VmError> {
+    let fuel = FUEL_BASE + (program.instrs.len() as u64).saturating_mul(FUEL_PER_BYTE);
+    run_ir_with_fuel(program, words, fuel)
+}
+
+/// Like [`run_ir`] but with an explicit `fuel` (step) budget.
+///
+/// # Errors
+/// See [`run_ir`].
+pub fn run_ir_with_fuel(program: &Program, words: &[u64], fuel: u64) -> Result<u64, VmError> {
+    run_core(program, &[], 0, words, fuel)
+}
+
+/// The shared dispatch core. `input`/`domain` drive the byte-oriented hand-
+/// lowered routine; `words` drives [`Instr::LoadInput`] for IR-lowered programs.
+/// Both input sources are always available, so a single loop serves both paths.
+fn run_core(
+    program: &Program,
+    input: &[u8],
+    domain: u64,
+    words: &[u64],
     mut fuel: u64,
 ) -> Result<u64, VmError> {
     let mut regs = [0u64; NUM_REGS];
@@ -166,6 +205,49 @@ pub fn run_with_fuel(
             }
             Instr::Ret { src } => {
                 return Ok(regs[reg_index(src)]);
+            }
+            Instr::Sub { dst, src } => {
+                let v = regs[reg_index(dst)].wrapping_sub(regs[reg_index(src)]);
+                regs[reg_index(dst)] = v;
+                pc += 1;
+            }
+            Instr::Mul { dst, src } => {
+                let v = regs[reg_index(dst)].wrapping_mul(regs[reg_index(src)]);
+                regs[reg_index(dst)] = v;
+                pc += 1;
+            }
+            Instr::And { dst, src } => {
+                regs[reg_index(dst)] &= regs[reg_index(src)];
+                pc += 1;
+            }
+            Instr::Or { dst, src } => {
+                regs[reg_index(dst)] |= regs[reg_index(src)];
+                pc += 1;
+            }
+            Instr::Shl { dst, shift } => {
+                let s = u32::from(shift) & 63;
+                regs[reg_index(dst)] <<= s;
+                pc += 1;
+            }
+            Instr::Shr { dst, shift } => {
+                let s = u32::from(shift) & 63;
+                regs[reg_index(dst)] >>= s;
+                pc += 1;
+            }
+            Instr::Rotr { dst, shift } => {
+                let v = regs[reg_index(dst)].rotate_right(u32::from(shift) & 63);
+                regs[reg_index(dst)] = v;
+                pc += 1;
+            }
+            Instr::LoadInput { dst, slot } => {
+                let Some(&w) = words.get(slot as usize) else {
+                    return Err(VmError {
+                        frame,
+                        fault: VmFault::BadInputSlot,
+                    });
+                };
+                regs[reg_index(dst)] = w;
+                pc += 1;
             }
         }
     }

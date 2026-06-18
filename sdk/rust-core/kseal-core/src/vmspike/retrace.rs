@@ -1,5 +1,6 @@
-//! The crash-symbolication mitigation: a **private, encrypted de-virtualization
-//! / retrace map** keyed off the build seed.
+//! The crash-symbolication mitigation: a **private, encrypted and authenticated
+//! de-virtualization / retrace map**, keyed off the build seed and bound to the
+//! build's `build_hash`.
 //!
 //! Virtualization breaks ordinary symbolication — every virtualized method
 //! crashes inside the VM dispatch loop, and `mapping.txt`/dSYM cannot express
@@ -7,35 +8,54 @@
 //! to emit, at build time, a map from VM program counter to the original source
 //! site, ship it **out of band**, encrypted, and resolve crashes internally.
 //!
-//! Here that map is serialized and XOR-encrypted under a key derived from the
-//! [`BuildSeed`]. A [`Symbolicator`] opens it with the same seed and resolves a
-//! captured [`VmFrame`]; opening with the wrong seed fails the
-//! magic/checksum/seed-tag check, so an attacker who lifts the artifact without
-//! the key gets nothing.
-//! Production would replace the XOR keystream with a real AEAD under a
-//! KMS-managed key — see `docs/virtualization-tier-decision.md`.
+//! Confidentiality and integrity are both real here:
+//!
+//! * **Encryption** — the entry table is XORed with a SHA-256 counter-mode
+//!   keystream derived from the [`BuildSeed`] (and `build_hash`). Without the
+//!   seed the entries are indistinguishable from random.
+//! * **Authentication** — the whole artifact is covered by an HMAC-SHA256 tag
+//!   (encrypt-then-MAC) under a separate seed-derived key, verified in constant
+//!   time via the vetted `hmac` crate. Tampering or a wrong seed fails the tag.
+//! * **Build binding** — the `build_hash` is carried in the authenticated header
+//!   and folded into key derivation, so a map can only be opened against the
+//!   build it was emitted for; pairing it with another build's frames is
+//!   rejected.
+//!
+//! This is the spike's XOR-checksum scheme upgraded to a proper AEAD-shaped
+//! construction. Production would swap the in-process key for a KMS/HSM-managed
+//! key and ship the map through the crash pipeline — see
+//! `docs/virtualization-tier-decision.md` §6 for key custody.
 
-use super::encode::{fnv1a64, keystream_byte, subkey, BuildSeed};
+use super::encode::BuildSeed;
 use super::interp::VmFrame;
+use hmac::{Hmac, Mac};
+use sha2::{Digest, Sha256};
+
+type HmacSha256 = Hmac<Sha256>;
 
 /// Magic prefix identifying an encrypted retrace map.
 const MAGIC: [u8; 4] = *b"KVRM";
-/// Retrace-map format version.
-const VERSION: u8 = 1;
+/// Retrace-map format version (bumped: v1 was XOR + FNV checksum).
+const VERSION: u8 = 2;
+/// Length of the authenticated cleartext header: `MAGIC ‖ VERSION ‖ build_hash`.
+const HEADER_LEN: usize = 4 + 1 + 32;
+/// Length of the trailing HMAC-SHA256 tag.
+const TAG_LEN: usize = 32;
 
 /// A source site recorded at lowering time (cheap, `'static`).
 ///
 /// `source_line` is the line of the *lowering* statement that emitted the
-/// instruction. In the spike this stands in for a production DWARF line-table
-/// entry pointing at the pre-virtualization source; the symbolication mechanism
-/// is identical either way.
+/// instruction (for the hand-lowered routine) or the IR node id (for
+/// [`super::ir`]-compiled routines). In the spike this stands in for a
+/// production DWARF line-table entry pointing at the pre-virtualization source;
+/// the symbolication mechanism is identical either way.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SourceSite {
     /// Originating function name.
     pub function: &'static str,
     /// Human-readable description of the source step.
     pub step: &'static str,
-    /// Source line associated with the step.
+    /// Source line (or IR node id) associated with the step.
     pub source_line: u32,
 }
 
@@ -46,7 +66,7 @@ pub struct ResolvedSite {
     pub function: String,
     /// Human-readable description of the source step.
     pub step: String,
-    /// Source line associated with the step.
+    /// Source line (or IR node id) associated with the step.
     pub source_line: u32,
 }
 
@@ -55,47 +75,93 @@ pub struct ResolvedSite {
 pub enum RetraceError {
     /// Buffer ended before a field could be read.
     TooShort,
-    /// Magic prefix did not match (typically a wrong seed).
+    /// Magic prefix did not match.
     BadMagic,
     /// Unsupported version.
     BadVersion,
-    /// Checksum mismatch (corruption or wrong seed).
-    BadChecksum,
-    /// The embedded build-seed tag did not match the supplied seed.
-    SeedMismatch,
+    /// The authenticated `build_hash` did not match the one supplied to
+    /// [`Symbolicator::open`].
+    BuildHashMismatch,
+    /// HMAC verification failed — corruption, tampering, or (most often) a wrong
+    /// build seed. This is the "useless without the key" outcome.
+    AuthFailed,
 }
 
-/// Serializes `entries` into a plaintext retrace map and encrypts it under the
-/// key derived from `seed`. The build seed is also folded in as a bound tag so a
-/// map cannot be silently paired with a different build's frames;
-/// [`Symbolicator::open`] verifies it and rejects a mismatch with
-/// [`RetraceError::SeedMismatch`].
+/// Derives a 32-byte sub-key for `label`, bound to both `seed` and `build_hash`.
+fn derive_key(seed: &BuildSeed, build_hash: &[u8; 32], label: &[u8]) -> [u8; 32] {
+    let mut h = Sha256::new();
+    h.update(label);
+    h.update(seed.0);
+    h.update(build_hash);
+    let d = h.finalize();
+    let mut k = [0u8; 32];
+    k.copy_from_slice(&d);
+    k
+}
+
+/// SHA-256 counter-mode keystream of `len` bytes under `key`.
+///
+/// Block `n` is `SHA-256("…ctr" ‖ key ‖ n_be64)`; concatenated and truncated.
+/// This is a PRF-based stream cipher — strong enough that the map is opaque
+/// without the seed — standing in for the KMS-backed AEAD production will use.
+fn keystream(key: &[u8; 32], len: usize) -> Vec<u8> {
+    let mut out = Vec::with_capacity(len + 32);
+    let mut counter: u64 = 0;
+    while out.len() < len {
+        let mut h = Sha256::new();
+        h.update(b"kseal/vmspike/retrace-ctr");
+        h.update(key);
+        h.update(counter.to_be_bytes());
+        out.extend_from_slice(&h.finalize());
+        counter += 1;
+    }
+    out.truncate(len);
+    out
+}
+
+/// Serializes `entries` into a retrace map, encrypts the entry table under a
+/// `seed`+`build_hash`-derived keystream, and appends an HMAC-SHA256 tag over
+/// the authenticated header and ciphertext.
+///
+/// The `build_hash` is carried in the clear (it is a public build identifier)
+/// but authenticated, so the artifact is cryptographically bound to one build.
 #[must_use]
-pub fn encrypt_map(entries: &[(u32, SourceSite)], seed: &BuildSeed) -> Vec<u8> {
-    let seed_tag = subkey(seed, b"kseal/vmspike/retrace-tag");
-
-    let mut raw: Vec<u8> = Vec::new();
-    raw.extend_from_slice(&MAGIC);
-    raw.push(VERSION);
-    raw.extend_from_slice(&seed_tag.to_be_bytes());
-    raw.extend_from_slice(&(entries.len() as u32).to_be_bytes());
+pub fn encrypt_map(entries: &[(u32, SourceSite)], seed: &BuildSeed, build_hash: &[u8; 32]) -> Vec<u8> {
+    // Plaintext entry table.
+    let mut pt: Vec<u8> = Vec::new();
+    pt.extend_from_slice(&(entries.len() as u32).to_be_bytes());
     for (pc, site) in entries {
-        raw.extend_from_slice(&pc.to_be_bytes());
-        raw.extend_from_slice(&site.source_line.to_be_bytes());
-        put_str(&mut raw, site.function);
-        put_str(&mut raw, site.step);
+        pt.extend_from_slice(&pc.to_be_bytes());
+        pt.extend_from_slice(&site.source_line.to_be_bytes());
+        put_str(&mut pt, site.function);
+        put_str(&mut pt, site.step);
     }
-    // FNV-1a is a non-cryptographic checksum (corruption/wrong-seed detection only,
-    // not integrity/authenticity); production uses AEAD under a KMS key — see the
-    // module doc and docs/virtualization-tier-decision.md §6.
-    let checksum = fnv1a64(&raw);
-    raw.extend_from_slice(&checksum.to_be_bytes());
 
-    let key = subkey(seed, b"kseal/vmspike/retrace-key");
-    for (i, b) in raw.iter_mut().enumerate() {
-        *b ^= keystream_byte(key, i);
+    // Encrypt the entry table (the confidential part).
+    let enc_key = derive_key(seed, build_hash, b"kseal/vmspike/retrace-enc");
+    let ks = keystream(&enc_key, pt.len());
+    for (b, k) in pt.iter_mut().zip(&ks) {
+        *b ^= *k;
     }
-    raw
+
+    // Assemble authenticated header ‖ ciphertext, then append the MAC tag.
+    let mut out = Vec::with_capacity(HEADER_LEN + pt.len() + TAG_LEN);
+    out.extend_from_slice(&MAGIC);
+    out.push(VERSION);
+    out.extend_from_slice(build_hash);
+    out.extend_from_slice(&pt);
+
+    let mac_key = derive_key(seed, build_hash, b"kseal/vmspike/retrace-mac");
+    let tag = mac(&mac_key, &out);
+    out.extend_from_slice(&tag);
+    out
+}
+
+/// Computes HMAC-SHA256 of `msg` under `key` using the vetted `hmac` crate.
+fn mac(key: &[u8; 32], msg: &[u8]) -> [u8; 32] {
+    let mut m = HmacSha256::new_from_slice(key).expect("HMAC accepts keys of any length");
+    m.update(msg);
+    m.finalize().into_bytes().into()
 }
 
 /// Opens an encrypted retrace map and resolves captured VM frames.
@@ -105,40 +171,51 @@ pub struct Symbolicator {
 }
 
 impl Symbolicator {
-    /// Decrypts and parses an encrypted retrace map under `seed`.
+    /// Verifies and decrypts an encrypted retrace map under `seed`, requiring it
+    /// to be bound to `build_hash`.
     ///
     /// # Errors
-    /// Returns [`RetraceError`] if the buffer is truncated, if the
-    /// magic/version/checksum do not validate, or if the embedded seed tag does
-    /// not match `seed` — the expected outcome when the wrong seed (key) is
-    /// supplied.
-    pub fn open(encrypted: &[u8], seed: &BuildSeed) -> Result<Self, RetraceError> {
-        let key = subkey(seed, b"kseal/vmspike/retrace-key");
-        let mut raw = encrypted.to_vec();
-        for (i, b) in raw.iter_mut().enumerate() {
-            *b ^= keystream_byte(key, i);
-        }
-        if raw.len() < 8 {
+    /// Returns [`RetraceError`] if the buffer is truncated, the magic/version is
+    /// wrong, the `build_hash` does not match, or the HMAC tag does not verify —
+    /// the last being the expected outcome for a wrong seed (no key) or any
+    /// tampering.
+    pub fn open(
+        encrypted: &[u8],
+        seed: &BuildSeed,
+        build_hash: &[u8; 32],
+    ) -> Result<Self, RetraceError> {
+        if encrypted.len() < HEADER_LEN + TAG_LEN {
             return Err(RetraceError::TooShort);
         }
-        let split = raw.len() - 8;
-        let want = fnv1a64(&raw[..split]);
-        let got = u64::from_be_bytes(raw[split..].try_into().map_err(|_| RetraceError::TooShort)?);
-        if want != got {
-            return Err(RetraceError::BadChecksum);
-        }
+        let (body, tag) = encrypted.split_at(encrypted.len() - TAG_LEN);
 
-        let mut r = Reader::new(&raw[..split]);
-        if r.take(4)? != MAGIC {
+        if body[..4] != MAGIC {
             return Err(RetraceError::BadMagic);
         }
-        if r.u8()? != VERSION {
+        if body[4] != VERSION {
             return Err(RetraceError::BadVersion);
         }
-        let seed_tag = r.u64()?;
-        if seed_tag != subkey(seed, b"kseal/vmspike/retrace-tag") {
-            return Err(RetraceError::SeedMismatch);
+        if &body[5..HEADER_LEN] != build_hash {
+            return Err(RetraceError::BuildHashMismatch);
         }
+
+        // Authenticate before touching the ciphertext (constant-time verify).
+        let mac_key = derive_key(seed, build_hash, b"kseal/vmspike/retrace-mac");
+        let mut m = HmacSha256::new_from_slice(&mac_key).expect("HMAC accepts keys of any length");
+        m.update(body);
+        if m.verify_slice(tag).is_err() {
+            return Err(RetraceError::AuthFailed);
+        }
+
+        // Decrypt the entry table.
+        let enc_key = derive_key(seed, build_hash, b"kseal/vmspike/retrace-enc");
+        let mut pt = body[HEADER_LEN..].to_vec();
+        let ks = keystream(&enc_key, pt.len());
+        for (b, k) in pt.iter_mut().zip(&ks) {
+            *b ^= *k;
+        }
+
+        let mut r = Reader::new(&pt);
         let count = r.u32()? as usize;
         let mut entries = Vec::with_capacity(count);
         for _ in 0..count {
@@ -174,6 +251,20 @@ impl Symbolicator {
     }
 }
 
+/// Derives a stable, public `build_hash` from a [`BuildSeed`] for the demo /
+/// tests. Production supplies the real build identifier (e.g. the existing
+/// per-build HKDF output) instead.
+#[must_use]
+pub fn build_hash_from_seed(seed: &BuildSeed) -> [u8; 32] {
+    let mut h = Sha256::new();
+    h.update(b"kseal/vmspike/demo-build-hash");
+    h.update(seed.0);
+    let d = h.finalize();
+    let mut bh = [0u8; 32];
+    bh.copy_from_slice(&d);
+    bh
+}
+
 fn put_str(raw: &mut Vec<u8>, s: &str) {
     let b = s.as_bytes();
     raw.extend_from_slice(&(b.len() as u16).to_be_bytes());
@@ -196,9 +287,6 @@ impl<'a> Reader<'a> {
         self.pos = end;
         Ok(slice)
     }
-    fn u8(&mut self) -> Result<u8, RetraceError> {
-        Ok(self.take(1)?[0])
-    }
     fn u16(&mut self) -> Result<u16, RetraceError> {
         let b = self.take(2)?;
         Ok(u16::from_be_bytes([b[0], b[1]]))
@@ -206,12 +294,6 @@ impl<'a> Reader<'a> {
     fn u32(&mut self) -> Result<u32, RetraceError> {
         let b = self.take(4)?;
         Ok(u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
-    }
-    fn u64(&mut self) -> Result<u64, RetraceError> {
-        let b = self.take(8)?;
-        let mut a = [0u8; 8];
-        a.copy_from_slice(b);
-        Ok(u64::from_be_bytes(a))
     }
     fn string(&mut self) -> Result<String, RetraceError> {
         let n = self.u16()? as usize;
@@ -222,15 +304,16 @@ impl<'a> Reader<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::isa::lower_tag_mix;
+    use super::*;
 
     #[test]
     fn resolves_a_known_pc_through_the_encrypted_map() {
         let lowered = lower_tag_mix();
         let seed = BuildSeed::from_u64(99);
-        let enc = encrypt_map(&lowered.retrace, &seed);
-        let sym = Symbolicator::open(&enc, &seed).unwrap();
+        let bh = build_hash_from_seed(&seed);
+        let enc = encrypt_map(&lowered.retrace, &seed, &bh);
+        let sym = Symbolicator::open(&enc, &seed, &bh).unwrap();
         assert_eq!(sym.entry_count(), lowered.retrace.len());
 
         // Pick the multiply step and confirm it resolves to native_tag_mix.
@@ -249,7 +332,59 @@ mod tests {
     #[test]
     fn wrong_seed_cannot_open_the_map() {
         let lowered = lower_tag_mix();
-        let enc = encrypt_map(&lowered.retrace, &BuildSeed::from_u64(1));
-        assert!(Symbolicator::open(&enc, &BuildSeed::from_u64(2)).is_err());
+        let seed = BuildSeed::from_u64(1);
+        let bh = build_hash_from_seed(&seed);
+        let enc = encrypt_map(&lowered.retrace, &seed, &bh);
+        // Wrong seed: build_hash still matches (it is public), so the failure is
+        // the HMAC tag — i.e. the map is useless without the key.
+        assert_eq!(
+            Symbolicator::open(&enc, &BuildSeed::from_u64(2), &bh).err(),
+            Some(RetraceError::AuthFailed)
+        );
+    }
+
+    #[test]
+    fn tampering_any_byte_is_detected() {
+        let lowered = lower_tag_mix();
+        let seed = BuildSeed::from_u64(0x1234);
+        let bh = build_hash_from_seed(&seed);
+        let enc = encrypt_map(&lowered.retrace, &seed, &bh);
+
+        // Flip one bit in the ciphertext region and one in the tag region.
+        for idx in [HEADER_LEN + 1, enc.len() - 1] {
+            let mut bad = enc.clone();
+            bad[idx] ^= 0x01;
+            assert_eq!(
+                Symbolicator::open(&bad, &seed, &bh).err(),
+                Some(RetraceError::AuthFailed),
+                "tamper at {idx} must fail auth"
+            );
+        }
+    }
+
+    #[test]
+    fn map_is_bound_to_its_build_hash() {
+        let lowered = lower_tag_mix();
+        let seed = BuildSeed::from_u64(0x5151);
+        let bh = build_hash_from_seed(&seed);
+        let enc = encrypt_map(&lowered.retrace, &seed, &bh);
+
+        let other_bh = build_hash_from_seed(&BuildSeed::from_u64(0x6262));
+        assert_eq!(
+            Symbolicator::open(&enc, &seed, &other_bh).err(),
+            Some(RetraceError::BuildHashMismatch)
+        );
+    }
+
+    #[test]
+    fn entries_are_encrypted_not_plaintext() {
+        // The function-name strings must not appear in the clear in the artifact.
+        let lowered = lower_tag_mix();
+        let seed = BuildSeed::from_u64(0x9090);
+        let bh = build_hash_from_seed(&seed);
+        let enc = encrypt_map(&lowered.retrace, &seed, &bh);
+        let needle = b"native_tag_mix";
+        let found = enc.windows(needle.len()).any(|w| w == needle);
+        assert!(!found, "source identifiers must be encrypted");
     }
 }
