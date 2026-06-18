@@ -18,12 +18,17 @@
 //!   is passed as the AEAD associated data, and `build_hash` is also folded into
 //!   the key and nonce derivation, so a map can only be opened against the build
 //!   it was emitted for; pairing it with another build's frames is rejected.
-//! * **Nonce discipline** — the key and nonce are both derived from
-//!   `seed ‖ build_hash ‖ routine`, so every distinct `(build, routine)` map
-//!   gets an independent `(key, nonce)`. A given map is encrypted exactly once,
-//!   so its deterministic nonce never repeats under its key, and distinct
-//!   routines virtualized in one build never share a key — all while keeping
-//!   the artifact byte-reproducible.
+//! * **Nonce discipline (synthetic IV).** The key is derived from
+//!   `seed ‖ build_hash ‖ routine`, and the nonce is a **synthetic IV** —
+//!   `SHA-256(domain ‖ seed ‖ build_hash ‖ routine ‖ plaintext)` truncated to
+//!   96 bits, carried in the header and bound as AAD. Because it depends on the
+//!   plaintext, two seals of *different* entries under the same
+//!   `(seed, build_hash, routine)` get *different* nonces, so a `(key, nonce)`
+//!   pair is never reused with two different plaintexts — nonce-misuse-resistant
+//!   rather than relying on a one-seal-per-tuple convention — while identical
+//!   inputs still reproduce the same byte-for-byte artifact. The `seed` is
+//!   secret, so the carried nonce reveals nothing about the plaintext beyond the
+//!   equality that any deterministic encryption already exposes.
 //!
 //! This replaces the spike's hand-rolled SHA-256-CTR + HMAC construction with a
 //! standard, vetted AEAD primitive. Production would swap the in-process key for
@@ -39,11 +44,14 @@ use sha2::{Digest, Sha256};
 /// Magic prefix identifying an encrypted retrace map.
 const MAGIC: [u8; 4] = *b"KVRM";
 /// Retrace-map format version (v1: XOR + FNV checksum; v2: SHA256-CTR + HMAC;
-/// v3: ChaCha20-Poly1305 AEAD).
-const VERSION: u8 = 3;
+/// v3: ChaCha20-Poly1305 AEAD; v4: v3 + plaintext-derived synthetic-IV nonce
+/// carried in the header).
+const VERSION: u8 = 4;
+/// Length of the 96-bit ChaCha20-Poly1305 nonce, carried in the header.
+const NONCE_LEN: usize = 12;
 /// Length of the authenticated cleartext header (also the AEAD associated
-/// data): `MAGIC ‖ VERSION ‖ build_hash`.
-const HEADER_LEN: usize = 4 + 1 + 32;
+/// data): `MAGIC ‖ VERSION ‖ build_hash ‖ nonce`.
+const HEADER_LEN: usize = 4 + 1 + 32 + NONCE_LEN;
 /// Length of the trailing Poly1305 authentication tag appended by the AEAD.
 const TAG_LEN: usize = 16;
 
@@ -108,24 +116,34 @@ fn derive_key(seed: &BuildSeed, build_hash: &[u8; 32], routine: &str, label: &[u
     k
 }
 
-/// Derives a deterministic 12-byte AEAD nonce bound to `seed`, `build_hash`, and
-/// the per-map `routine`.
+/// Derives the 12-byte AEAD nonce as a **synthetic IV**: a deterministic
+/// function of the plaintext `pt`, keyed by the secret `seed` and bound to
+/// `build_hash` and the per-map `routine`.
 ///
-/// Each `(build, routine)` derives a unique key (see [`derive_key`]) and encrypts
-/// its retrace map exactly once, so this nonce never repeats under a given key —
-/// the safety condition for ChaCha20-Poly1305. Folding `routine` in additionally
-/// gives distinct routine maps in one build independent nonces, while keeping the
-/// emitted artifact byte-reproducible.
-fn derive_nonce(seed: &BuildSeed, build_hash: &[u8; 32], routine: &str) -> [u8; 12] {
+/// Because the nonce depends on the plaintext, re-sealing *different* entries
+/// under the same `(seed, build_hash, routine)` yields a *different* nonce, so a
+/// `(key, nonce)` pair is never reused with two different plaintexts — the
+/// safety condition for ChaCha20-Poly1305 — even if [`encrypt_map`] is called
+/// more than once for one tuple. Identical inputs reproduce the same nonce (and
+/// thus the same artifact), so the build stays byte-reproducible. The `seed` is
+/// secret, so the nonce carried in the header reveals nothing about `pt` beyond
+/// the plaintext equality that deterministic encryption already exposes.
+fn derive_nonce(
+    seed: &BuildSeed,
+    build_hash: &[u8; 32],
+    routine: &str,
+    pt: &[u8],
+) -> [u8; NONCE_LEN] {
     let mut h = Sha256::new();
     h.update(b"kseal/vmspike/retrace-aead-nonce");
     h.update(seed.0);
     h.update(build_hash);
     h.update((routine.len() as u64).to_be_bytes());
     h.update(routine.as_bytes());
+    h.update(pt);
     let d = h.finalize();
-    let mut n = [0u8; 12];
-    n.copy_from_slice(&d[..12]);
+    let mut n = [0u8; NONCE_LEN];
+    n.copy_from_slice(&d[..NONCE_LEN]);
     n
 }
 
@@ -136,9 +154,10 @@ fn derive_nonce(seed: &BuildSeed, build_hash: &[u8; 32], routine: &str) -> [u8; 
 ///
 /// The `build_hash` is carried in the clear (it is a public build identifier)
 /// but authenticated via the AEAD's associated data, so the artifact is
-/// cryptographically bound to one build. The `routine` identifier domain-
-/// separates per-routine maps so that emitting more than one map in a single
-/// build never reuses a `(key, nonce)` pair.
+/// cryptographically bound to one build. The nonce is a synthetic IV derived
+/// from the plaintext (see [`derive_nonce`]) and carried in the header, so
+/// distinct entries — whether across routines or across repeated calls for one
+/// `(seed, build_hash, routine)` — never reuse a `(key, nonce)` pair.
 #[must_use]
 pub fn encrypt_map(
     entries: &[(u32, SourceSite)],
@@ -156,16 +175,19 @@ pub fn encrypt_map(
         put_str(&mut pt, site.step);
     }
 
+    // Encrypt-and-authenticate the entry table in one AEAD pass. The nonce is a
+    // synthetic IV over the plaintext, so re-sealing different entries under the
+    // same (seed, build_hash, routine) can never reuse a (key, nonce) pair.
+    let key = derive_key(seed, build_hash, routine, b"kseal/vmspike/retrace-aead-key");
+    let nonce = derive_nonce(seed, build_hash, routine, &pt);
+
     // Authenticated cleartext header — also the AEAD associated data, which
-    // cryptographically binds the artifact to MAGIC / VERSION / build_hash.
+    // cryptographically binds the artifact to MAGIC / VERSION / build_hash / nonce.
     let mut header = Vec::with_capacity(HEADER_LEN);
     header.extend_from_slice(&MAGIC);
     header.push(VERSION);
     header.extend_from_slice(build_hash);
-
-    // Encrypt-and-authenticate the entry table in one AEAD pass.
-    let key = derive_key(seed, build_hash, routine, b"kseal/vmspike/retrace-aead-key");
-    let nonce = derive_nonce(seed, build_hash, routine);
+    header.extend_from_slice(&nonce);
     let cipher = ChaCha20Poly1305::new(Key::from_slice(&key));
     let ct = cipher
         .encrypt(
@@ -216,19 +238,21 @@ impl Symbolicator {
         if header[4] != VERSION {
             return Err(RetraceError::BadVersion);
         }
-        if &header[5..HEADER_LEN] != build_hash {
+        if &header[5..5 + 32] != build_hash {
             return Err(RetraceError::BuildHashMismatch);
         }
+        // Synthetic-IV nonce carried after the build_hash; authenticated as part
+        // of the AAD header, so tampering it fails the Poly1305 verify.
+        let nonce = &header[5 + 32..HEADER_LEN];
 
         // Authenticated decryption: the header is bound as associated data and
-        // `build_hash` is folded into both key and nonce, so a wrong seed, any
-        // tamper, or a foreign build all fail the constant-time Poly1305 verify.
+        // `build_hash` is folded into the key, so a wrong seed, any tamper, or a
+        // foreign build all fail the constant-time Poly1305 verify.
         let key = derive_key(seed, build_hash, routine, b"kseal/vmspike/retrace-aead-key");
-        let nonce = derive_nonce(seed, build_hash, routine);
         let cipher = ChaCha20Poly1305::new(Key::from_slice(&key));
         let pt = cipher
             .decrypt(
-                Nonce::from_slice(&nonce),
+                Nonce::from_slice(nonce),
                 Payload {
                     msg: ciphertext,
                     aad: header,
@@ -432,6 +456,44 @@ mod tests {
             Symbolicator::open(&map_a, &seed, &bh, "routine_b").err(),
             Some(RetraceError::AuthFailed),
             "wrong routine id must fail auth"
+        );
+    }
+
+    #[test]
+    fn same_tuple_distinct_entries_never_reuse_nonce() {
+        // Re-sealing *different* entries under the *same* (seed, build_hash,
+        // routine) must not reuse a (key, nonce) pair: the synthetic-IV nonce is
+        // derived from the plaintext, so different entries ⇒ different nonce.
+        let seed = BuildSeed::from_u64(0xBEEF_BEEF);
+        let bh = build_hash_from_seed(&seed);
+        let site = |source_line| SourceSite {
+            function: "demo_routine",
+            step: "ir:xor",
+            source_line,
+        };
+        let entries_a = [(0u32, site(1))];
+        let entries_b = [(0u32, site(2))]; // same shape, different content
+
+        let map_a = encrypt_map(&entries_a, &seed, &bh, "demo_routine");
+        let map_b = encrypt_map(&entries_b, &seed, &bh, "demo_routine");
+
+        // The synthetic-IV nonce is carried in the header after build_hash.
+        let nonce_a = &map_a[5 + 32..HEADER_LEN];
+        let nonce_b = &map_b[5 + 32..HEADER_LEN];
+        assert_ne!(nonce_a, nonce_b, "different plaintext must yield a different nonce");
+        assert_ne!(map_a, map_b, "different plaintext must yield different ciphertext");
+
+        // Both still open correctly under the same tuple.
+        assert!(Symbolicator::open(&map_a, &seed, &bh, "demo_routine").is_ok());
+        assert!(Symbolicator::open(&map_b, &seed, &bh, "demo_routine").is_ok());
+
+        // Tampering the carried nonce (part of the AAD header) fails the verify.
+        let mut bad = map_a.clone();
+        bad[5 + 32] ^= 0x01;
+        assert_eq!(
+            Symbolicator::open(&bad, &seed, &bh, "demo_routine").err(),
+            Some(RetraceError::AuthFailed),
+            "tampered nonce must fail auth"
         );
     }
 }

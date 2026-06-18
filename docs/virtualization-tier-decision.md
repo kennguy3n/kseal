@@ -80,7 +80,7 @@ mod vmspike;` line in `lib.rs` already present from 5.3.
 | `vmspike/strength.rs` *(new)* | — | Rust mirror of the Gradle `ObfuscationStrength` (OFF/LOW/MEDIUM/HIGH, default OFF); `cohort_bucket()` runs the **native** routine at OFF/LOW/MEDIUM and the **virtualized** program at **HIGH** — behaviour-identical either way. |
 | `vmspike/encode.rs` | Per-build-polymorphic encoder (opcode perm + register perm + XOR keystream from a 32-byte `BuildSeed` via the crate's existing `sha2`). | Extended to encode the new opcodes; legacy path unchanged. |
 | `vmspike/interp.rs` | Byte-input dispatch loop; faults return a `VmFrame` (pc) instead of panicking. | Adds a word-oriented `run_ir` entry point for IR programs + dispatch for the new opcodes. Shared core; legacy byte path unchanged. |
-| `vmspike/retrace.rs` | XOR-keystream + FNV-checksum "encrypted" map + `Symbolicator`. | Upgraded to a **ChaCha20-Poly1305 AEAD** (the vetted `chacha20poly1305` crate) with the cleartext header bound as associated data and `build_hash` folded into key + nonce derivation. Constant-time verify; the crate is an **optional dependency gated behind `vm-spike`**, so the default build links none of it. |
+| `vmspike/retrace.rs` | XOR-keystream + FNV-checksum "encrypted" map + `Symbolicator`. | Upgraded to a **ChaCha20-Poly1305 AEAD** (the vetted `chacha20poly1305` crate) with the cleartext header bound as associated data, `build_hash`+`routine` folded into the key, and a **plaintext-derived synthetic-IV nonce** carried in the header (nonce-misuse-resistant; closes CWE-323). Constant-time verify; the crate is an **optional dependency gated behind `vm-spike`**, so the default build links none of it. |
 | `vmspike/mod.rs` | Orchestration, artifact bundle, measurement harness, tests. | Adds the IR-cohort measurement (`measure::run_cohort`) and updates call sites for the authenticated retrace API. |
 
 **CI-validated (no new heavy deps; `Cargo.lock` not churned).** The
@@ -115,8 +115,11 @@ which compile and test the spike under `--features vm-spike`, clippy-clean
   map back to source; `wrong_seed_cannot_open_the_map` (auth fails — useless
   without the key), `tampering_any_byte_is_detected` (the AEAD tag catches
   ciphertext and tag edits), `map_is_bound_to_its_build_hash` (a map cannot be paired with
-  another build), and `entries_are_encrypted_not_plaintext` (source identifiers
-  never appear in the clear).
+  another build), `entries_are_encrypted_not_plaintext` (source identifiers
+  never appear in the clear), and the nonce-misuse-resistance pair
+  `distinct_routines_in_one_build_do_not_collide` /
+  `same_tuple_distinct_entries_never_reuse_nonce` (different plaintext ⇒ a
+  different synthetic-IV nonce, so a `(key, nonce)` pair is never reused — CWE-323).
 
 **Still design-only (scoped in §8):** a lowering for *arbitrary* Rust beyond the
 integer/bitwise IR; the **KMS/HSM-managed** key for the retrace map (the
@@ -264,8 +267,8 @@ The 5.4 format uses a standard, vetted AEAD:
 - **Encryption + authentication.** The entry table is sealed with
   **ChaCha20-Poly1305** (the `chacha20poly1305` crate) under a
   `seed`+`build_hash`+`routine`-derived key
-  (`derive_key(seed, build_hash, routine, "…aead-key")`) and a deterministic
-  nonce over the same inputs (`derive_nonce`). A single AEAD pass provides
+  (`derive_key(seed, build_hash, routine, "…aead-key")`) and a synthetic-IV
+  nonce derived from the plaintext (`derive_nonce`, see below). A single AEAD pass provides
   both confidentiality (source identifiers never appear in the clear, proven by
   `entries_are_encrypted_not_plaintext`) and integrity: any tampering or a wrong
   seed fails the **constant-time Poly1305 verify** (`AuthFailed`, proven by
@@ -275,15 +278,23 @@ The 5.4 format uses a standard, vetted AEAD:
   key and nonce derivation, so a map can only be opened against the build it was
   emitted for (`BuildHashMismatch`); it cannot be paired with another build's
   frames.
-- **Nonce discipline (per-routine domain separation).** Both the key and the
-  nonce are derived from `seed ‖ build_hash ‖ routine`, so every distinct
-  `(build, routine)` map gets an **independent `(key, nonce)`**. Each map is
-  encrypted exactly once, so its deterministic nonce never repeats under its
-  key, and a build that virtualizes several routines never reuses a
-  `(key, nonce)` pair across their maps — closing the AEAD nonce-reuse hazard
-  that a build-only nonce would carry once §8.2/§8.3 emit per-routine maps — all
-  while keeping the artifact byte-reproducible (proven by
-  `distinct_routines_in_one_build_do_not_collide`).
+- **Nonce discipline (synthetic IV, nonce-misuse-resistant).** The key is
+  derived from `seed ‖ build_hash ‖ routine`, and the nonce is a **synthetic IV**
+  computed as `SHA-256(domain ‖ seed ‖ build_hash ‖ routine ‖ plaintext)`
+  truncated to 96 bits, carried in the header and bound as AAD. Because the nonce
+  depends on the plaintext, sealing *different* entries under the same
+  `(seed, build_hash, routine)` — across distinct routines **or** repeated calls
+  for one tuple — yields *different* nonces, so a `(key, nonce)` pair is never
+  reused with two different plaintexts. This makes the construction
+  nonce-misuse-resistant by design rather than relying on a one-seal-per-tuple
+  convention, closing the AEAD nonce-reuse hazard (CWE-323) that a `(seed,
+  build_hash[, routine])`-only nonce would carry once §8.2/§8.3 emit per-routine
+  maps. Identical inputs reproduce the same nonce, so the artifact stays
+  byte-reproducible; the secret `seed` keys the derivation, so the carried nonce
+  reveals nothing about the plaintext beyond the equality any deterministic
+  encryption already exposes. Proven by
+  `distinct_routines_in_one_build_do_not_collide` and
+  `same_tuple_distinct_entries_never_reuse_nonce`.
 
 `Symbolicator::open(encrypted, seed, build_hash, routine)` verifies, decrypts, and
 resolves a captured `VmFrame`; without the key the artifact is indistinguishable
