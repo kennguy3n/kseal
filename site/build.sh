@@ -37,7 +37,7 @@ shopt -u nullglob
 ln -s ../css .staging/css
 
 # Root docs that docs/*.md cross-link to via ../NAME.md.
-for f in PROPOSAL.md ARCHITECTURE.md PROGRESS.md; do
+for f in PROPOSAL.md ARCHITECTURE.md; do
   ln -s "../../$f" ".staging/$f"
 done
 # The root README is staged under a distinct name: MkDocs treats README.md as an
