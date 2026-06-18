@@ -85,6 +85,9 @@ pub fn encrypt_map(entries: &[(u32, SourceSite)], seed: &BuildSeed) -> Vec<u8> {
         put_str(&mut raw, site.function);
         put_str(&mut raw, site.step);
     }
+    // FNV-1a is a non-cryptographic checksum (corruption/wrong-seed detection only,
+    // not integrity/authenticity); production uses AEAD under a KMS key — see the
+    // module doc and docs/virtualization-tier-decision.md §6.
     let checksum = fnv1a64(&raw);
     raw.extend_from_slice(&checksum.to_be_bytes());
 
