@@ -20,6 +20,15 @@ obfuscate-strings = []
 # or the FFI surface. See `src/vmspike/mod.rs`.
 vm-spike = []
 
+# Phase 6.1 DECISION SPIKE — white-box cryptography for the proof key
+# (`whitebox`). Off by default and never shipped: this gates a self-contained,
+# bounded proof-of-concept that bakes the proof key into encoded lookup tables at
+# build time and reproduces the EXACT production proof HMAC tag, used to produce
+# the go/no-go evidence in `docs/whitebox-crypto-decision.md`. It is ADDITIVE: it
+# does NOT replace or alter the production crypto path, and adds nothing to the
+# FFI surface. See `src/whitebox/mod.rs`.
+whitebox-spike = []
+
 [dependencies]
 prost.workspace = true
 zstd.workspace = true
