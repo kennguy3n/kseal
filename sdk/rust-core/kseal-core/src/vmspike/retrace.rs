@@ -9,8 +9,9 @@
 //!
 //! Here that map is serialized and XOR-encrypted under a key derived from the
 //! [`BuildSeed`]. A [`Symbolicator`] opens it with the same seed and resolves a
-//! captured [`VmFrame`]; opening with the wrong seed fails the magic/checksum
-//! check, so an attacker who lifts the artifact without the key gets nothing.
+//! captured [`VmFrame`]; opening with the wrong seed fails the
+//! magic/checksum/seed-tag check, so an attacker who lifts the artifact without
+//! the key gets nothing.
 //! Production would replace the XOR keystream with a real AEAD under a
 //! KMS-managed key — see `docs/virtualization-tier-decision.md`.
 
@@ -60,11 +61,15 @@ pub enum RetraceError {
     BadVersion,
     /// Checksum mismatch (corruption or wrong seed).
     BadChecksum,
+    /// The embedded build-seed tag did not match the supplied seed.
+    SeedMismatch,
 }
 
 /// Serializes `entries` into a plaintext retrace map and encrypts it under the
 /// key derived from `seed`. The build seed is also folded in as a bound tag so a
-/// map cannot be silently paired with a different build's frames.
+/// map cannot be silently paired with a different build's frames;
+/// [`Symbolicator::open`] verifies it and rejects a mismatch with
+/// [`RetraceError::SeedMismatch`].
 #[must_use]
 pub fn encrypt_map(entries: &[(u32, SourceSite)], seed: &BuildSeed) -> Vec<u8> {
     let seed_tag = subkey(seed, b"kseal/vmspike/retrace-tag");
@@ -100,9 +105,10 @@ impl Symbolicator {
     /// Decrypts and parses an encrypted retrace map under `seed`.
     ///
     /// # Errors
-    /// Returns [`RetraceError`] if the buffer is truncated or if the
-    /// magic/version/checksum do not validate — the expected outcome when the
-    /// wrong seed (key) is supplied.
+    /// Returns [`RetraceError`] if the buffer is truncated, if the
+    /// magic/version/checksum do not validate, or if the embedded seed tag does
+    /// not match `seed` — the expected outcome when the wrong seed (key) is
+    /// supplied.
     pub fn open(encrypted: &[u8], seed: &BuildSeed) -> Result<Self, RetraceError> {
         let key = subkey(seed, b"kseal/vmspike/retrace-key");
         let mut raw = encrypted.to_vec();
@@ -126,7 +132,10 @@ impl Symbolicator {
         if r.u8()? != VERSION {
             return Err(RetraceError::BadVersion);
         }
-        let _seed_tag = r.u64()?;
+        let seed_tag = r.u64()?;
+        if seed_tag != subkey(seed, b"kseal/vmspike/retrace-tag") {
+            return Err(RetraceError::SeedMismatch);
+        }
         let count = r.u32()? as usize;
         let mut entries = Vec::with_capacity(count);
         for _ in 0..count {
