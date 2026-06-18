@@ -100,8 +100,12 @@ The module has three parts:
    MAC, returning a `RequestProof`. A `measure` submodule reports table size and
    per-tag latency.
 
-**No `unsafe`. No new dependencies** (reuses `sha2` already in the workspace;
-`Cargo.lock` is unchanged). CI exercises the feature: the Makefile `test-rust`
+**No `unsafe`. No new resolved crates** (reuses `sha2` already in the workspace;
+the optional `zeroize` scrub dependency was already present in `Cargo.lock`
+transitively via the `ed25519-dalek` stack, so the spike adds **no new
+supply-chain surface** — the only `Cargo.lock` edit is adding the already-present
+`zeroize` to `kseal-core`'s dependency list, pulled in only when the feature is
+enabled). CI exercises the feature: the Makefile `test-rust`
 and `lint` targets now also run `cargo test --features whitebox-spike` and
 `cargo clippy --all-targets --features whitebox-spike -- -D warnings`.
 
@@ -260,7 +264,9 @@ to scope what (3)/(4) would cost before committing.
   it does not replace it.
 - `kseal_*` **FFI exports unchanged**; **no** proto changes; **no** `server/**`
   or `server/gen` changes (proto-drift clean).
-- **No `unsafe`; no heavy new dependencies; `Cargo.lock` unchanged.**
+- **No `unsafe`; no heavy new dependencies; no new resolved crates** (the
+  optional `zeroize` scrub dep was already in `Cargo.lock` transitively via the
+  `ed25519-dalek` stack; the only lock edit is listing it under `kseal-core`).
 - Owns its own scaffolding (new `whitebox-spike` feature, new `mod whitebox`, new
   Makefile lines); does **not** touch the `vm-spike` feature, the `vmspike`
   module, or `docs/virtualization-tier-decision.md`.
