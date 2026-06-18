@@ -295,10 +295,16 @@ pub fn native_tag_mix(input: &[u8], domain: u64) -> u64 {
 /// site as the stand-in for a production DWARF line table).
 #[must_use]
 pub fn lower_tag_mix() -> LoweredProgram {
-    let mut b = Builder::new("native_tag_mix", vec![MIX_OFFSET, MIX_PRIME, MIX_PRIME2]);
+    let mut b = Builder::new("native_tag_mix", Vec::new());
+    let k_offset = b.intern_const(MIX_OFFSET);
+    let k_prime = b.intern_const(MIX_PRIME);
+    let k_prime2 = b.intern_const(MIX_PRIME2);
 
     b.emit(
-        Instr::LoadConst { dst: REG_ACC, k: 0 },
+        Instr::LoadConst {
+            dst: REG_ACC,
+            k: k_offset,
+        },
         "acc = MIX_OFFSET",
         line!(),
     );
@@ -331,7 +337,10 @@ pub fn lower_tag_mix() -> LoweredProgram {
         line!(),
     );
     b.emit(
-        Instr::MulConst { dst: REG_ACC, k: 1 },
+        Instr::MulConst {
+            dst: REG_ACC,
+            k: k_prime,
+        },
         "acc = acc.wrapping_mul(MIX_PRIME)",
         line!(),
     );
@@ -375,7 +384,10 @@ pub fn lower_tag_mix() -> LoweredProgram {
         line!(),
     );
     b.emit(
-        Instr::MulConst { dst: REG_ACC, k: 2 },
+        Instr::MulConst {
+            dst: REG_ACC,
+            k: k_prime2,
+        },
         "acc = acc.wrapping_mul(MIX_PRIME2)",
         line!(),
     );
@@ -412,23 +424,32 @@ impl Builder {
         self.instrs.len() as u16
     }
 
-    /// Number of constants currently interned (used by [`super::ir`] to detect
-    /// pool overflow before it would panic).
-    pub(super) fn const_pool_len(&self) -> usize {
-        self.consts.len()
-    }
-
-    /// Interns `c` into the constant pool, returning its index (deduplicated so
-    /// repeated constants share a slot). Panics only if the pool exceeds the
-    /// `u8` index space, which the IR's bounded generators never approach.
-    pub(super) fn intern_const(&mut self, c: u64) -> u8 {
+    /// Interns `c` into the constant pool, returning its index, or `None` if a
+    /// *new* constant would overflow the pool.
+    ///
+    /// The pool is capped at 255, not 256: [`super::encode`] writes the pool
+    /// count in a single `u8`, so a 256-entry pool would serialize its count as
+    /// `0` and make the program undecodable. Already-interned constants are
+    /// deduplicated and always succeed, since returning an existing index never
+    /// grows the pool.
+    pub(super) fn intern_const_checked(&mut self, c: u64) -> Option<u8> {
         if let Some(i) = self.consts.iter().position(|&x| x == c) {
-            return i as u8;
+            return Some(i as u8);
+        }
+        if self.consts.len() >= 255 {
+            return None;
         }
         let i = self.consts.len();
-        assert!(i < 256, "vmspike constant pool overflow");
         self.consts.push(c);
-        i as u8
+        Some(i as u8)
+    }
+
+    /// Interns `c` and returns its index, panicking if the pool is full. Used by
+    /// the hand-lowering, whose fixed constant set never approaches the cap;
+    /// callers that can recover should use [`Builder::intern_const_checked`].
+    pub(super) fn intern_const(&mut self, c: u64) -> u8 {
+        self.intern_const_checked(c)
+            .expect("vmspike constant pool overflow (encode writes count as u8)")
     }
 
     /// Appends `instr`, records its source site, and returns its pc.

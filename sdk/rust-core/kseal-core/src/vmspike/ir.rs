@@ -329,17 +329,18 @@ fn binary_instr(expr: &Expr, dst: u8, src: u8) -> Instr {
     }
 }
 
-/// Interns `c` into the builder's constant pool, mapping the pool-overflow
-/// assertion to a recoverable [`LowerError`].
+/// Interns `c` into the builder's constant pool, mapping a pool overflow to a
+/// recoverable [`LowerError`].
 ///
-/// The cap is 255, not 256: [`super::encode`] writes the pool count in a single
-/// `u8`, so a 256-entry pool would serialize its count as `0` and make the
-/// program undecodable. Bounding the pool at 255 keeps the count representable.
+/// The pool is capped at 255 (see [`Builder::intern_const_checked`]):
+/// [`super::encode`] writes the pool count in a single `u8`, so a 256-entry pool
+/// would serialize its count as `0` and make the program undecodable. Because
+/// the check defers to the deduplicating intern, re-referencing an
+/// already-interned constant succeeds even when the pool is full — only a *new*
+/// constant past 255 distinct entries overflows.
 fn intern(b: &mut Builder, c: u64) -> Result<u8, LowerError> {
-    if b.const_pool_len() >= 255 {
-        return Err(LowerError::ConstPoolOverflow);
-    }
-    Ok(b.intern_const(c))
+    b.intern_const_checked(c)
+        .ok_or(LowerError::ConstPoolOverflow)
 }
 
 // --- the representative routine wired end-to-end (Task C) ---
@@ -614,6 +615,22 @@ mod tests {
             interp::run_ir(&program, &[]).unwrap(),
             eval(&ok, &[]),
             "decoded 255-constant program must match the reference"
+        );
+
+        // A pool already at the 255 cap may still re-reference an existing
+        // constant: deduplication returns the existing index without growing
+        // the pool, so lowering succeeds (the cap counts *distinct* constants).
+        let mut with_dup: Vec<u64> = distinct[..255].to_vec();
+        with_dup.push(distinct[0]);
+        let dup = balanced_const_sum(&with_dup);
+        assert!(register_need(&dup) <= NUM_REGS, "balanced tree must fit the bank");
+        let lowered = lower("const_pool_dup", 0, &dup).expect("255 distinct + a dup must lower");
+        let program =
+            decode_with_seed(&encode_with_seed(&lowered.program, &seed), &seed).unwrap();
+        assert_eq!(
+            interp::run_ir(&program, &[]).unwrap(),
+            eval(&dup, &[]),
+            "decoded 255-distinct + dup program must match the reference"
         );
 
         // The 256th distinct constant exceeds the u8 count field, so lowering
