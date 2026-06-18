@@ -77,7 +77,7 @@ func (s *seeder) ingestEvents(tenantID string, a appSeed) error {
 	events := make([]*ksealv1.TelemetryEvent, 0, eventsPerApp)
 	for i := 0; i < eventsPerApp; i++ {
 		t := s.weightedTemplate(total)
-		// Spread over the last 23h; cluster the critical campaign more recently.
+		// Spread each event uniformly over the last 23h.
 		offsetMs := int64(s.rng.Intn(23*3600)) * 1000
 		region := regions[s.rng.Intn(len(regions))]
 		ev := &ksealv1.TelemetryEvent{
