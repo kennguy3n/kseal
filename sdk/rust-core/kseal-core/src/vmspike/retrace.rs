@@ -176,9 +176,9 @@ impl Symbolicator {
     ///
     /// # Errors
     /// Returns [`RetraceError`] if the buffer is truncated, the magic/version is
-    /// wrong, the `build_hash` does not match, or the HMAC tag does not verify —
-    /// the last being the expected outcome for a wrong seed (no key) or any
-    /// tampering.
+    /// wrong, the `build_hash` does not match, or the AEAD (Poly1305) tag does
+    /// not verify — the last being the expected outcome for a wrong seed (no
+    /// key) or any tampering.
     pub fn open(
         encrypted: &[u8],
         seed: &BuildSeed,
