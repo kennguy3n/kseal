@@ -8,8 +8,8 @@ import (
 )
 
 const cliCatalog = "## MASVS-CODE\n\nObjective: code.\n\n" +
-	"| MASVS objective | kseal control | Phase | Module | MASTG |\n|---|---|---|---|---|\n" +
-	"| Build provenance | Build proof records hashes | P3 | build proof | unregistered build flagged |\n"
+	"| MASVS objective | kseal control | Module | MASTG |\n|---|---|---|---|\n" +
+	"| Build provenance | Build proof records hashes | build proof | unregistered build flagged |\n"
 
 const cliManifest = `{"schema":"kseal.build-proof/v1","platform":"android","build_hash":"abc123abc123",
 "app":{"package_id":"com.example","version_name":"1.0","version_code":1},"sdk":{"version":"0.1.0"},

@@ -10,17 +10,17 @@ import (
 )
 
 const catalogMD = "## MASVS-STORAGE\n\nObjective: storage.\n\n" +
-	"| MASVS objective | kseal control | Phase | Module | MASTG |\n|---|---|---|---|---|\n" +
-	"| No secrets in app storage | No static secrets shipped | P1 | secret protection | static scan |\n" +
-	"| Tenant data isolated at rest | Logical tenant_id | P1/P4 | control plane | cross-tenant read deny |\n\n" +
+	"| MASVS objective | kseal control | Module | MASTG |\n|---|---|---|---|\n" +
+	"| No secrets in app storage | No static secrets shipped | secret protection | static scan |\n" +
+	"| Tenant data isolated at rest | Logical tenant_id | control plane | cross-tenant read deny |\n\n" +
 	"## MASVS-CODE\n\nObjective: code.\n\n" +
-	"| MASVS objective | kseal control | Phase | Module | MASTG |\n|---|---|---|---|---|\n" +
-	"| Memory safety in native | Rust core; CFI/MTE where supported | P1/P3 | build hardening | CFI/MTE flags present |\n" +
-	"| Build provenance | Build proof records hashes | P3 | build proof | unregistered build flagged |\n\n" +
+	"| MASVS objective | kseal control | Module | MASTG |\n|---|---|---|---|\n" +
+	"| Memory safety in native | Rust core; CFI/MTE where supported | build hardening | CFI/MTE flags present |\n" +
+	"| Build provenance | Build proof records hashes | build proof | unregistered build flagged |\n\n" +
 	"## MASVS-RESILIENCE\n\nObjective: resilience.\n\n" +
-	"| MASVS objective | kseal control | Phase | Module | MASTG |\n|---|---|---|---|---|\n" +
-	"| Obfuscation + polymorphism | Per-build polymorphic obfuscation | P3 | build plane | diff two builds |\n" +
-	"| Anti-tamper / integrity | App-integrity + build-proof binding | P2/P3 | modules 1,2 | patch binary |\n"
+	"| MASVS objective | kseal control | Module | MASTG |\n|---|---|---|---|\n" +
+	"| Obfuscation + polymorphism | Per-build polymorphic obfuscation | build plane | diff two builds |\n" +
+	"| Anti-tamper / integrity | App-integrity + build-proof binding | modules 1,2 | patch binary |\n"
 
 const androidManifest = `{
   "schema":"kseal.build-proof/v1","platform":"android",

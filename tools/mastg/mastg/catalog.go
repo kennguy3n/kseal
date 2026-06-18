@@ -27,7 +27,6 @@ type Category struct {
 type Control struct {
 	Objective string
 	Control   string
-	Phase     string
 	Module    string
 	MASTG     string
 }
@@ -81,11 +80,11 @@ func ParseCatalog(markdown string) (*Catalog, error) {
 			if isHeaderOrSeparator(cells) {
 				continue
 			}
-			if len(cells) < 5 {
-				return nil, fmt.Errorf("category %q: malformed control row %q (want 5 columns, got %d)", cur.Name, trimmed, len(cells))
+			if len(cells) < 4 {
+				return nil, fmt.Errorf("category %q: malformed control row %q (want 4 columns, got %d)", cur.Name, trimmed, len(cells))
 			}
 			cur.Controls = append(cur.Controls, Control{
-				Objective: cells[0], Control: cells[1], Phase: cells[2], Module: cells[3], MASTG: cells[4],
+				Objective: cells[0], Control: cells[1], Module: cells[2], MASTG: cells[3],
 			})
 		}
 	}
