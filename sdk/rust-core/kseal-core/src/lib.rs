@@ -50,6 +50,15 @@ pub mod transport;
 #[cfg(feature = "vm-spike")]
 pub mod vmspike;
 
+// Phase 6.1 DECISION SPIKE: white-box cryptography for the proof key. Compiled
+// only under the default-off `whitebox-spike` feature; additive and isolated, it
+// reproduces the EXACT production proof HMAC tag from encoded key tables but does
+// not replace the production crypto path or touch the FFI surface. The standard
+// build is byte-for-byte unchanged. See `whitebox` and
+// `docs/whitebox-crypto-decision.md`.
+#[cfg(feature = "whitebox-spike")]
+pub mod whitebox;
+
 use crate::config::ConfigCache;
 use crate::events::{EventBatch, EventInput, PrivacyGuard};
 use crate::proto::request_proof_result::Decision;

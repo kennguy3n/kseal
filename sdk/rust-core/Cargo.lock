@@ -650,6 +650,7 @@ dependencies = [
  "serde",
  "sha2",
  "thiserror",
+ "zeroize",
  "zstd",
 ]
 

@@ -20,6 +20,16 @@ obfuscate-strings = []
 # or the FFI surface. See `src/vmspike/mod.rs`.
 vm-spike = []
 
+# Phase 6.1 DECISION SPIKE — white-box cryptography for the proof key
+# (`whitebox`). Off by default and never shipped: this gates a self-contained,
+# bounded proof-of-concept that bakes the proof key into encoded lookup tables at
+# build time and reproduces the EXACT production proof HMAC tag, used to produce
+# the go/no-go evidence in `docs/whitebox-crypto-decision.md`. It is ADDITIVE: it
+# does NOT replace or alter the production crypto path, and adds nothing to the
+# FFI surface. See `src/whitebox/mod.rs`. Pulls in `zeroize` (already in the lock
+# transitively) only when enabled, so the default build is unchanged.
+whitebox-spike = ["dep:zeroize"]
+
 [dependencies]
 prost.workspace = true
 zstd.workspace = true
@@ -31,6 +41,10 @@ getrandom.workspace = true
 bitflags.workspace = true
 thiserror.workspace = true
 serde.workspace = true
+# White-box spike only (gated by `whitebox-spike`): volatile, fence-backed
+# scrubbing of the transiently-reconstructed key blocks. Already present in the
+# lock via the dalek stack, so enabling the spike adds no new resolved crate.
+zeroize = { version = "1", optional = true, default-features = false }
 
 [build-dependencies]
 prost-build = "0.13"
