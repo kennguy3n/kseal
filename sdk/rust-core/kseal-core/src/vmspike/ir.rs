@@ -331,8 +331,12 @@ fn binary_instr(expr: &Expr, dst: u8, src: u8) -> Instr {
 
 /// Interns `c` into the builder's constant pool, mapping the pool-overflow
 /// assertion to a recoverable [`LowerError`].
+///
+/// The cap is 255, not 256: [`super::encode`] writes the pool count in a single
+/// `u8`, so a 256-entry pool would serialize its count as `0` and make the
+/// program undecodable. Bounding the pool at 255 keeps the count representable.
 fn intern(b: &mut Builder, c: u64) -> Result<u8, LowerError> {
-    if b.const_pool_len() >= 256 {
+    if b.const_pool_len() >= 255 {
         return Err(LowerError::ConstPoolOverflow);
     }
     Ok(b.intern_const(c))
@@ -573,5 +577,55 @@ mod tests {
             }
             other => panic!("expected TooManyRegisters, got {other:?}"),
         }
+    }
+
+    /// A balanced (commutative `Add`) tree over `consts`. Balancing keeps the
+    /// register need at ~log2(n)+1, so even hundreds of leaves fit the register
+    /// bank — isolating the constant-pool size as the only limit under test.
+    fn balanced_const_sum(consts: &[u64]) -> Expr {
+        match consts {
+            [c] => Expr::Const(*c),
+            _ => {
+                let mid = consts.len() / 2;
+                Expr::Add(
+                    Box::new(balanced_const_sum(&consts[..mid])),
+                    Box::new(balanced_const_sum(&consts[mid..])),
+                )
+            }
+        }
+    }
+
+    #[test]
+    fn constant_pool_is_capped_at_the_u8_count_field() {
+        // The pool count is serialized as a single u8, so a 256-entry pool would
+        // write a count of 0 and make the program undecodable. Lowering must cap
+        // the pool at 255 instead of silently producing a corrupt stream.
+        let distinct: Vec<u64> = (1..=256u64).collect();
+
+        // 255 distinct constants lower and round-trip cleanly through the
+        // per-build encoder (count 255 fits the u8 field).
+        let ok = balanced_const_sum(&distinct[..255]);
+        assert!(register_need(&ok) <= NUM_REGS, "balanced tree must fit the bank");
+        let lowered = lower("const_pool_max", 0, &ok).expect("255 constants must lower");
+        let seed = BuildSeed::from_u64(0xC0FF_EE00);
+        let program =
+            decode_with_seed(&encode_with_seed(&lowered.program, &seed), &seed).unwrap();
+        assert_eq!(
+            interp::run_ir(&program, &[]).unwrap(),
+            eval(&ok, &[]),
+            "decoded 255-constant program must match the reference"
+        );
+
+        // The 256th distinct constant exceeds the u8 count field, so lowering
+        // fails cleanly rather than emitting an undecodable stream.
+        let too_many = balanced_const_sum(&distinct);
+        assert!(
+            register_need(&too_many) <= NUM_REGS,
+            "balanced tree must fit the bank"
+        );
+        assert_eq!(
+            lower("const_pool_overflow", 0, &too_many).err(),
+            Some(LowerError::ConstPoolOverflow),
+        );
     }
 }
