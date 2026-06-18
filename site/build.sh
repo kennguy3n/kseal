@@ -33,6 +33,11 @@ for f in blog/*.md; do
 done
 shopt -u nullglob
 
+# Blog image assets (console screenshots embedded in the deep-dives).
+if [[ -d blog/img ]]; then
+  ln -s ../../blog/img .staging/blog/img
+fi
+
 # Site-owned static assets (custom theme CSS, images).
 ln -s ../css .staging/css
 

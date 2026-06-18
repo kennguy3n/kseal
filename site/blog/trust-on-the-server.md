@@ -73,6 +73,12 @@ patches the SDK to report *zero* risk bits, attestation still fails server-side,
 contributing 70, and the build is `BitAppUnrecognized` (weight 65) as well —
 either path keeps the decision well away from `ALLOW`.
 
+![kseal console — Meridian Pay tenant overview](img/01-dashboard.png)
+
+*Every decision is the server's, and the console makes that visible: trust
+sessions bucketed by the server-assigned level (`TRUSTED` through `CRITICAL`),
+alongside how many attestations failed server-side.*
+
 ## Why this is also fast
 
 Server-authoritative does not mean slow. The full fuse-score-level computation

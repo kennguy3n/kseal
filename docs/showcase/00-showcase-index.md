@@ -34,6 +34,15 @@ Splunk, enforcement mode `STEP_UP`.
 Each chapter's examples are drawn from the five canonical scenarios D1–D5 in
 [`scenarios.json`](../reference/fixtures/scenarios.json) and the payload fixtures alongside it.
 
+The console screenshots throughout this series are captured from the kseal console driven by
+the canonical Meridian Pay dataset — the same tenant, apps, policies and events the fixtures
+describe, seeded by [`examples/meridian-showcase`](../../examples/meridian-showcase) so the
+views regenerate from a clean checkout.
+
+![kseal console — the Meridian Pay tenant overview](screenshots/01-dashboard.png)
+*The Meridian Pay tenant at a glance: two registered apps, the 24-hour event volume, issued
+trust sessions, and the server-derived trust-level distribution.*
+
 ---
 
 ## Why these jobs are hard for the SME segment

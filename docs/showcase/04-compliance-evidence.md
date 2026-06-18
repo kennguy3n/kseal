@@ -48,6 +48,12 @@ That last point matters for a compliance tool: it states exactly what the eviden
 registered with an empty manifest — a real defect that was found and fixed via this very drive;
 see [defects found](defects-found.md).)
 
+![kseal console — MASVS evidence](screenshots/10-masvs-evidence.png)
+*MASVS evidence for a `pay-android` release: **8/8** categories Evidenced (each with its
+backing modules), the applied transforms (`control-flow-flattening`, `mixed-boolean-arithmetic`,
+`native-symbol-encryption`, `string-obfuscation`), and a "Gaps & notes" panel stating the
+provenance of the evidence — all anchored to the build-proof `build_hash`.*
+
 ### A data-processing registry that documents itself
 
 The data-processing registry records each processing activity — a tenant-default
@@ -56,6 +62,11 @@ The data-processing registry records each processing activity — a tenant-defau
 [`events/risk-event.json`](../reference/fixtures/events/risk-event.json) (no device ID, IP,
 advertising ID, or raw PII). This is the artifact that answers the privacy/DPIA questions in a
 security questionnaire, kept *in the platform* next to the controls it describes.
+
+![kseal console — data-processing registry](screenshots/09-data-processing.png)
+*The data-processing registry: each record names the data categories it processes
+(`device_integrity_signals`, `coarse_geo`, `risk_scores`), its purpose, legal basis, and a
+bounded retention window — the DPIA evidence kept beside the controls it describes.*
 
 ### Every change is evidence, too
 

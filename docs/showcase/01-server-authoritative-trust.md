@@ -26,6 +26,13 @@ trustworthy, an attacker who owns the client owns the decision.
 
 ## What the mobile-security team does in kseal
 
+Both of Meridian's apps are registered to the one tenant, each binding its SDK and CLI to its
+own signing keys:
+
+![kseal console — Meridian Pay's registered apps](screenshots/04-apps.png)
+*`pay-android` (`com.meridianpay.wallet`) and `merchant` (`com.meridianpay.merchant`), both
+active under tenant `meridian`.*
+
 ### 1. A genuine install gets a short-lived trust token
 
 When a stock device on a registered build asks to be trusted, the control plane verifies the
@@ -79,6 +86,15 @@ A single device-side bit (tamper, 60) is only `MEDIUM_RISK` on its own. It is th
 with the server-side attestation failure that crosses `CRITICAL` and denies the payment.
 That is the server-authoritative property in one number.
 
+The console's per-app view shows `pay-android`'s active policy, its recognized builds, and the
+live event stream those decisions land in — including the `Runtime tamper` and `Policy
+decision` events behind this scenario:
+
+![kseal console — pay-android app detail](screenshots/05-app-detail.png)
+*`pay-android`: the active `payments-baseline` policy (Step-up), three registered builds, and
+recent events from `Policy decision` down to `Runtime tamper`, `Malicious keyboard` and
+`Root / jailbreak`.*
+
 ### 4. Push the decisions where the SOC already lives
 
 The SOC doesn't log into kseal — it lives in Splunk. So kseal **streams to it**, two ways,
@@ -102,6 +118,18 @@ raw integer, so correlation rules never depend on fragile numeric bit positions;
 token is held server-side and **never appears in telemetry**. There is no data lake to build —
 the contract is minimized by default and the webhook signature is verifiable, so a spoofed
 POST can't impersonate kseal.
+
+Both transports are registered and managed in the console, with the secret sealed server-side
+and a field allow-list that enforces the minimized contract:
+
+![kseal console — SIEM connector](screenshots/07-siem.png)
+*Meridian's Splunk HEC connector: active, secret sealed server-side, with the minimized field
+allow-list (`build_hash`, `country_or_region`, `event_type`, `policy_hash`, `risk_level`,
+`risk_signals`).*
+
+![kseal console — signed webhooks](screenshots/12-webhooks.png)
+*The same decisions also leave as signed webhooks to Meridian's SOC and fraud-engineering
+endpoints, each filtered to the event types that endpoint cares about.*
 
 ---
 
