@@ -2,7 +2,7 @@
 
 macOS desktop SDK (Swift).
 
-Provides the public SDK surface and native desktop [RASP probes](../../../ARCHITECTURE.md#runtime-protection-modules)
+Provides the public SDK surface and native desktop [RASP probes](../../../ARCHITECTURE.md#rasp-probes)
 for macOS: Authenticode-equivalent code-signature/Gatekeeper verification,
 debugger/injection checks, and Secure Enclave–bound proof keys. Shared trust
 logic is delegated to the [Rust trust core](../../rust-core) over a C ABI.

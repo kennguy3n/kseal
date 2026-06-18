@@ -1,0 +1,42 @@
+{
+  "description": "Meridian Pay's active trust policy for the pay-android app, as stored in the control plane (kseal.v1.Policy). rules and risk_thresholds are JSON-encoded strings on the wire; they are expanded inline here for readability. policy_hash = sha256(\"meridian/payments-baseline/v12\") = 62fdc9b7...; it is echoed in every telemetry event and decision so a record can be tied back to the exact policy that produced it.",
+  "policy": {
+    "id": "pol_meridian_payments_baseline",
+    "tenant_id": "meridian",
+    "app_id": "pay-android",
+    "name": "payments-baseline",
+    "version": 12,
+    "enforcement_mode": "ENFORCEMENT_MODE_STEP_UP",
+    "risk_thresholds": {
+      "critical": 130,
+      "high_risk": 90,
+      "medium_risk": 50,
+      "low_risk": 20
+    },
+    "rules": {
+      "step_up_on": ["TRUST_LEVEL_MEDIUM_RISK", "TRUST_LEVEL_HIGH_RISK"],
+      "deny_on": ["TRUST_LEVEL_CRITICAL"]
+    },
+    "modules_enabled": [
+      "app_integrity",
+      "runtime_tamper",
+      "debugger",
+      "hooking",
+      "environment",
+      "network",
+      "request_proof",
+      "secret_protection",
+      "privacy_guard",
+      "screen_capture",
+      "overlay",
+      "accessibility",
+      "malicious_ime",
+      "remote_access"
+    ],
+    "is_active": true,
+    "created_at": 1781481600,
+    "updated_at": 1781568000
+  },
+  "policy_hash": "62fdc9b7f2da819931d88affe6ca7c3c22fcbbf0aeb2077a68994a1d4f508c34",
+  "notes": "enforcement_mode STEP_UP means CRITICAL -> DENY, HIGH/MEDIUM -> STEP_UP, everything else ALLOW (see reference/fixtures/scenarios.json and server/shared/risk Decision). The thresholds shown are the kseal defaults; a tenant can tighten them per app. modules_enabled lists the 14 RASP probes the build runs; the five fraud-vector probes (screen_capture, overlay, accessibility, malicious_ime, remote_access) are Android-only."
+}

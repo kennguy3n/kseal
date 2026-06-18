@@ -1,0 +1,14 @@
+{
+  "rpc": "kseal.v1.TrustService/GetNonce",
+  "request": {
+    "tenant_id": "meridian",
+    "app_id": "pay-android"
+  },
+  "response": {
+    "nonce": "qrvM3e7/ABEiM0RVZneImaq7zN3u/wARIjNEVWZ3iJk=",
+    "nonce_hex": "aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899",
+    "expires_at": "2026-06-16T04:02:00Z",
+    "ttl_seconds": 120
+  },
+  "notes": "32-byte server nonce (crypto.NonceSize) returned base64-standard on the wire; hex shown for readability. Single-use and short-lived: it is bound into the platform attestation and consumed by VerifyAttestation."
+}

@@ -1,63 +1,68 @@
-# Phase 6.1 — White-Box Cryptography for the Proof Key: Decision Spike & GO/NO-GO
+# White-Box Cryptography for the Proof Key — Design Reference
 
-**Status:** Decision spike (prototype + analysis). **Not** a production rollout.
-**Plan item:** 6.1 — *white-box cryptography for the proof-key path on devices
-that report `SECURE_HW_MISSING` (no hardware-backed keystore), so a static dump
-of the shipped `.so`/dylib does not reveal the proof key.*
-**Scope of this document:** the three deliverables of the spike — (A) a bounded,
-feature-gated Rust prototype, (B) this design doc, and (C) the recommendation.
+**Module:** `sdk/rust-core/kseal-core/src/whitebox/`, behind the
+**`whitebox-spike`** cargo feature (default **off**; not enabled in fleet builds).
+**What it is:** a table-based white-box keyed-MAC construction for the
+request-proof key, for devices that report `SECURE_HW_MISSING` (no hardware-backed
+keystore), so a static dump of the shipped `.so`/dylib does not reveal the proof
+key. It reproduces the production proof HMAC tag byte-for-byte.
+**What this document covers:** the design summary (§1), the implementation and
+what CI validates (§2), the threat model and its honest limits (§3), where it
+applies (§4), measured perf/size (§5), the build/vendor posture and key custody a
+production rollout requires (§6), the invariants it honors (§7), the criteria for
+enabling it in production (§8), and how to reproduce the results (§9).
 
 ---
 
-## 1. Recommendation: **NO-GO (defer)** — do not productionize a white-box proof key now
+## 1. Design summary
 
-**Do not swap the proof-key path to a white-box construction for the fleet at
-this time.** Keep the capability as a documented, default-off spike. Continue to
-*prefer hardware-backed keys when present*, and on `SECURE_HW_MISSING` devices
-keep relying on the existing layered defenses (Phase 5.2 native string
-obfuscation, Phase 4 RASP/anti-debug/anti-Frida/self-integrity, per-build
-polymorphism) plus the server-side trust thesis. Revisit **only** under the
-specific conditions in §8.
+kseal includes a white-box proof-key capability behind the default-off
+`whitebox-spike` feature. It is **not** enabled in fleet builds; hardware-backed
+keys remain strictly preferred when present, and on `SECURE_HW_MISSING` devices
+the shipped defenses (native string obfuscation, RASP/anti-debug/anti-Frida/
+self-integrity, per-build polymorphism) plus the server-side trust thesis carry
+the load. This document describes the construction, what it does and does not
+defend, and what enabling it for the fleet would require (§6, §8).
 
-**Why, in one paragraph.** kseal's trust decision is **server-side**: the server
-independently verifies platform attestation, the signed request proof, and the
-reproducible `build_hash`. A proof key lifted from a client therefore only lets
-an attacker forge *client-side* artifacts for *that* instance — it does not yield
-a server-accepted trust decision, because the server still requires fresh,
-genuine attestation bound to a known-good build. The spike proves the two things
-worth proving cheaply: (1) **parity is real** — a table-based white-box MAC
-reproduces the production proof HMAC tag *byte-for-byte* on the golden vector, so
-Go↔device parity is preserved and the white-box path is a drop-in; and (2)
-**static key extraction is genuinely defeated** at low cost — the raw key and
-both HMAC key blocks are absent from the compiled artifact (verified by grep over
-the release `rlib`), for ~32 KB of tables and ~+60 ns/tag. But the honest blocker
-is what the spike *cannot* do self-contained: because the proof MAC is
-**HMAC-SHA256**, a white-box that never reconstitutes the key requires
-white-boxing the **SHA-256 compression function itself** (encoded message
-schedule + round function) — a large, DCA/DFA-fragile effort that is realistically
-a **vendor toolchain** purchase with per-key build-plane keygen and key custody.
-Given the server-side-trust thesis, that marginal benefit (raising the bar on a
-*dynamic* attacker who, with the current spike, can still lift the key block at
-its moment of use) does not justify the build-infra and crypto-maintenance cost
+**The construction and its bounds, in one paragraph.** kseal's trust decision is
+**server-side**: the server independently verifies platform attestation, the
+signed request proof, and the reproducible `build_hash`. A proof key lifted from a
+client therefore only lets an attacker forge *client-side* artifacts for *that*
+instance — it does not yield a server-accepted trust decision, because the server
+still requires fresh, genuine attestation bound to a known-good build. The
+white-box construction establishes the two properties worth establishing cheaply:
+(1) **parity is real** — a table-based white-box MAC reproduces the production
+proof HMAC tag *byte-for-byte* on the golden vector, so Go↔device parity is
+preserved and the white-box path is a drop-in; and (2) **static key extraction is
+genuinely defeated** at low cost — the raw key and both HMAC key blocks are absent
+from the compiled artifact (verified by grep over the release `rlib`), for ~32 KB
+of tables and ~+60 ns/tag. The honest bound is what a self-contained table scheme
+*cannot* do: because the proof MAC is **HMAC-SHA256**, a white-box that never
+reconstitutes the key requires white-boxing the **SHA-256 compression function
+itself** (encoded message schedule + round function) — a large, DCA/DFA-fragile
+effort that is realistically a **vendor toolchain** purchase with per-key
+build-plane keygen and key custody. Given the server-side-trust thesis, that
+marginal benefit (raising the bar on a *dynamic* attacker who, with the
+self-contained construction, can still lift the key block at its moment of use)
+does not justify the build-infra and crypto-maintenance cost for a fleet rollout
 today.
 
-| | Verdict |
+| | Property |
 |---|---|
-| **Recommendation** | **NO-GO (defer).** Default-off, documented, not shipped. |
-| **One-line rationale** | Server-side trust makes a lifted client key low-value; a *true* self-contained white-box HMAC needs SHA-256 white-boxing (vendor-grade), and the spike's tractable form still reconstitutes the key block at use. |
-| **What the spike *does* prove** | Byte-for-byte parity with the golden proof HMAC tag, and that the raw key is absent from a static binary dump, for ~32 KB / ~+60 ns/tag. |
-| **Cost driver** | Build-plane per-key table generation + key custody + (for real resistance) white-boxing SHA-256 or a vendor toolchain — **not** binary size or latency. |
-| **Flip to GO if** | A concrete contractual/compliance requirement demands at-rest key concealment on `SECURE_HW_MISSING` devices that the existing stack cannot satisfy (§8). |
+| **Posture** | Default-off, documented capability; not enabled in fleet builds. |
+| **What it proves** | Byte-for-byte parity with the golden proof HMAC tag, and that the raw key is absent from a static binary dump, for ~32 KB / ~+60 ns/tag. |
+| **Honest limit** | The self-contained table form still reconstitutes the key block transiently at use; a *true* self-contained white-box HMAC needs SHA-256 white-boxing (vendor-grade). |
+| **Cost driver for a rollout** | Build-plane per-key table generation + key custody + (for real resistance) white-boxing SHA-256 or a vendor toolchain — **not** binary size or latency. |
 
-This is consistent with kseal's existing posture (`ARCHITECTURE.md` favors
-server-side trust over heavyweight client obfuscation). The spike confirms that
-judgment **with measurements** rather than by assertion.
+This is consistent with kseal's posture (`ARCHITECTURE.md` favors server-side
+trust over heavyweight client obfuscation), now backed by measurements rather than
+assertion.
 
 ---
 
-## 2. What was built (deliverable A) — and what is CI-validated
+## 2. Implementation and what CI validates
 
-A bounded, **feature-gated** (`whitebox-spike`, default **off**) Rust prototype
+A bounded, **feature-gated** (`whitebox-spike`, default **off**) Rust module
 lives entirely in the trust core at
 `sdk/rust-core/kseal-core/src/whitebox/`. It is additive and isolated:
 
@@ -102,14 +107,14 @@ The module has three parts:
 
 **No `unsafe`. No new resolved crates** (reuses `sha2` already in the workspace;
 the optional `zeroize` scrub dependency was already present in `Cargo.lock`
-transitively via the `ed25519-dalek` stack, so the spike adds **no new
+transitively via the `ed25519-dalek` stack, so the construction adds **no new
 supply-chain surface** — the only `Cargo.lock` edit is adding the already-present
 `zeroize` to `kseal-core`'s dependency list, pulled in only when the feature is
 enabled). CI exercises the feature: the Makefile `test-rust`
-and `lint` targets now also run `cargo test --features whitebox-spike` and
+and `lint` targets also run `cargo test --features whitebox-spike` and
 `cargo clippy --all-targets --features whitebox-spike -- -D warnings`.
 
-### 2.1 Parity — the key deliverable (PASS)
+### 2.1 Parity — the central property (PASS)
 
 The parity test `whitebox_proof_tag_equals_standard_and_golden` asserts, on the
 project's golden vector (`token_id="tok"`, `request_hash=01 02 03 04`,
@@ -159,22 +164,23 @@ and in the shipped native artifact, recoverable by `strings`/a static dump.
 
 **What it does *not* fully defend (honest limits):**
 
-- **Dynamic / memory-resident extraction.** This tractable, self-contained spike
-  does **not** achieve a fully-encoded data flow: the key block is *transiently
-  reconstructed on the stack at use* (then scrubbed). A determined dynamic
-  attacker with a debugger/Frida on a rooted device can breakpoint the decode and
-  read it. Real resistance requires the decode to be **fused into** the SHA-256
-  compression so the key never reconstitutes — which the spike does not do.
+- **Dynamic / memory-resident extraction.** This tractable, self-contained
+  construction does **not** achieve a fully-encoded data flow: the key block is
+  *transiently reconstructed on the stack at use* (then scrubbed). A determined
+  dynamic attacker with a debugger/Frida on a rooted device can breakpoint the
+  decode and read it. Real resistance requires the decode to be **fused into**
+  the SHA-256 compression so the key never reconstitutes — which this
+  construction does not do.
 - **Grey-box / table-lifting attacks.** Even a "true" white-box is not
   unbreakable. Published attacks — **DCA** (Differential Computation Analysis,
   side-channel-style on captured execution traces) and **DFA** (Differential
   Fault Analysis) — routinely break unprotected academic white-box AES, and the
   encoded tables can simply be *lifted wholesale* and replayed as an oracle.
   White-box **raises attacker cost; it is not a guarantee.**
-- **Affine/structural weakness of the spike encoding.** The per-byte bijections
+- **Affine/structural weakness of the table encoding.** The per-byte bijections
   are independent encodings without external (inter-table) mixing, so they are
-  weaker than production white-box internal/external encodings. This is a spike
-  illustrating storage concealment, not a hardened scheme.
+  weaker than production white-box internal/external encodings. This is a
+  construction illustrating storage concealment, not a hardened scheme.
 
 **Why this is acceptable for kseal regardless — the server-side-trust tie-in.**
 A lifted proof key only forges **client-side** artifacts for one instance. The
@@ -195,14 +201,14 @@ incremental at-rest hardening for one risk signal — not a load-bearing control
   **Hardware-backed keys remain strictly preferred when present** — they defend
   the dynamic/memory case that white-box does not, at lower cost.
 - Treated as **defense-in-depth for one risk signal**, layered under the existing
-  Phase 4/5 hardening and the server-side trust decision — never as a replacement
-  for attestation.
+  RASP / native-obfuscation hardening and the server-side trust decision — never
+  as a replacement for attestation.
 
 ---
 
 ## 5. Perf & size budget (measured)
 
-Measured on the spike harness (`measure::run`), release build, this VM. Latency
+Measured on the harness (`measure::run`), release build, this VM. Latency
 is wall-clock per tag, standard `HMAC-SHA256` vs white-box, averaged over 200k
 iterations after warmup; timing is informational (never asserted, so CI cannot
 flake).
@@ -219,17 +225,17 @@ key-block bytes + 128 × 256-byte inverse permutation tables, in `.rodata`.
 **Reading the numbers.** The overhead is a near-constant **~+50–75 ns/tag** (128
 table lookups + scrub), so the *relative* tax shrinks as the message grows. The
 proof path computes a single tag per request, far off the hot path; **+~60 ns and
-~32 KB are negligible against the proof budget** and are *not* the reason for the
-NO-GO. (A nibble-encoded variant would cut tables to ~4 KB; size is not the
-constraint either way.) The constraint is engineering/operational, per §1 and §6.
+~32 KB are negligible against the proof budget.** (A nibble-encoded variant would
+cut tables to ~4 KB; size is not the constraint either way.) The constraint on a
+fleet rollout is engineering/operational, per §1 and §6.
 
 ---
 
-## 6. Build / vendor posture — what productionizing actually requires
+## 6. Build / vendor posture — what productionizing requires
 
-The spike bakes a **single, in-source** key into tables at compile time to prove
-parity. A real deployment cannot ship one key to the whole fleet, and must not
-keep the key in source. Productionizing requires:
+The in-source construction bakes a **single, in-repo** key into tables at compile
+time to establish parity. A real deployment cannot ship one key to the whole
+fleet, and must not keep the key in source. Productionizing requires:
 
 1. **Build-plane per-key table generation.** A keygen step in the build/release
    plane that, per tenant/instance key, emits the encoded tables — the key must
@@ -250,8 +256,8 @@ keep the key in source. Productionizing requires:
    a **commercial white-box vendor** purchase, with the attendant licensing,
    integration, and crash-debuggability costs.
 
-The spike deliberately stops at storage concealment with proven parity precisely
-to scope what (3)/(4) would cost before committing.
+The construction deliberately stops at storage concealment with proven parity
+precisely to scope what (3)/(4) would cost before committing to them.
 
 ---
 
@@ -267,15 +273,16 @@ to scope what (3)/(4) would cost before committing.
 - **No `unsafe`; no heavy new dependencies; no new resolved crates** (the
   optional `zeroize` scrub dep was already in `Cargo.lock` transitively via the
   `ed25519-dalek` stack; the only lock edit is listing it under `kseal-core`).
-- Owns its own scaffolding (new `whitebox-spike` feature, new `mod whitebox`, new
+- Owns its own scaffolding (the `whitebox-spike` feature, the `mod whitebox`, its
   Makefile lines); does **not** touch the `vm-spike` feature, the `vmspike`
   module, or `docs/virtualization-tier-decision.md`.
 
 ---
 
-## 8. Conditions that would flip this to GO
+## 8. Criteria for enabling white-box in production
 
-Revisit and consider productionizing **only** if all of the following hold:
+Revisit and consider enabling the white-box proof-key path for the fleet **only**
+if all of the following hold:
 
 1. A concrete **contractual/compliance requirement** mandates at-rest concealment
    of a client key on `SECURE_HW_MISSING` devices that the existing
@@ -289,7 +296,7 @@ Revisit and consider productionizing **only** if all of the following hold:
    key at rest.
 
 Absent these, the layered hardening already in the product is the better
-cost/benefit, and this spike remains a default-off, documented capability.
+cost/benefit, and white-box remains a default-off, documented capability.
 
 ---
 

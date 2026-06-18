@@ -54,10 +54,10 @@ func (r *Report) Markdown() string {
 			b.WriteString(fmt.Sprintf("_%s_\n\n", c.Objective))
 		}
 		b.WriteString(fmt.Sprintf("Build-time evidenced: %d / %d.\n\n", c.EvidenceHit, len(c.Controls)))
-		b.WriteString("| MASVS objective | kseal control | Phase | Status | Evidence |\n|---|---|---|---|---|\n")
+		b.WriteString("| MASVS objective | kseal control | Status | Evidence |\n|---|---|---|---|\n")
 		for _, ctl := range c.Controls {
-			b.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s |\n",
-				escape(ctl.Objective), escape(ctl.Control), escape(ctl.Phase),
+			b.WriteString(fmt.Sprintf("| %s | %s | %s | %s |\n",
+				escape(ctl.Objective), escape(ctl.Control),
 				statusLabel(ctl.Evidence.Status), escape(ctl.Evidence.Detail)))
 		}
 		b.WriteString("\n")

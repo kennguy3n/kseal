@@ -1,91 +1,85 @@
-# Code-Virtualization Tier: Decision (5.3) → Production Increment (5.4) — **GO**
+# Selective Code-Virtualization Tier — Design Reference
 
-**Status:** GO. The 5.3 decision spike's NO-GO was **overridden by the product
-owner**; this tier is now being productionized **selectively and opt-in, gated
-behind the highest obfuscation strength (`HIGH`)**. This document records the GO
-decision, the first CI-validated production increment (5.4), and the
-productionization roadmap for the remaining XL work.
-**Plan item:** 5.3 — *"(XL, optional) Virtualization tier… Recommend gating
-behind an explicit opt-in strength level with documented tradeoffs. Decision
-gate: go/no-go after 5.1–5.2 telemetry."*
-**Scope of this document:** the GO recommendation (§1), what the 5.3 spike and
-the 5.4 increment built and CI-validate (§2), threat model (§3), what to
-virtualize (§4), the polymorphic VM + the new IR→bytecode compiler (§5), the
-encrypted+authenticated retrace map (§6), measured perf/size for both the spike
-and this increment (§7), and the **productionization roadmap** (§8) plus the
-per-build go/no-go gates (§9).
+**Module:** `sdk/rust-core/kseal-core/src/vmspike/`, behind the **`vm-spike`**
+cargo feature (default **off**).
+**What it is:** a selective code-virtualization tier — off by default and engaged
+only at `ObfuscationStrength.HIGH` — that compiles a handful of cold,
+security-relevant, non-crypto routines to a per-build-polymorphic bytecode run by
+a small bundled interpreter, with full crash-triage preserved through a private,
+encrypted-and-authenticated retrace map.
+**What this document covers:** the design summary (§1), the implementation and
+what CI validates (§2), the threat model (§3), what is in scope to virtualize
+(§4), the polymorphic VM and the IR→bytecode compiler (§5), the
+encrypted+authenticated retrace map and its key custody (§6), measured perf/size
+(§7), the operational requirements for a production rollout to real critical
+paths (§8), and the ship discipline plus per-build acceptance gates (§9).
 
 ---
 
-## 1. Recommendation: **GO (productionize, selectively, opt-in behind `HIGH`)**
+## 1. Design summary
 
-**Ship a selective code-virtualization tier, off by default and engaged only at
-`ObfuscationStrength.HIGH`.** Virtualize a *handful* of cold, security-relevant,
-non-crypto routines via a maintained source→bytecode compiler with per-build
-polymorphism; keep full crash-triage through a private, encrypted+authenticated
-retrace map; and **never** virtualize any routine that feeds a golden vector or
-sits on a hot path. This tier is a **top layer that raises the bar against
-static RE, automated/transferable devirtualization, and patch-and-resign of a
-single routine** — it is explicitly *not* a replacement for kseal's
+kseal ships a **selective** code-virtualization tier: it is off by default and
+engages strictly at `ObfuscationStrength.HIGH`. It virtualizes a *handful* of
+cold, security-relevant, **non-crypto** routines via a maintained source→bytecode
+compiler with per-build polymorphism, keeps full crash-triage through a private,
+encrypted+authenticated retrace map, and **never** virtualizes any routine that
+feeds a golden vector or sits on a hot path.
+
+This tier is a **top layer that raises the bar against static reverse
+engineering, automated/transferable devirtualization, and patch-and-resign of a
+single routine.** It is explicitly *not* a replacement for kseal's
 server-authoritative trust decision, and it protects no secret.
 
-**Why GO now, in one paragraph.** The 5.3 spike's blocking concern was never raw
-size or speed — it was the engineering cost of *owning a small compiler* and the
-operational cost of *private crash-symbolication*. This 5.4 increment retires the
-first risk and de-risks the second **with shipping, CI-validated code**: the
-hand-lowered one-function spike is replaced by a real, maintained **IR→bytecode
-lowering** (a Sethi–Ullman register allocator over a 12-operation integer/bitwise
-IR) proven byte-identical to native evaluation across **>24,000 randomized
-expression/input pairs**, and the retrace map is upgraded from an XOR+checksum
-toy to a **ChaCha20-Poly1305 AEAD–encrypted, `build_hash`-bound** artifact (the
-vetted `chacha20poly1305` RustCrypto primitive) with round-trip, wrong-key,
-tamper, and build-binding tests. The tier is
-wired end-to-end behind `HIGH` against one representative cold routine, and the
-measured costs remain small (single-digit-KB fixed footprint; a cold-only perf
-tax whose *absolute* cost is sub-microsecond). Given a concrete product mandate to
-match DexGuard/iXGuard's top tier, the cost/benefit now clears the bar — provided
-the rollout stays selective, opt-in, golden-safe, and bounded by the roadmap in
-§8.
+The design is deliberately **narrow and region-based**, not whole-program. The
+costs that matter for virtualization are never raw size or speed — they are the
+engineering cost of *owning a small compiler* and the operational cost of
+*private crash-symbolication*. The tier addresses both in shipping, CI-validated
+code: a maintained **IR→bytecode lowering** (a Sethi–Ullman register allocator
+over a 12-operation integer/bitwise IR) proven byte-identical to native
+evaluation across **>24,000 randomized expression/input pairs**, and a retrace
+map built on a **ChaCha20-Poly1305 AEAD, `build_hash`-bound** artifact (the vetted
+`chacha20poly1305` RustCrypto primitive) with round-trip, wrong-key, tamper, and
+build-binding tests. The tier is wired end-to-end behind `HIGH` against one
+representative cold routine, and the measured costs are small: a single-digit-KB
+fixed footprint and a cold-only perf tax whose *absolute* cost is sub-microsecond.
 
-| | Verdict |
+| | Property |
 |---|---|
-| **Recommendation** | **GO.** Productionize selectively, **default-off**, engaged only at `ObfuscationStrength.HIGH`. |
-| **One-line rationale** | The compiler-ownership and crash-symbolication risks that drove the spike's NO-GO are now retired/de-risked in code; remaining work is bounded and roadmapped (§8). |
+| **Posture** | Selective, **default-off**, engaged only at `ObfuscationStrength.HIGH`. |
 | **Scope guardrails** | Cold + non-crypto + golden-safe only (§4). Never hot paths, never golden-vector crypto, never whole-program. |
-| **Honesty clause** | A top hardening layer over server-side trust + the 5.1/5.2/Phase-4 stack — raises client-tamper cost, never the authority of the decision. |
+| **Role** | A top hardening layer over server-side trust + the native string-obfuscation / CFG-flattening / RASP stack — raises client-tamper cost, never the authority of the decision. |
 
-This refines (does not contradict) kseal's stated posture: `ARCHITECTURE.md`
-lists "heavy virtualization / whole-program VM obfuscation" under *what to avoid*.
-The GO here is the **narrow, selective, region-based** variant the commercial
-consensus actually recommends — not whole-program virtualization — kept opt-in so
-the default fleet build is byte-for-byte unchanged.
+This is the **narrow, selective, region-based** variant the commercial consensus
+recommends — not whole-program virtualization, which `ARCHITECTURE.md` lists under
+*what to avoid*. The tier is kept opt-in so the default fleet build is
+byte-for-byte unchanged.
 
 ---
 
-## 2. What was built — spike (5.3) + this increment (5.4)
+## 2. Implementation and what CI validates
 
 Everything lives in the trust core under `sdk/rust-core/kseal-core/src/vmspike/`,
-behind the existing **`vm-spike`** cargo feature (default **off**). It is
-additive and isolated: it does **not** touch the trust/crypto/kill-switch/proof
-paths, adds **nothing** to the FFI C ABI, and with the feature off the standard
-build is **byte-for-byte unchanged** (verified: the default release
-`libkseal_core` rlib hash is identical to current `main`). The only edit to an
-existing non-vmspike file remains the single `#[cfg(feature = "vm-spike")] pub
-mod vmspike;` line in `lib.rs` already present from 5.3.
+behind the **`vm-spike`** cargo feature (default **off**). It is additive and
+isolated: it does **not** touch the trust/crypto/kill-switch/proof paths, adds
+**nothing** to the FFI C ABI, and with the feature off the standard build is
+**byte-for-byte unchanged** (verified: the default release `libkseal_core` rlib
+hash is identical to current `main`). The only edit to an existing non-vmspike
+file is the single `#[cfg(feature = "vm-spike")] pub mod vmspike;` line in
+`lib.rs`.
 
-| Module | 5.3 spike | 5.4 increment (this PR) |
-|---|---|---|
-| `vmspike/isa.rs` | 10-opcode register ISA; hand-lowered `native_tag_mix`. | Extended to **18 opcodes / 16 registers** (adds `Sub/Mul/And/Or/Shl/Shr/Rotr/LoadInput`); `Builder` generalized so any lowering can emit + record retrace sites. Still safe Rust, no `unsafe`. |
-| `vmspike/ir.rs` *(new)* | — | The **maintained compiler**: an `Expr` IR (const/input + add/sub/mul/xor/and/or/shl/shr/rotl/rotr), a native `eval` reference, **Sethi–Ullman `register_need`** analysis, and an automatic `lower()` from IR → bytecode. Rejects over-wide expressions and out-of-range inputs *before* codegen. |
-| `vmspike/strength.rs` *(new)* | — | Rust mirror of the Gradle `ObfuscationStrength` (OFF/LOW/MEDIUM/HIGH, default OFF); `cohort_bucket()` runs the **native** routine at OFF/LOW/MEDIUM and the **virtualized** program at **HIGH** — behaviour-identical either way. |
-| `vmspike/encode.rs` | Per-build-polymorphic encoder (opcode perm + register perm + XOR keystream from a 32-byte `BuildSeed` via the crate's existing `sha2`). | Extended to encode the new opcodes; legacy path unchanged. |
-| `vmspike/interp.rs` | Byte-input dispatch loop; faults return a `VmFrame` (pc) instead of panicking. | Adds a word-oriented `run_ir` entry point for IR programs + dispatch for the new opcodes. Shared core; legacy byte path unchanged. |
-| `vmspike/retrace.rs` | XOR-keystream + FNV-checksum "encrypted" map + `Symbolicator`. | Upgraded to a **ChaCha20-Poly1305 AEAD** (the vetted `chacha20poly1305` crate) with the cleartext header bound as associated data, `build_hash`+`routine` folded into the key, and a **plaintext-derived synthetic-IV nonce** carried in the header (nonce-misuse-resistant; closes CWE-323). Constant-time verify; the crate is an **optional dependency gated behind `vm-spike`**, so the default build links none of it. |
-| `vmspike/mod.rs` | Orchestration, artifact bundle, measurement harness, tests. | Adds the IR-cohort measurement (`measure::run_cohort`) and updates call sites for the authenticated retrace API. |
+| Module | Role |
+|---|---|
+| `vmspike/isa.rs` | An 18-opcode / 16-register safe-Rust ISA (`Add/Sub/Mul/And/Or/Xor/Shl/Shr/Rotr/LoadInput/…`). The `Builder` lets any lowering emit instructions and record retrace sites. No `unsafe`. |
+| `vmspike/ir.rs` | The maintained compiler: an `Expr` IR (const/input + add/sub/mul/xor/and/or/shl/shr/rotl/rotr), a native `eval` reference, **Sethi–Ullman `register_need`** analysis, and an automatic `lower()` from IR → bytecode. Rejects over-wide expressions and out-of-range inputs *before* codegen. |
+| `vmspike/strength.rs` | Rust mirror of the Gradle `ObfuscationStrength` (OFF/LOW/MEDIUM/HIGH, default OFF); `cohort_bucket()` runs the **native** routine at OFF/LOW/MEDIUM and the **virtualized** program at **HIGH** — behaviour-identical either way. |
+| `vmspike/encode.rs` | Per-build-polymorphic encoder: an opcode permutation, a register permutation, and an XOR keystream derived from a 32-byte `BuildSeed` via the crate's existing `sha2`. |
+| `vmspike/interp.rs` | Byte-input dispatch loop plus a word-oriented `run_ir` entry point for IR programs; faults return a `VmFrame` (pc) instead of panicking. |
+| `vmspike/retrace.rs` | The **ChaCha20-Poly1305 AEAD** retrace map + `Symbolicator` (§6): cleartext header bound as associated data, `build_hash`+`routine` folded into the key, a plaintext-derived synthetic-IV nonce in the header (nonce-misuse-resistant; closes CWE-323), constant-time verify. The `chacha20poly1305` crate is an **optional dependency gated behind `vm-spike`**, so the default build links none of it. |
+| `vmspike/mod.rs` | Orchestration, artifact bundle, measurement harness (`measure::run_cohort`), tests. |
 
-**CI-validated (no new heavy deps; `Cargo.lock` not churned).** The
+**CI-validated (no heavy deps; `Cargo.lock` not churned).** The
 `release-gate.yml` `build-test` job runs `make build` / `make lint` / `make test`,
-which compile and test the spike under `--features vm-spike`, clippy-clean
+which compile and test the tier under `--features vm-spike`, clippy-clean
 (`-D warnings`), on every run. The shipped release **artifacts** remain unchanged
 — the tier is never linked into a default build.
 
@@ -95,9 +89,9 @@ which compile and test the spike under `--features vm-spike`, clippy-clean
   `ir::…::lowered_vm_is_byte_identical_to_native_eval_over_thousands_of_cases`
   generates 3,000 random IR expressions (depth ≤ 7, 1–4 inputs) and runs each
   over 8 random input vectors — **>24,000** `(expr, input)` pairs — asserting the
-  decoded, per-build-encoded VM result equals the native `eval`. The original
-  `virtualized_is_byte_identical_to_native_over_random_inputs` (4,000 cases for
-  the hand-lowered routine) is retained.
+  decoded, per-build-encoded VM result equals the native `eval`. A second test
+  (`virtualized_is_byte_identical_to_native_over_random_inputs`, 4,000 cases)
+  covers the byte-input routine.
 - **IR per-build polymorphism + reproducibility** —
   `lowering_is_deterministic_but_encoding_is_per_build_polymorphic`: identical IR
   lowers to an identical program (reproducible `build_hash` input), two seeds
@@ -121,10 +115,10 @@ which compile and test the spike under `--features vm-spike`, clippy-clean
   `same_tuple_distinct_entries_never_reuse_nonce` (different plaintext ⇒ a
   different synthetic-IV nonce, so a `(key, nonce)` pair is never reused — CWE-323).
 
-**Still design-only (scoped in §8):** a lowering for *arbitrary* Rust beyond the
-integer/bitwise IR; the **KMS/HSM-managed** key for the retrace map (the
-increment uses a `BuildSeed`-derived in-process key); and the build-plugin +
-crash-pipeline integrations.
+**Out of scope of the current implementation (covered in §8):** a lowering for
+*arbitrary* Rust beyond the integer/bitwise IR; the **KMS/HSM-managed** key for
+the retrace map (the in-process path uses a `BuildSeed`-derived key); and the
+build-plugin + crash-pipeline integrations.
 
 ---
 
@@ -147,8 +141,9 @@ crash-pipeline integrations.
 ### 3.2 What it does **not** do (and is not for)
 
 - **It is not confidentiality for secrets.** A shipped secret is still
-  extractable at runtime; protecting key material is white-box crypto (Phase 6),
-  not virtualization. kseal's model is explicitly *"no secret to steal."*
+  extractable at runtime; protecting key material is white-box crypto
+  (`docs/whitebox-crypto-decision.md`), not virtualization. kseal's model is
+  explicitly *"no secret to steal."*
 - **It does not change the trust decision.** The server verifies attestation +
   signed proof + `build_hash` independently; defeating a *client-side*
   virtualized gate yields no server-accepted trust token. The marginal value is
@@ -159,7 +154,7 @@ crash-pipeline integrations.
 
 ---
 
-## 4. What to virtualize in kseal
+## 4. What is in scope to virtualize
 
 **Cold + critical + non-crypto only.** Production candidates (all low-frequency,
 security-relevant glue — *not* the cryptographic primitives themselves):
@@ -170,13 +165,13 @@ security-relevant glue — *not* the cryptographic primitives themselves):
   primitive),
 - **attestation-token assembly** (nonce/claims marshalling).
 
-**This increment virtualizes a deliberately safe stand-in for those:**
+**The wired-in routine is a deliberately safe stand-in for those:**
 `ir::demo_cohort_native` — an opaque device-cohort bucketing function over
 `(device_hi, device_lo, salt)` using only mixing arithmetic. It is **cold,
 non-crypto, and feeds no golden vector**, so virtualizing it cannot perturb any
 pinned output. It exists to prove the lowering is wired through `strength`
 selection, not to protect anything. Extending to the real candidates above is
-roadmapped in §8.3 **with the parity-test strategy that keeps golden vectors
+covered in §8.3 **with the parity-test strategy that keeps golden vectors
 byte-identical**.
 
 **Explicitly excluded (hard constraint, CI-enforced):**
@@ -202,11 +197,11 @@ Virtualization is always the **top layer**, never a replacement:
 
 ```
         ┌──────────────────────────────────────────────┐
- 5.3/5.4 │ selective code virtualization (cold gates)    │   ← this tier, opt-in @ HIGH
+        │ selective code virtualization (cold gates)    │   ← this tier, opt-in @ HIGH
         ├──────────────────────────────────────────────┤
- 5.2 →  │  native string obfuscation (obfstr! XOR)       │
- 5.1 →  │  bytecode CFG flattening + MBA (Gradle ASM)    │
- P4  →  │  RASP: anti-debug / anti-Frida / self-integrity│
+        │  native string obfuscation (obfstr! XOR)       │
+        │  bytecode CFG flattening + MBA (Gradle ASM)    │
+        │  RASP: anti-debug / anti-Frida / self-integrity│
         ├──────────────────────────────────────────────┤
         │  per-build HKDF polymorphism seed (all layers) │
         ├──────────────────────────────────────────────┤
@@ -214,10 +209,9 @@ Virtualization is always the **top layer**, never a replacement:
         └──────────────────────────────────────────────┘
 ```
 
-### 5.1 The maintained compiler (`ir.rs`) — the core of this increment
+### 5.1 The maintained compiler (`ir.rs`)
 
-The spike hand-lowered exactly one function. That is replaced by an automatic,
-testable lowering:
+The lowering is automatic and testable rather than a hand table:
 
 1. **IR.** `Expr` is a tree of pure 64-bit integer/bitwise ops: `Const`, `Input`,
    `Add/Sub/Mul`, `Xor/And/Or`, `Shl/Shr` and `Rotl/Rotr` (shift/rotate amounts
@@ -231,38 +225,37 @@ testable lowering:
    model, `register_need(expr) ≤ NUM_REGS` is a sufficient-and-necessary fit
    condition — so oversized expressions are **rejected before** any bytecode is
    emitted (`LowerError::TooManyRegisters`), as are out-of-range input slots.
-3. **Lowering.** `lower()` walks the tree, emits the new ISA ops into the
+3. **Lowering.** `lower()` walks the tree, emits the ISA ops into the
    generalized `Builder`, records a retrace site per node, and appends the
    `Ret`. The result is deterministic: **same IR ⇒ identical decoded program**,
    so `build_hash` stays reproducible.
 
 This is a small, owned compiler with a real allocator and real rejection paths —
-not a hand table — which is precisely the artifact the spike said productionizing
-would require.
+not a hand table.
 
-### 5.2 Polymorphic-per-build VM (unchanged seam, now driven by the compiler)
+### 5.2 Polymorphic-per-build VM
 
 From an explicit 32-byte build seed (in production: the existing per-build HKDF
 seed / `build_hash`), `encode.rs` derives an **opcode permutation**, a **register
 permutation**, and a **keystream** XORed over the encoded program. Same program +
 same seed ⇒ identical bytes (reproducible `build_hash`); different seed ⇒
-different bytecode and a decoder for one build gets nothing from another's. The
-5.4 IR path rides this same seam — the polymorphism tests now run against
-compiler output, not a hand table.
+different bytecode, and a decoder for one build gets nothing from another's. The
+IR path rides this same seam, so the polymorphism tests run against compiler
+output, not a hand table.
 
 ---
 
-## 6. Crash-symbolication: the crux, now a real encrypted+authenticated artifact
+## 6. Crash-symbolication: an encrypted+authenticated retrace map
 
 **The cost.** Every virtualized method crashes *inside the VM dispatch loop*.
 `mapping.txt`/dSYM map the interpreter, not "VM program → source," so a crash in a
 virtualized routine is opaque to ordinary symbolication. Losing triage on a
 security-critical gate is a serious operational regression — historically the
-single biggest reason build-time hardening stopped short of virtualization.
+single biggest reason build-time hardening stops short of virtualization.
 
-**The mitigation (now productionized in `retrace.rs`).** At build time we emit a
-private map `VM pc → {function, step, source line}` and ship it **out of band**.
-The 5.4 format uses a standard, vetted AEAD:
+**The mitigation (implemented in `retrace.rs`).** At build time the tier emits a
+private map `VM pc → {function, step, source line}` and ships it **out of band**.
+The format uses a standard, vetted AEAD:
 
 - **Encryption + authentication.** The entry table is sealed with
   **ChaCha20-Poly1305** (the `chacha20poly1305` crate) under a
@@ -300,10 +293,11 @@ The 5.4 format uses a standard, vetted AEAD:
 resolves a captured `VmFrame`; without the key the artifact is indistinguishable
 from random and unforgeable. This mirrors Guardsquare's "retrace" workflow.
 
-**What remains design-only:** swapping the in-process `BuildSeed`-derived key for
-a **KMS/HSM-managed** key and wiring the upload + server-side retrace step (§8.2).
-The cryptographic primitive (a vetted AEAD, AAD-bound, constant-time verify) is
-already production-correct; only key custody and transport are outstanding.
+**Key custody — what production requires.** The in-process `BuildSeed`-derived
+key must be swapped for a **KMS/HSM-managed** key, with the upload + server-side
+retrace step wired (§8.2). The cryptographic primitive (a vetted AEAD, AAD-bound,
+constant-time verify) is already production-correct; only key custody and
+transport remain.
 
 ---
 
@@ -315,7 +309,7 @@ already production-correct; only key custody and transport are outstanding.
 > machine-dependent and vary run-to-run; the **ratios and byte counts** are the
 > portable signal. Timing is printed, never asserted, so CI stays stable.
 
-### 7.1 Throughput — 5.3 hand-lowered routine (`native_tag_mix`)
+### 7.1 Throughput — the byte-input routine (`native_tag_mix`)
 
 | Input bytes | native ns/op | virtualized ns/op | perf tax |
 |---:|---:|---:|---:|
@@ -329,7 +323,7 @@ Per-VM-instruction dispatch overhead is roughly constant, so the *ratio* shrinks
 as the native routine does more work per call. For a small **cold gate** the tax
 is ~10–22× but the **absolute** cost is sub-microsecond.
 
-### 7.2 Throughput + size — 5.4 IR-compiled routine (`demo_cohort`)
+### 7.2 Throughput + size — the IR-compiled routine (`demo_cohort`)
 
 The maintained-compiler path, measured end-to-end (lower → encode → decode → run)
 by `measure::run_cohort`:
@@ -343,7 +337,7 @@ by `measure::run_cohort`:
 | Encoded **bytecode** | **162 B** | per-function shipped cost. |
 | Encrypted retrace map | **1,287 B** | private, out-of-band — **not** in the shipped binary. |
 
-The IR routine's tax is higher than the hand-lowered one (more VM instructions
+The IR routine's tax is higher than the byte-input one (more VM instructions
 per call, no amortizing payload loop), but it is still a **cold** routine whose
 absolute per-call cost is ~65 ns — i.e. budget-irrelevant for code that runs once
 per attestation. This is exactly why the tier is "cold code only."
@@ -361,15 +355,15 @@ per attestation. This is exactly why the tier is "cold code only."
 ~8 KB (interpreter + decoder + key schedule), amortized across *all* virtualized
 functions, plus ~77–162 B of bytecode per function. Virtualizing a handful of
 cold gates costs single-digit KB total — trivial against the SDK footprint
-budget. **Size is not the blocker; the roadmap items in §8 are the remaining
-work.**
+budget. **Size is not the constraint; the operational work in §8 is.**
 
 ---
 
-## 8. Productionization roadmap (remaining XL work)
+## 8. What production rollout to real critical paths requires
 
-This increment lands the compiler core and the authenticated retrace artifact.
-The following are required before any *real* critical routine ships virtualized.
+The compiler core and the authenticated retrace artifact are implemented and
+CI-validated. The following are required before any *real* critical routine ships
+virtualized.
 
 ### 8.1 Own and maintain the source→bytecode lowering compiler
 
@@ -419,7 +413,7 @@ vectors byte-identical**:
    output equals the native one over randomized inputs **and** that the relevant
    golden vectors (proof HMAC tag, signed-config signature, kill-switch preimage)
    are **byte-identical in both the default and feature-on builds** — the same
-   invariant this increment already enforces for the crypto suite.
+   invariant the crypto suite already enforces.
 3. CI gate: fail the build if any golden vector differs between default and
    `vm-spike` builds, or if the default rlib hash changes.
 
@@ -432,23 +426,23 @@ vectors byte-identical**:
   integration point).
 - **Perf budget.** Enforce cold/critical-only selection; add a build-time check
   that rejects virtualizing any function tagged hot or on the request path.
-- **Rollout + telemetry + go/no-go-per-build gates.** Stage behind `HIGH` opt-in;
+- **Rollout + telemetry + per-build gates.** Stage behind `HIGH` opt-in;
   collect crash-retrace success rate and per-build VM-fault telemetry; gate each
   build on (a) golden vectors unchanged, (b) default build unchanged, (c) retrace
   map decrypts and round-trips for a sampled fault, (d) perf within budget. Any
-  gate red ⇒ no-go for that build (fall back to native).
+  gate red ⇒ that build falls back to native.
 
 ---
 
-## 9. GO rationale and per-build go/no-go gates
+## 9. Ship discipline and per-build acceptance gates
 
-**Decision: GO**, under a product mandate to match top-tier vendors, because the
-two costs that drove the spike's NO-GO are now addressed in code: the
-**maintained compiler** exists with a real allocator, rejection paths, and a
->24,000-case correctness backbone; and the **crash-symbolication** artifact is a
-real encrypted+authenticated, build-bound map with round-trip/wrong-key/tamper
-tests. The runtime costs remain small and cold-only, and the default fleet build
-is provably unchanged. The remaining work (§8) is bounded, roadmapped, and gated.
+The two costs that make virtualization risky — owning a compiler and preserving
+crash-symbolication — are addressed in code: the **maintained compiler** has a
+real allocator, rejection paths, and a >24,000-case correctness backbone; and the
+**crash-symbolication** artifact is a real encrypted+authenticated, build-bound
+map with round-trip/wrong-key/tamper tests. The runtime costs are small and
+cold-only, and the default fleet build is provably unchanged. The remaining work
+(§8) is bounded and gated.
 
 **Ship discipline (non-negotiable):**
 
@@ -460,14 +454,14 @@ is provably unchanged. The remaining work (§8) is bounded, roadmapped, and gate
    whole-program; never hot paths; no `unsafe`.
 4. **Symbolication first.** No virtualized routine ships before the KMS-backed
    retrace pipeline (§8.2) is live for its build.
-5. **Per-build gates.** Each build must pass §8.4's go/no-go gates or fall back to
-   native.
+5. **Per-build gates.** Each build must pass §8.4's acceptance gates or fall back
+   to native.
 
 Framed honestly: this tier raises the cost of static RE / automated
 devirtualization / patch-and-resign of a single routine. It is a **top layer over
-kseal's server-authoritative trust** and the already-shipped 5.1/5.2/Phase-4
-stack — it strengthens client-tamper resistance, and it never becomes the thing
-the trust decision depends on.
+kseal's server-authoritative trust** and the already-shipped native
+string-obfuscation / CFG-flattening / RASP stack — it strengthens client-tamper
+resistance, and it never becomes the thing the trust decision depends on.
 
 ---
 
@@ -483,11 +477,11 @@ cargo test  --features vm-spike
 # Confirm the default (feature-off) build is byte-for-byte unchanged:
 cargo build --release            # hash target/release/libkseal_core.rlib
 
-# Print the perf/size sweep used in §7 (hand-lowered sweep + IR cohort line):
+# Print the perf/size sweep used in §7 (byte-input sweep + IR cohort line):
 cargo test --release --features vm-spike perf_and_size_report -- --nocapture
 ```
 
 Machine-code/fixed-footprint sizes in §7.3 were read with
 `nm --print-size --demangle` on the release `libkseal_core` rlib (interpreter /
-decoder symbols); the §7.1 sweep is the 5.3 spike's recorded numbers and the
-§7.2 cohort figures are from this increment's `measure::run_cohort`.
+decoder symbols); the §7.1 sweep is the byte-input routine's recorded numbers and
+the §7.2 cohort figures are from `measure::run_cohort`.

@@ -66,7 +66,7 @@ every issuance. It *sounds* like the conservative choice.
 dollars/month** and adds latency to the hot path — it would quietly kill the SME unit economics
 ([Chapter 8](08-cost-scale-and-noops-economics.md)). Keys are still HSM-released and rotated;
 custody is preserved; KMS op volume scales with the **tenant** count (~5k), not MAU. Proofs
-verify against cached public keys, so verification is ~444 ns and free of network round-trips.
+verify against cached public keys, so verification is ~357 ns and free of network round-trips.
 
 **Honest cost of the call.** Slightly more key-management machinery (rotation, caching,
 revocation) to build and reason about. We take that one-time complexity to avoid a recurring

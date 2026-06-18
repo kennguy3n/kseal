@@ -1,0 +1,27 @@
+{
+  "description": "The signed ConfigResponse the device fetches from the control plane (kseal.v1.ConfigService/GetConfig). It carries the policy (as a signed, cacheable SignedConfig) and, when one is active for the scope, the SignedKillSwitch. Both are Ed25519-signed so the device verifies them OFFLINE against a pinned signing key - a CDN or cache cannot tamper with policy or forge a disable.",
+  "rpc": "kseal.v1.ConfigService/GetConfig",
+  "config_response": {
+    "config": {
+      "config_bytes": "<base64 serialized PolicyConfig - expanded in control/policy.json>",
+      "signature": "<Ed25519 over the signed-config preimage; illustrative here - the byte-exact reproducible crypto vectors are control/kill-switch-command.json and reference/golden-vectors.json>",
+      "key_id": "cfg_meridian_2026_06",
+      "version": 12,
+      "ttl_seconds": 900
+    },
+    "etag": "W/\"meridian-pay-android-v12\"",
+    "last_modified": 1781568000,
+    "kill_switch": {
+      "ref": "control/kill-switch-command.json",
+      "tenant_id": "meridian",
+      "app_id": "pay-android",
+      "build_hash": "e3bb7952a304da35ff93f5ddc20aa9220c6cc9be462016ae2985af3e76a70d73",
+      "command": "KILL_SWITCH_COMMAND_DISABLE",
+      "version": 1,
+      "key_id": "ks_meridian_2026_06",
+      "signature_b64": "iZy+wIiFB2XRpOXMTGckDlryz0oYQ4BG4OV4mMSYA3Q8Tw4EwTk4of/J2GRqX/Rif89wcrmUNLUMWxTfDOQxDw=="
+    }
+  },
+  "signed_config_preimage_layout": "u32_be(len)||\"kseal/v1/signed-config\" || i64_be(version) || i64_be(ttl_seconds) || u32_be(len)||key_id || u32_be(len)||config_bytes",
+  "notes": "The signed-config signature authenticates the WHOLE envelope (version is the rollback anchor, ttl_seconds the staleness anchor, plus key_id and config_bytes), closing the CDN/cache tamper vector. The Go server and the Rust device core mirror this preimage byte-for-byte, pinned by a shared golden vector. The embedded kill_switch signature above is the REAL, verifiable Ed25519 signature from control/kill-switch-command.json; an absent or invalid kill switch never disables (fail-safe)."
+}

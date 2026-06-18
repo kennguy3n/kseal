@@ -39,7 +39,7 @@ proof with the **same** preimage + HMAC construction the Rust SDK uses.
 ## The request proof: a canonical byte layout, or nothing
 
 The per-request proof is the part that runs on every call, so it has to be cheap (a single
-HMAC, ~333 ns — [Chapter 3](03-device-plane-rasp-and-rust-core.md)) *and* unambiguous across a
+HMAC, ~349 ns — [Chapter 3](03-device-plane-rasp-and-rust-core.md)) *and* unambiguous across a
 Rust producer and a Go verifier. The construction lives in
 `sdk/rust-core/kseal-core/src/crypto.rs`:
 
@@ -85,7 +85,7 @@ with the nonce and the monotonic sequence number, the proof defeats:
 | **Repackaging** | The trust token encodes the `build_hash`; a repackaged build has a different hash |
 
 `tests/e2e_trust_flow_test.go` asserts every one of these returns **DENY** — replayed proof,
-decreasing sequence, wrong nonce, wrong token, wrong key. The proof verifies in ~444 ns
+decreasing sequence, wrong nonce, wrong token, wrong key. The proof verifies in ~357 ns
 (`request_proof_verify` bench), so this protection is effectively free on the hot path.
 
 ---
@@ -95,12 +95,12 @@ decreasing sequence, wrong nonce, wrong token, wrong key. The proof verifies in 
 Trust flows *up* (device → server). Policy flows *down* (server → device) over the **same kind
 of construction**: an Ed25519-signed config envelope (`sdk/rust-core/kseal-core/src/config.rs`)
 with its own domain-separated preimage. The device verifies the signature
-(`config_verify_and_decode_ed25519`, ~49 µs) before trusting any policy change, and caches by
+(`config_verify_and_decode_ed25519`, ~54 µs) before trusting any policy change, and caches by
 ETag with a TTL. `tests/e2e_config_test.go` covers verify + `If-None-Match` caching + TTL +
 version rotation.
 
-This is why the [GameForge kill switch](../showcase/03-gameforge-incident-response.md) and the
-[ShopSwift canary](../showcase/05-shopswift-release-engineer.md) are trustworthy: the client
+This is why the [signed kill switch](../showcase/03-incident-response-and-kill-switch.md) and the
+[policy canary](../showcase/05-policy-canary-rollout.md) are trustworthy: the client
 *verifies the signature before honoring* a "stand down" or a policy swap, so an attacker can't
 forge or replay control-plane state onto a device.
 

@@ -37,7 +37,9 @@ the Go server expects). Rust gives you:
 The risk signals live in one place — `sdk/rust-core/kseal-core/src/risk.rs` — as a stable
 bitset (`ROOT`, `JAILBREAK`, `EMULATOR`, `DEBUGGER`, `HOOKING`, `TAMPER`, `APP_INTEGRITY`,
 `NETWORK_MITM`, `PROXY`, `REPACKAGED`, …). Stable bit positions are a contract: the server,
-the SIEM and the policy all reference them, so they're tested (`bit_positions_are_stable`).
+the SIEM and the policy all reference them, so they're tested (`bit_positions_are_stable`). The
+full device-wire and server-bit map, with weights, is in
+[`docs/reference/risk-signals.md`](../reference/risk-signals.md).
 
 ---
 
@@ -71,24 +73,26 @@ Performance isn't a nice-to-have here; an SDK that adds jank gets removed. The h
 | Network at launch | **none** |
 
 The Criterion benches in `sdk/rust-core/kseal-core/benches/core_benches.rs` measure the
-hot-path operations directly. Measured on an x86-64 dev host (phones are slower, but these are
-nanosecond/microsecond operations — orders of magnitude under any perceptible budget):
+hot-path operations directly, and the full table lives in
+[`docs/reference/benchmarks.md`](../reference/benchmarks.md). Measured on an x86-64 dev host
+(phones are slower, but these are nanosecond/microsecond operations — orders of magnitude under
+any perceptible budget):
 
 | Operation | Measured (median) |
 |---|---|
-| `core_new` (init the trust core) | **≈ 129 ns** |
-| `policy_evaluate` (score bits → decision) | **≈ 49 ns** |
-| `request_proof_generate` (HMAC) | **≈ 333 ns** |
-| `config_verify_and_decode_ed25519` | **≈ 49 µs** |
-| `batch_and_compress_10` (telemetry) | **≈ 33 µs** |
+| `core_new` (init the trust core) | **≈ 158 ns** |
+| `policy_evaluate` (score bits → decision) | **≈ 48 ns** |
+| `request_proof_generate` (HMAC) | **≈ 349 ns** |
+| `config_verify_and_decode_ed25519` | **≈ 54 µs** |
+| `batch_and_compress_10` (telemetry) | **≈ 35 µs** |
 
 How those numbers stay small is the design:
 
-- **No launch-time network call.** Initialization is local (~130 ns); the SDK never blocks
+- **No launch-time network call.** Initialization is local (~158 ns); the SDK never blocks
   startup on a round-trip. Telemetry is batched and deferred.
 - **Risk-driven scheduling, not a heartbeat.** Checks run lazily and escalate with risk, so
   CPU scales with threat, not with a fixed timer.
-- **The expensive primitive runs rarely.** Ed25519 config verification (~49 µs) only runs when
+- **The expensive primitive runs rarely.** Ed25519 config verification (~54 µs) only runs when
   a *new signed config* arrives — not per request. The per-request cost is a single HMAC.
 - **Compact wire format.** Protobuf + zstd (optionally dictionary-trained) keeps telemetry
   batches tiny; the compression itself is microseconds.

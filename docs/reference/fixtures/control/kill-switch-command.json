@@ -1,0 +1,24 @@
+{
+  "description": "A signed kill switch issued by Meridian's control plane to remotely disable trust for a compromised build. The signature is a REAL Ed25519 signature over the canonical preimage and verifies against the public key below; it is reproduced byte-for-byte by the Rust core (crypto::kill_switch_preimage) and the Go server (compliance.killSwitchPreimage). The signing key is derived from a fixed demo seed so this fixture is reproducible (see fixtures/README.md).",
+  "rpc": "kseal.v1.ComplianceService/IssueKillSwitch",
+  "preimage_layout": "u32_be(len)||DOMAIN || u32_be(len)||tenant_id || u32_be(len)||app_id || u32_be(len)||build_hash || u64_be(command) || u64_be(version) || u64_be(issued_at) || u32_be(len)||reason",
+  "domain": "kseal/v1/kill-switch",
+  "signed_kill_switch": {
+    "tenant_id": "meridian",
+    "app_id": "pay-android",
+    "build_hash": "e3bb7952a304da35ff93f5ddc20aa9220c6cc9be462016ae2985af3e76a70d73",
+    "command": "KILL_SWITCH_COMMAND_DISABLE",
+    "version": 1,
+    "issued_at": 1781584200,
+    "issued_at_iso": "2026-06-16T04:30:00Z",
+    "reason": "compromised-build-2026-06-16",
+    "signature_b64": "iZy+wIiFB2XRpOXMTGckDlryz0oYQ4BG4OV4mMSYA3Q8Tw4EwTk4of/J2GRqX/Rif89wcrmUNLUMWxTfDOQxDw=="
+  },
+  "verification": {
+    "algorithm": "Ed25519",
+    "signing_public_key_b64": "qO4rAwt8obLT+tUb2utUnxz4s+8Juf7xSJp2UAXP2Mk=",
+    "preimage_len_bytes": 175,
+    "preimage_hex": "000000146b7365616c2f76312f6b696c6c2d737769746368000000086d6572696469616e0000000b7061792d616e64726f6964000000406533626237393532613330346461333566663933663564646332306161393232306336636339626534363230313661653239383561663365373661373064373300000000000000020000000000000001000000006a30d1480000001c636f6d70726f6d697365642d6275696c642d323032362d30362d3136"
+  },
+  "notes": "command=DISABLE kills trust for exactly this build_hash; ENABLE is the implicit default for every other build. version is monotonic per scope (anti-rollback): re-issuing the same scope bumps it. The switch is delivered inside the signed ConfigResponse (control/config-envelope.json) so the device verifies it offline against the pinned signing key; a flipped command or build_hash fails verification and is ignored (fail-safe)."
+}

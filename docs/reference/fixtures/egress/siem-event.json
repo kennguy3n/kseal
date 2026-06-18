@@ -1,0 +1,40 @@
+{
+  "description": "The same D3 CRITICAL decision delivered to Meridian's SIEM as a Splunk HEC event (POST to /services/collector/event). The minimized record lives under \"event\"; index/sourcetype/time are HEC routing metadata, not telemetry. This mirrors server/data-plane/siem/mapping.go renderSplunk. Sentinel (DCR rows) and Elastic (ECS bulk) connectors carry the identical minimized record in their own envelopes.",
+  "connector": {
+    "format": "SIEM_PAYLOAD_FORMAT_SPLUNK_HEC",
+    "endpoint": "https://splunk.meridian.example:8088",
+    "splunk_index": "meridian_security",
+    "splunk_sourcetype": "kseal:trust",
+    "auth": "Splunk <HEC token> (carried in the Authorization header, never logged)"
+  },
+  "request": {
+    "method": "POST",
+    "url": "https://splunk.meridian.example:8088/services/collector/event",
+    "headers": {
+      "Authorization": "Splunk <HEC-TOKEN>",
+      "Content-Type": "application/json",
+      "X-Kseal-Idempotency-Key": "idem_3f1c9a2b7d4e",
+      "X-Splunk-Request-Channel": "idem_3f1c9a2b7d4e"
+    },
+    "body": {
+      "event": {
+        "tenant_id": "meridian",
+        "app_id": "pay-android",
+        "event_type": "EVENT_TYPE_POLICY_DECISION",
+        "risk_level": "TRUST_LEVEL_CRITICAL",
+        "risk_bits": 48,
+        "risk_signals": ["app_tamper", "attestation_fail"],
+        "confidence": "CONFIDENCE_HIGH",
+        "build_hash": "e3bb7952a304da35ff93f5ddc20aa9220c6cc9be462016ae2985af3e76a70d73",
+        "policy_hash": "62fdc9b7f2da819931d88affe6ca7c3c22fcbbf0aeb2077a68994a1d4f508c34",
+        "install_key_hash": "152c900d3185e766f9420b6b2a0287647b475ed2d1af70894296f6c05731094f",
+        "coarse_time_bucket": 1781582400,
+        "country_or_region": "BR"
+      },
+      "sourcetype": "kseal:trust",
+      "index": "meridian_security",
+      "time": 1781582400
+    }
+  },
+  "notes": "The body under \"event\" is byte-identical in content to egress/webhook-body.json - one decision, two transports. The egress client is the SSRF-hardened safehttp client, and the connector secret (HEC token) is held server-side and never appears in telemetry. On the wire multiple events are newline-delimited (HEC batch) and gzip-compressed."
+}

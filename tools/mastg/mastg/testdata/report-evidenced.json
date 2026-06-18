@@ -14,7 +14,6 @@
         "category": "MASVS-STORAGE",
         "objective": "No sensitive data in logs",
         "control": "Privacy guard strips identifiers at source",
-        "phase": "P1/P2",
         "mastg_tests": [
           "MASTG-STORAGE"
         ],
@@ -32,7 +31,6 @@
         "category": "MASVS-STORAGE",
         "objective": "No secrets in app storage",
         "control": "No static secrets; keys hardware-bound",
-        "phase": "P1",
         "mastg_tests": [
           "MASTG-RESILIENCE",
           "MASTG-STORAGE"
@@ -51,7 +49,6 @@
         "category": "MASVS-STORAGE",
         "objective": "Tenant data isolated at rest",
         "control": "Logical tenant_id namespacing",
-        "phase": "P1/P4",
         "mastg_tests": null,
         "method": "Server test",
         "plane": "server",
@@ -67,7 +64,6 @@
         "category": "MASVS-CRYPTO",
         "objective": "Strong, current algorithms",
         "control": "Modern AEAD + signatures",
-        "phase": "P1",
         "mastg_tests": [
           "MASTG-CRYPTO"
         ],
@@ -85,7 +81,6 @@
         "category": "MASVS-CRYPTO",
         "objective": "Deterministic serialization",
         "control": "Canonical message formats",
-        "phase": "P1",
         "mastg_tests": null,
         "method": "Property test",
         "plane": "other",

@@ -41,7 +41,7 @@ document:
 2. **Assets at risk** — what the attacker is actually after.
 3. **Attack trees** — the concrete paths from attacker goal to impact.
 4. **Applicable RASP modules** — which of the nine
-   [runtime modules](../ARCHITECTURE.md#runtime-protection-modules) raise the
+   [runtime modules](../ARCHITECTURE.md#rasp-probes) raise the
    cost of each path.
 5. **Recommended enforcement level** — the default policy posture
    (`observe → step-up → block`) calibrated to that vertical's risk tolerance.

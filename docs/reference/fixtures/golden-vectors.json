@@ -1,0 +1,50 @@
+{
+  "description": "The cross-language crypto vectors that pin device<->server parity. Each is reproduced byte-for-byte by independent Go and Rust implementations and is asserted in CI, so a value here is ground truth, not illustration. These are the anchors that let the server trust a proof minted on a device it never shares a secret with.",
+  "request_proof_hmac": {
+    "purpose": "Per-request proof: the device HMACs a domain-separated preimage with its per-install key; the server reconstructs the same preimage and key-derivation and recomputes the tag. Equal tag => the request came from a sealed, attested install.",
+    "algorithm": "HMAC-SHA256",
+    "domain": "kseal/v1/request-proof",
+    "preimage_layout": "u32_be(len)||DOMAIN || u32_be(len)||token_id || u32_be(len)||request_hash || u32_be(len)||nonce || i64_be(sequence)",
+    "inputs": {
+      "instance_key_utf8": "kseal-test-instance-key",
+      "token_id": "tok",
+      "request_hash_hex": "01020304",
+      "nonce_hex": "aabb",
+      "sequence": 1
+    },
+    "expected_tag_hex": "718bb06df45dc4bbc5bf483bd65acf7609429966adba8baff66fa965857ebd0d",
+    "pinned_in": [
+      "sdk/rust-core/kseal-core/src/crypto.rs",
+      "sdk/rust-core/kseal-core/src/whitebox/mod.rs",
+      "server/shared/proof/proof_test.go",
+      "server/shared/crypto/crypto_test.go"
+    ],
+    "reproduce": "HMAC-SHA256(key=\"kseal-test-instance-key\", preimage) where preimage = len-prefixed(domain, token_id, request_hash, nonce) || int64_be(sequence)"
+  },
+  "kill_switch_ed25519": {
+    "purpose": "Remote disable/enable for a (tenant, app, build) scope, verified offline by the device against a pinned signing key. A forged or altered command is a no-op (fail-safe).",
+    "algorithm": "Ed25519",
+    "domain": "kseal/v1/kill-switch",
+    "preimage_layout": "u32_be(len)||DOMAIN || u32_be(len)||tenant_id || u32_be(len)||app_id || u32_be(len)||build_hash || u64_be(command) || u64_be(version) || u64_be(issued_at) || u32_be(len)||reason",
+    "example_ref": "control/kill-switch-command.json",
+    "preimage_len_bytes": 175,
+    "pinned_in": [
+      "sdk/rust-core/kseal-core/src/crypto.rs (kill_switch_preimage)",
+      "server compliance (killSwitchPreimage)"
+    ]
+  },
+  "signed_config_ed25519": {
+    "purpose": "Authenticate a whole policy envelope (config bytes + version + ttl + key_id) so the device can verify policy offline behind a CDN and reject rollbacks/staleness.",
+    "algorithm": "Ed25519",
+    "domain": "kseal/v1/signed-config",
+    "preimage_layout": "u32_be(len)||DOMAIN || i64_be(version) || i64_be(ttl_seconds) || u32_be(len)||key_id || u32_be(len)||config_bytes",
+    "example_ref": "control/config-envelope.json"
+  },
+  "demo_hashes": {
+    "note": "Reproducible identifiers used across every fixture and doc. Each is a plain sha256 of the listed input string so any reader can regenerate it.",
+    "build_hash": {"value": "e3bb7952a304da35ff93f5ddc20aa9220c6cc9be462016ae2985af3e76a70d73", "preimage": "meridian/pay-android/1.4.0/seed=00000000"},
+    "policy_hash": {"value": "62fdc9b7f2da819931d88affe6ca7c3c22fcbbf0aeb2077a68994a1d4f508c34", "preimage": "meridian/payments-baseline/v12"},
+    "install_key_hash": {"value": "152c900d3185e766f9420b6b2a0287647b475ed2d1af70894296f6c05731094f", "preimage": "meridian-demo-install-0001"},
+    "coarse_time_bucket": {"value": 1781582400, "iso": "2026-06-16T04:00:00Z"}
+  }
+}

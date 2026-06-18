@@ -116,7 +116,7 @@ inflates size and startup well past our budgets (SDK startup < 40 ms, footprint
 symbolication — all at odds with serving 5000 SME tenants. We instead lean on
 **per-build polymorphism + native verification + mapping-aware integration**, where
 a bypass crafted for one build does not transfer to the next. See
-[`ARCHITECTURE.md#what-to-avoid`](../ARCHITECTURE.md).
+[`ARCHITECTURE.md#what-kseal-deliberately-avoids`](../ARCHITECTURE.md).
 
 ### Native posture (`ksealHardenNativeLibraries`)
 

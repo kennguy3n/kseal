@@ -1,0 +1,48 @@
+{
+  "rpc": "kseal.v1.TrustService/EvaluateTrust",
+  "scenario": "D3 - repackaged build (RASP self-integrity fires on-device; attestation fails server-side)",
+  "request": {
+    "tenant_id": "meridian",
+    "app_id": "pay-android",
+    "trust_token": "tt_8f6a1b2c3d4e5f60_01H...",
+    "reported_risk_bits_wire": 64,
+    "reported_wire_bits_set": ["wireTamper (bit 6)"]
+  },
+  "scoring": {
+    "step_1_from_wire": {
+      "wire_value": 64,
+      "maps_to_server": ["app_tamper (server bit 4)"],
+      "server_value": 16
+    },
+    "step_2_fuse_attestation": {
+      "attestation_derived": ["attestation_fail (server bit 5)"],
+      "attestation_value": 32,
+      "fused_server_bits": 48
+    },
+    "step_3_score": {
+      "weights": { "app_tamper": 60, "attestation_fail": 70 },
+      "sum": 130,
+      "saturating": false
+    },
+    "step_4_level": {
+      "thresholds": { "CRITICAL": 130, "HIGH_RISK": 90, "MEDIUM_RISK": 50, "LOW_RISK": 20 },
+      "score": 130,
+      "level": "TRUST_LEVEL_CRITICAL"
+    }
+  },
+  "response": {
+    "trust_level": "TRUST_LEVEL_CRITICAL",
+    "confidence": "CONFIDENCE_HIGH",
+    "risk_bits": 48,
+    "risk_signals": ["app_tamper", "attestation_fail"],
+    "decision": "DECISION_DENY",
+    "next_checks": [
+      "EVENT_TYPE_ROOT_RISK",
+      "EVENT_TYPE_DEBUGGER",
+      "EVENT_TYPE_HOOKING_DETECTED",
+      "EVENT_TYPE_APP_INTEGRITY_FAIL"
+    ],
+    "reason": "Critical risk: on-device self-integrity reports the binary no longer matches its registered build baseline, and the platform attestation does not recognize the build. Both must be satisfied to reach CRITICAL."
+  },
+  "notes": "The decision is server-side. Even though a repackaged app could patch its local SDK to report risk_bits=0, it cannot suppress the server-derived attestation_fail, and it cannot mint a server-accepted decision. risk_signals are emitted in ascending bit order (app_tamper bit 4, attestation_fail bit 5) and match the webhook body in egress/webhook-body.json byte-for-byte. Meridian Pay runs in ENFORCEMENT_MODE_STEP_UP, where CRITICAL maps to DECISION_DENY; in ENFORCEMENT_MODE_OBSERVE the same event is recorded but allowed."
+}
