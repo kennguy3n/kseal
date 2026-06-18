@@ -1,4 +1,4 @@
-# kseal — Business & Product Proposal
+# kseal — Business & Product Overview
 
 ## Table of Contents
 
@@ -6,7 +6,7 @@
 - [Strategic Position](#strategic-position)
 - [Market Analysis](#market-analysis)
 - [Standards Baseline](#standards-baseline)
-- [Product Vision](#product-vision)
+- [Product Capabilities](#product-capabilities)
 - [Differentiation Thesis vs AppSealing](#differentiation-thesis-vs-appsealing)
 - [NoOps Product Experience](#noops-product-experience)
 - [Unit Economics](#unit-economics)
@@ -78,9 +78,9 @@ kseal measures itself against **OWASP MASVS** coverage areas and verifies contro
 
 ---
 
-## Product Vision
+## Product Capabilities
 
-The full kseal product spans seven feature domains:
+The kseal product spans seven feature domains:
 
 - **Runtime protection (RASP):** root/jailbreak, emulator/simulator, debugger, hooking-framework, environment-risk, and network-manipulation detection, with local risk scoring.
 - **Build-time hardening:** obfuscation, string/resource/symbol encryption, native library hardening, and per-build polymorphism via Gradle/Xcode plugins.
@@ -187,7 +187,7 @@ kseal uses logical isolation by default and escalates physical isolation only wh
 
 | Risk | Severity | Mitigation |
 |---|---|---|
-| **iOS App Review rejection** | High | No private/undocumented API use; App Attest/DeviceCheck only; App Review safety review in Phase 0; privacy manifest auto-generated. |
+| **iOS App Review rejection** | High | No private/undocumented API use; App Attest/DeviceCheck only; documented App Review safety analysis ([docs/ios-app-review.md](docs/ios-app-review.md)); privacy manifest auto-generated. |
 | **False positives blocking real users** | High | Default `observe → step-up → block`; policy simulator; canary + auto-rollback; automatic false-positive detection; kill switch. |
 | **RASP bypass arms race** | Medium | Server-side enforcement so a client bypass decays; per-build polymorphism; signal fusion; rapid signed config updates. |
 | **SDK performance regressions** | Medium | Hard performance budgets enforced in CI; crash/ANR release gate; lazy/risk-driven scheduling. |
@@ -207,7 +207,7 @@ Start with **API trust + privacy-preserving runtime telemetry**, *not* full app 
 - **Faster enterprise value.** Customers see fraudulent/fake-client traffic blocked on real endpoints within hours, a concrete and measurable win.
 - **Stronger security foundation.** Establishing server-side trust first means every later feature (RASP, hardening) feeds a decision engine that already exists, rather than bolting enforcement on afterward.
 
-App shielding and build-time hardening follow once the trust backbone and customer confidence are established.
+App shielding and build-time hardening — both shipping today — are positioned as the natural expansion once a tenant's trust backbone is in production. The sequencing is a sales motion, not an engineering one.
 
 ---
 
