@@ -37,8 +37,9 @@ hand-lowered one-function spike is replaced by a real, maintained **IR→bytecod
 lowering** (a Sethi–Ullman register allocator over a 12-operation integer/bitwise
 IR) proven byte-identical to native evaluation across **>24,000 randomized
 expression/input pairs**, and the retrace map is upgraded from an XOR+checksum
-toy to a **SHA-256-CTR–encrypted, HMAC-SHA256–authenticated, `build_hash`-bound**
-artifact with round-trip, wrong-key, tamper, and build-binding tests. The tier is
+toy to a **ChaCha20-Poly1305 AEAD–encrypted, `build_hash`-bound** artifact (the
+vetted `chacha20poly1305` RustCrypto primitive) with round-trip, wrong-key,
+tamper, and build-binding tests. The tier is
 wired end-to-end behind `HIGH` against one representative cold routine, and the
 measured costs remain small (single-digit-KB fixed footprint; a cold-only perf
 tax whose *absolute* cost is sub-microsecond). Given a concrete product mandate to
@@ -79,7 +80,7 @@ mod vmspike;` line in `lib.rs` already present from 5.3.
 | `vmspike/strength.rs` *(new)* | — | Rust mirror of the Gradle `ObfuscationStrength` (OFF/LOW/MEDIUM/HIGH, default OFF); `cohort_bucket()` runs the **native** routine at OFF/LOW/MEDIUM and the **virtualized** program at **HIGH** — behaviour-identical either way. |
 | `vmspike/encode.rs` | Per-build-polymorphic encoder (opcode perm + register perm + XOR keystream from a 32-byte `BuildSeed` via the crate's existing `sha2`). | Extended to encode the new opcodes; legacy path unchanged. |
 | `vmspike/interp.rs` | Byte-input dispatch loop; faults return a `VmFrame` (pc) instead of panicking. | Adds a word-oriented `run_ir` entry point for IR programs + dispatch for the new opcodes. Shared core; legacy byte path unchanged. |
-| `vmspike/retrace.rs` | XOR-keystream + FNV-checksum "encrypted" map + `Symbolicator`. | Upgraded to **SHA-256-CTR encryption + HMAC-SHA256 authentication (encrypt-then-MAC) + `build_hash` binding**, using the crate's existing vetted `hmac`/`sha2` deps. Constant-time verify. |
+| `vmspike/retrace.rs` | XOR-keystream + FNV-checksum "encrypted" map + `Symbolicator`. | Upgraded to a **ChaCha20-Poly1305 AEAD** (the vetted `chacha20poly1305` crate) with the cleartext header bound as associated data and `build_hash` folded into key + nonce derivation. Constant-time verify; the crate is an **optional dependency gated behind `vm-spike`**, so the default build links none of it. |
 | `vmspike/mod.rs` | Orchestration, artifact bundle, measurement harness, tests. | Adds the IR-cohort measurement (`measure::run_cohort`) and updates call sites for the authenticated retrace API. |
 
 **CI-validated (no new heavy deps; `Cargo.lock` not churned).** The
@@ -112,8 +113,8 @@ which compile and test the spike under `--features vm-spike`, clippy-clean
   `captured_crash_frame_resolves_to_the_right_source_site` forces a real
   dispatch-loop fault and resolves the captured pc through the **encrypted**
   map back to source; `wrong_seed_cannot_open_the_map` (auth fails — useless
-  without the key), `tampering_any_byte_is_detected` (HMAC catches ciphertext and
-  tag edits), `map_is_bound_to_its_build_hash` (a map cannot be paired with
+  without the key), `tampering_any_byte_is_detected` (the AEAD tag catches
+  ciphertext and tag edits), `map_is_bound_to_its_build_hash` (a map cannot be paired with
   another build), and `entries_are_encrypted_not_plaintext` (source identifiers
   never appear in the clear).
 
@@ -258,21 +259,24 @@ single biggest reason build-time hardening stopped short of virtualization.
 
 **The mitigation (now productionized in `retrace.rs`).** At build time we emit a
 private map `VM pc → {function, step, source line}` and ship it **out of band**.
-The 5.4 format is a proper AEAD-shaped construction:
+The 5.4 format uses a standard, vetted AEAD:
 
-- **Encryption.** The entry table is XORed with a **SHA-256 counter-mode
-  keystream** under a seed+`build_hash`-derived key (`derive_key(seed,
-  build_hash, "…enc")`). Source identifiers never appear in the clear (proven by
-  `entries_are_encrypted_not_plaintext`).
-- **Authentication.** The whole artifact (authenticated header ‖ ciphertext) is
-  covered by an **HMAC-SHA256 tag** under a *separate* derived key
-  (`"…mac"`), verified in **constant time** via the vetted `hmac` crate
-  (`encrypt-then-MAC`). Any tampering or a wrong seed fails the tag
-  (`AuthFailed`).
-- **Build binding.** The `build_hash` is carried in the authenticated header and
-  folded into both key derivations, so a map can only be opened against the build
-  it was emitted for (`BuildHashMismatch`); it cannot be paired with another
-  build's frames.
+- **Encryption + authentication.** The entry table is sealed with
+  **ChaCha20-Poly1305** (the `chacha20poly1305` crate) under a
+  seed+`build_hash`-derived key (`derive_key(seed, build_hash, "…aead-key")`) and
+  a deterministic per-build nonce (`derive_nonce`). A single AEAD pass provides
+  both confidentiality (source identifiers never appear in the clear, proven by
+  `entries_are_encrypted_not_plaintext`) and integrity: any tampering or a wrong
+  seed fails the **constant-time Poly1305 verify** (`AuthFailed`, proven by
+  `wrong_seed_cannot_open_the_map` and `tampering_any_byte_is_detected`).
+- **Build binding.** The cleartext header (`MAGIC ‖ VERSION ‖ build_hash`) is
+  passed as the AEAD **associated data**, and `build_hash` is folded into both
+  key and nonce derivation, so a map can only be opened against the build it was
+  emitted for (`BuildHashMismatch`); it cannot be paired with another build's
+  frames.
+- **Nonce discipline.** Each build derives a unique key and encrypts its map
+  exactly once, so the deterministic per-build nonce never repeats under a given
+  key while keeping the artifact byte-reproducible.
 
 `Symbolicator::open(encrypted, seed, build_hash)` verifies, decrypts, and
 resolves a captured `VmFrame`; without the key the artifact is indistinguishable
@@ -280,7 +284,7 @@ from random and unforgeable. This mirrors Guardsquare's "retrace" workflow.
 
 **What remains design-only:** swapping the in-process `BuildSeed`-derived key for
 a **KMS/HSM-managed** key and wiring the upload + server-side retrace step (§8.2).
-The cryptographic shape (encrypt-then-MAC, AAD-bound, constant-time verify) is
+The cryptographic primitive (a vetted AEAD, AAD-bound, constant-time verify) is
 already production-correct; only key custody and transport are outstanding.
 
 ---
@@ -319,7 +323,7 @@ by `measure::run_cohort`:
 | Perf tax | **~50×** | high *ratio*, negligible *absolute* (sub-µs). |
 | Emitted instructions | **41** | produced by the compiler from the `Expr` tree. |
 | Encoded **bytecode** | **162 B** | per-function shipped cost. |
-| Encrypted retrace map | **1,303 B** | private, out-of-band — **not** in the shipped binary. |
+| Encrypted retrace map | **1,287 B** | private, out-of-band — **not** in the shipped binary. |
 
 The IR routine's tax is higher than the hand-lowered one (more VM instructions
 per call, no amortizing payload loop), but it is still a **cold** routine whose
@@ -333,7 +337,7 @@ per attestation. This is exactly why the tier is "cold code only."
 | Interpreter dispatch core | ~520 | **fixed**, shared by every virtualized function. |
 | Load-time decoder + key schedule | ~7,400 | **fixed**, shared; one-time. |
 | Per-function bytecode | 77–162 | replaces native machine code of similar size. |
-| Per-function retrace map | 675–1,303 | private, out-of-band; not shipped in the binary. |
+| Per-function retrace map | 659–1,287 | private, out-of-band; not shipped in the binary. |
 
 **Net size impact is negligible.** The shipped runtime footprint is a fixed
 ~8 KB (interpreter + decoder + key schedule), amortized across *all* virtualized

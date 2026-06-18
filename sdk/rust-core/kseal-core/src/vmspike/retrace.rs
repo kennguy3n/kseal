@@ -8,39 +8,41 @@
 //! to emit, at build time, a map from VM program counter to the original source
 //! site, ship it **out of band**, encrypted, and resolve crashes internally.
 //!
-//! Confidentiality and integrity are both real here:
+//! Confidentiality and integrity are both provided by a single vetted AEAD:
 //!
-//! * **Encryption** — the entry table is XORed with a SHA-256 counter-mode
-//!   keystream derived from the [`BuildSeed`] (and `build_hash`). Without the
-//!   seed the entries are indistinguishable from random.
-//! * **Authentication** — the whole artifact is covered by an HMAC-SHA256 tag
-//!   (encrypt-then-MAC) under a separate seed-derived key, verified in constant
-//!   time via the vetted `hmac` crate. Tampering or a wrong seed fails the tag.
-//! * **Build binding** — the `build_hash` is carried in the authenticated header
-//!   and folded into key derivation, so a map can only be opened against the
-//!   build it was emitted for; pairing it with another build's frames is
-//!   rejected.
+//! * **ChaCha20-Poly1305** (the `chacha20poly1305` crate) encrypts the entry
+//!   table and authenticates it with a Poly1305 tag in one pass. Without the
+//!   seed-derived key the entries are indistinguishable from random, and any
+//!   tamper is rejected by the tag's constant-time verify.
+//! * **Build binding** — the cleartext header (`MAGIC ‖ VERSION ‖ build_hash`)
+//!   is passed as the AEAD associated data, and `build_hash` is also folded into
+//!   the key and nonce derivation, so a map can only be opened against the build
+//!   it was emitted for; pairing it with another build's frames is rejected.
+//! * **Nonce discipline** — each build derives a unique key and encrypts its map
+//!   exactly once, so a deterministic per-build nonce never repeats under a
+//!   given key while keeping the artifact byte-reproducible.
 //!
-//! This is the spike's XOR-checksum scheme upgraded to a proper AEAD-shaped
-//! construction. Production would swap the in-process key for a KMS/HSM-managed
-//! key and ship the map through the crash pipeline — see
+//! This replaces the spike's hand-rolled SHA-256-CTR + HMAC construction with a
+//! standard, vetted AEAD primitive. Production would swap the in-process key for
+//! a KMS/HSM-managed key and ship the map through the crash pipeline — see
 //! `docs/virtualization-tier-decision.md` §6 for key custody.
 
 use super::encode::BuildSeed;
 use super::interp::VmFrame;
-use hmac::{Hmac, Mac};
+use chacha20poly1305::aead::{Aead, KeyInit, Payload};
+use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
 use sha2::{Digest, Sha256};
-
-type HmacSha256 = Hmac<Sha256>;
 
 /// Magic prefix identifying an encrypted retrace map.
 const MAGIC: [u8; 4] = *b"KVRM";
-/// Retrace-map format version (bumped: v1 was XOR + FNV checksum).
-const VERSION: u8 = 2;
-/// Length of the authenticated cleartext header: `MAGIC ‖ VERSION ‖ build_hash`.
+/// Retrace-map format version (v1: XOR + FNV checksum; v2: SHA256-CTR + HMAC;
+/// v3: ChaCha20-Poly1305 AEAD).
+const VERSION: u8 = 3;
+/// Length of the authenticated cleartext header (also the AEAD associated
+/// data): `MAGIC ‖ VERSION ‖ build_hash`.
 const HEADER_LEN: usize = 4 + 1 + 32;
-/// Length of the trailing HMAC-SHA256 tag.
-const TAG_LEN: usize = 32;
+/// Length of the trailing Poly1305 authentication tag appended by the AEAD.
+const TAG_LEN: usize = 16;
 
 /// A source site recorded at lowering time (cheap, `'static`).
 ///
@@ -82,8 +84,8 @@ pub enum RetraceError {
     /// The authenticated `build_hash` did not match the one supplied to
     /// [`Symbolicator::open`].
     BuildHashMismatch,
-    /// HMAC verification failed — corruption, tampering, or (most often) a wrong
-    /// build seed. This is the "useless without the key" outcome.
+    /// AEAD authentication failed — corruption, tampering, or (most often) a
+    /// wrong build seed. This is the "useless without the key" outcome.
     AuthFailed,
 }
 
@@ -99,32 +101,30 @@ fn derive_key(seed: &BuildSeed, build_hash: &[u8; 32], label: &[u8]) -> [u8; 32]
     k
 }
 
-/// SHA-256 counter-mode keystream of `len` bytes under `key`.
+/// Derives a deterministic 12-byte AEAD nonce bound to `seed` and `build_hash`.
 ///
-/// Block `n` is `SHA-256("…ctr" ‖ key ‖ n_be64)`; concatenated and truncated.
-/// This is a PRF-based stream cipher — strong enough that the map is opaque
-/// without the seed — standing in for the KMS-backed AEAD production will use.
-fn keystream(key: &[u8; 32], len: usize) -> Vec<u8> {
-    let mut out = Vec::with_capacity(len + 32);
-    let mut counter: u64 = 0;
-    while out.len() < len {
-        let mut h = Sha256::new();
-        h.update(b"kseal/vmspike/retrace-ctr");
-        h.update(key);
-        h.update(counter.to_be_bytes());
-        out.extend_from_slice(&h.finalize());
-        counter += 1;
-    }
-    out.truncate(len);
-    out
+/// Each build derives a unique key (see [`derive_key`]) and encrypts its retrace
+/// map exactly once, so this per-build nonce never repeats under a given key —
+/// the safety condition for ChaCha20-Poly1305 — while keeping the emitted
+/// artifact byte-reproducible.
+fn derive_nonce(seed: &BuildSeed, build_hash: &[u8; 32]) -> [u8; 12] {
+    let mut h = Sha256::new();
+    h.update(b"kseal/vmspike/retrace-aead-nonce");
+    h.update(seed.0);
+    h.update(build_hash);
+    let d = h.finalize();
+    let mut n = [0u8; 12];
+    n.copy_from_slice(&d[..12]);
+    n
 }
 
-/// Serializes `entries` into a retrace map, encrypts the entry table under a
-/// `seed`+`build_hash`-derived keystream, and appends an HMAC-SHA256 tag over
-/// the authenticated header and ciphertext.
+/// Serializes `entries` into a retrace map and seals the entry table with
+/// ChaCha20-Poly1305 under a `seed`+`build_hash`-derived key, binding the
+/// cleartext header as associated data.
 ///
 /// The `build_hash` is carried in the clear (it is a public build identifier)
-/// but authenticated, so the artifact is cryptographically bound to one build.
+/// but authenticated via the AEAD's associated data, so the artifact is
+/// cryptographically bound to one build.
 #[must_use]
 pub fn encrypt_map(entries: &[(u32, SourceSite)], seed: &BuildSeed, build_hash: &[u8; 32]) -> Vec<u8> {
     // Plaintext entry table.
@@ -137,31 +137,31 @@ pub fn encrypt_map(entries: &[(u32, SourceSite)], seed: &BuildSeed, build_hash: 
         put_str(&mut pt, site.step);
     }
 
-    // Encrypt the entry table (the confidential part).
-    let enc_key = derive_key(seed, build_hash, b"kseal/vmspike/retrace-enc");
-    let ks = keystream(&enc_key, pt.len());
-    for (b, k) in pt.iter_mut().zip(&ks) {
-        *b ^= *k;
-    }
+    // Authenticated cleartext header — also the AEAD associated data, which
+    // cryptographically binds the artifact to MAGIC / VERSION / build_hash.
+    let mut header = Vec::with_capacity(HEADER_LEN);
+    header.extend_from_slice(&MAGIC);
+    header.push(VERSION);
+    header.extend_from_slice(build_hash);
 
-    // Assemble authenticated header ‖ ciphertext, then append the MAC tag.
-    let mut out = Vec::with_capacity(HEADER_LEN + pt.len() + TAG_LEN);
-    out.extend_from_slice(&MAGIC);
-    out.push(VERSION);
-    out.extend_from_slice(build_hash);
-    out.extend_from_slice(&pt);
+    // Encrypt-and-authenticate the entry table in one AEAD pass.
+    let key = derive_key(seed, build_hash, b"kseal/vmspike/retrace-aead-key");
+    let nonce = derive_nonce(seed, build_hash);
+    let cipher = ChaCha20Poly1305::new(Key::from_slice(&key));
+    let ct = cipher
+        .encrypt(
+            Nonce::from_slice(&nonce),
+            Payload {
+                msg: &pt,
+                aad: &header,
+            },
+        )
+        .expect("ChaCha20-Poly1305 encryption of a bounded plaintext cannot fail");
 
-    let mac_key = derive_key(seed, build_hash, b"kseal/vmspike/retrace-mac");
-    let tag = mac(&mac_key, &out);
-    out.extend_from_slice(&tag);
+    let mut out = Vec::with_capacity(HEADER_LEN + ct.len());
+    out.extend_from_slice(&header);
+    out.extend_from_slice(&ct);
     out
-}
-
-/// Computes HMAC-SHA256 of `msg` under `key` using the vetted `hmac` crate.
-fn mac(key: &[u8; 32], msg: &[u8]) -> [u8; 32] {
-    let mut m = HmacSha256::new_from_slice(key).expect("HMAC accepts keys of any length");
-    m.update(msg);
-    m.finalize().into_bytes().into()
 }
 
 /// Opens an encrypted retrace map and resolves captured VM frames.
@@ -187,33 +187,34 @@ impl Symbolicator {
         if encrypted.len() < HEADER_LEN + TAG_LEN {
             return Err(RetraceError::TooShort);
         }
-        let (body, tag) = encrypted.split_at(encrypted.len() - TAG_LEN);
+        let header = &encrypted[..HEADER_LEN];
+        let ciphertext = &encrypted[HEADER_LEN..];
 
-        if body[..4] != MAGIC {
+        if header[..4] != MAGIC {
             return Err(RetraceError::BadMagic);
         }
-        if body[4] != VERSION {
+        if header[4] != VERSION {
             return Err(RetraceError::BadVersion);
         }
-        if &body[5..HEADER_LEN] != build_hash {
+        if &header[5..HEADER_LEN] != build_hash {
             return Err(RetraceError::BuildHashMismatch);
         }
 
-        // Authenticate before touching the ciphertext (constant-time verify).
-        let mac_key = derive_key(seed, build_hash, b"kseal/vmspike/retrace-mac");
-        let mut m = HmacSha256::new_from_slice(&mac_key).expect("HMAC accepts keys of any length");
-        m.update(body);
-        if m.verify_slice(tag).is_err() {
-            return Err(RetraceError::AuthFailed);
-        }
-
-        // Decrypt the entry table.
-        let enc_key = derive_key(seed, build_hash, b"kseal/vmspike/retrace-enc");
-        let mut pt = body[HEADER_LEN..].to_vec();
-        let ks = keystream(&enc_key, pt.len());
-        for (b, k) in pt.iter_mut().zip(&ks) {
-            *b ^= *k;
-        }
+        // Authenticated decryption: the header is bound as associated data and
+        // `build_hash` is folded into both key and nonce, so a wrong seed, any
+        // tamper, or a foreign build all fail the constant-time Poly1305 verify.
+        let key = derive_key(seed, build_hash, b"kseal/vmspike/retrace-aead-key");
+        let nonce = derive_nonce(seed, build_hash);
+        let cipher = ChaCha20Poly1305::new(Key::from_slice(&key));
+        let pt = cipher
+            .decrypt(
+                Nonce::from_slice(&nonce),
+                Payload {
+                    msg: ciphertext,
+                    aad: header,
+                },
+            )
+            .map_err(|_| RetraceError::AuthFailed)?;
 
         let mut r = Reader::new(&pt);
         let count = r.u32()? as usize;
@@ -336,7 +337,7 @@ mod tests {
         let bh = build_hash_from_seed(&seed);
         let enc = encrypt_map(&lowered.retrace, &seed, &bh);
         // Wrong seed: build_hash still matches (it is public), so the failure is
-        // the HMAC tag — i.e. the map is useless without the key.
+        // the Poly1305 tag — i.e. the map is useless without the key.
         assert_eq!(
             Symbolicator::open(&enc, &BuildSeed::from_u64(2), &bh).err(),
             Some(RetraceError::AuthFailed)
