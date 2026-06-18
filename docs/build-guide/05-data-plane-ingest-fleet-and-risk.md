@@ -17,8 +17,8 @@ fusion, fleet anomaly detection (`fleet/`), canary control (`canary/`), guardrai
 It is **eventually consistent and never the source of truth for secrets** — it executes
 signed policy from the control plane, it doesn't author it.
 
-The production broker (Kafka/Redpanda), analytics store (ClickHouse) and OTLP are delivered
-behind interfaces and enabled via env vars (`KSEAL_BROKER` / `KSEAL_ANALYTICS` /
+The production broker (Kafka/Redpanda), analytics store (ClickHouse) and OTLP sit
+behind interfaces and are enabled via env vars (`KSEAL_BROKER` / `KSEAL_ANALYTICS` /
 `KSEAL_OTLP_ENDPOINT`), defaulting to an in-process broker + in-memory store so a small tenant
 pays for none of it. That "heavy parts off by default, fail-closed" posture is what keeps the
 plane operable by one engineer.

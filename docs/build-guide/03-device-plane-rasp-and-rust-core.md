@@ -37,7 +37,9 @@ the Go server expects). Rust gives you:
 The risk signals live in one place — `sdk/rust-core/kseal-core/src/risk.rs` — as a stable
 bitset (`ROOT`, `JAILBREAK`, `EMULATOR`, `DEBUGGER`, `HOOKING`, `TAMPER`, `APP_INTEGRITY`,
 `NETWORK_MITM`, `PROXY`, `REPACKAGED`, …). Stable bit positions are a contract: the server,
-the SIEM and the policy all reference them, so they're tested (`bit_positions_are_stable`).
+the SIEM and the policy all reference them, so they're tested (`bit_positions_are_stable`). The
+full device-wire and server-bit map, with weights, is in
+[`docs/reference/risk-signals.md`](../reference/risk-signals.md).
 
 ---
 
@@ -71,8 +73,10 @@ Performance isn't a nice-to-have here; an SDK that adds jank gets removed. The h
 | Network at launch | **none** |
 
 The Criterion benches in `sdk/rust-core/kseal-core/benches/core_benches.rs` measure the
-hot-path operations directly. Measured on an x86-64 dev host (phones are slower, but these are
-nanosecond/microsecond operations — orders of magnitude under any perceptible budget):
+hot-path operations directly, and the full table lives in
+[`docs/reference/benchmarks.md`](../reference/benchmarks.md). Measured on an x86-64 dev host
+(phones are slower, but these are nanosecond/microsecond operations — orders of magnitude under
+any perceptible budget):
 
 | Operation | Measured (median) |
 |---|---|
