@@ -30,7 +30,7 @@ plane operable by one engineer.
 Ingest normalizes every event to the stable risk bitset from
 [Chapter 3](03-device-plane-rasp-and-rust-core.md), then **fuses** the device-reported bits
 with the platform-attestation verdict and scores them against the active policy. Scoring is
-the `policy_evaluate` path (~49 ns on device, the same logic server-side): weighted signal
+the `policy_evaluate` path (~48 ns on device, the same logic server-side): weighted signal
 bits → a composite score → a trust band (TRUSTED / MEDIUM / HIGH / CRITICAL) → an enforcement
 mode (OBSERVE / STEP_UP / DENY). The client never gets a vote; it only contributes signals.
 
@@ -74,9 +74,10 @@ maps to a concrete design choice:
 The behaviour is a unit test, not a demo artifact:
 `server/data-plane/fleet/engine_test.go` has `TestBaselineLearnThenSurge` (learn a clean
 baseline, then catch the surge) **and** `TestUnobservedScopeIsClean` (don't cry wolf on quiet
-cohorts). The [FitPulse chapter](../showcase/02-fitpulse-noops-sme.md) is this test, driven
-live: 320+ root attestations against `fitpulse-3.9` in five minutes → a `Surge` verdict at
-422 observations → auto step-up, with no human in the loop.
+cohorts). The [Fleet Anomaly Guard chapter](../showcase/02-fleet-anomaly-guard.md) is this test
+in story form: a coordinated root surge against one `pay-android` build cohort → a `Surge`
+verdict → the server-derived `FLEET_ANOMALY` bit fused in for an auto step-up, with no human in
+the loop.
 
 ---
 

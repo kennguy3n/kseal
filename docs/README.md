@@ -23,5 +23,5 @@ Start with the top-level [README](../README.md) and [ARCHITECTURE](../ARCHITECTU
 
 Two long-form, blog-style series complement the reference docs above:
 
-- **[Capability showcase](showcase/00-showcase-index.md)** — kseal *doing the job* for Meridian Pay, with live console screenshots and a [measured evidence / back-testing](showcase/evidence-and-backtesting.md) appendix.
+- **[Capability showcase](showcase/00-showcase-index.md)** — kseal *doing the job* for Meridian Pay, grounded in committed [reference fixtures](reference/fixtures/README.md) with a [measured evidence / back-testing](showcase/evidence-and-backtesting.md) appendix.
 - **[How to build a continuous app-trust platform](build-guide/00-index.md)** — a build-along series for engineers *and* product readers: the architecture, the trust protocol, the scale and privacy engineering, and the business decision behind each choice versus the incumbents.

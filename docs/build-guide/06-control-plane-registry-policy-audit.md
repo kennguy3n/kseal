@@ -42,7 +42,7 @@ label; it's the anchor for:
   [Chapter 5](05-data-plane-ingest-fleet-and-risk.md).
 
 One identity, used everywhere, is what lets the platform answer "is this a genuine
-`meditoken-2.2.0-rasp`?" consistently across trust, compliance and analytics.
+`pay-android` build `e3bb7952…`?" consistently across trust, compliance and analytics.
 
 ---
 
@@ -53,7 +53,7 @@ Response controls are control-plane mutations that take effect on devices via si
 - **Signed remote kill switch** — armed/disabled from the control plane, *cryptographically
   signed* so clients verify the signature before honoring it; takes effect on the next
   attestation, globally, in seconds. An attacker can't forge a "stand down" or replay an old
-  state. (See [GameForge](../showcase/03-gameforge-incident-response.md).)
+  state. (See [Incident response & kill switch](../showcase/03-incident-response-and-kill-switch.md).)
 - **Canary rollout with a guardrail** (`server/data-plane/canary/`) — stage a candidate policy
   to a slice of traffic, attribute every live decision to its cohort, and let a controller
   auto-roll-back if the candidate's block rate crosses a threshold with enough samples to be
@@ -61,7 +61,7 @@ Response controls are control-plane mutations that take effect on devices via si
   deterministic per instance, monotonic in the percentage, and independent across tenants
   (`bucket_test.go`); the controller is tested to roll back **above** the threshold and
   **not** below the min-sample count (`controller_test.go`). (See
-  [ShopSwift](../showcase/05-shopswift-release-engineer.md).)
+  [Policy canary rollout](../showcase/05-policy-canary-rollout.md).)
 
 Both write **audit entries** — which is the next pillar.
 
