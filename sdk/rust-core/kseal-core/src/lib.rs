@@ -43,6 +43,13 @@ pub mod risk;
 pub mod risk_engine;
 pub mod transport;
 
+// Phase 5.3 DECISION SPIKE: selective code-virtualization prototype. Compiled
+// only under the default-off `vm-spike` feature; additive and isolated, it is
+// not wired into the trust/crypto path or the FFI surface. The standard build is
+// byte-for-byte unchanged. See `vmspike` and `docs/virtualization-tier-decision.md`.
+#[cfg(feature = "vm-spike")]
+pub mod vmspike;
+
 use crate::config::ConfigCache;
 use crate::events::{EventBatch, EventInput, PrivacyGuard};
 use crate::proto::request_proof_result::Decision;

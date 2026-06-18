@@ -9,6 +9,7 @@ Complements the top-level [README](../README.md), [PROPOSAL](../PROPOSAL.md), [A
 - **Cost model** — ingest/storage/retention math at 10M / 100M / 300M MAU.
 - **Feature parity matrix** — comparison vs AppSealing/DoveRunner and other incumbents.
 - **Runbooks / ADRs** — operational guides and architecture decision records.
+  - [Virtualization-tier decision](virtualization-tier-decision.md) — Phase 5.3 spike, measured perf/size, and the GO/NO-GO recommendation.
 
 ## Narrative series
 

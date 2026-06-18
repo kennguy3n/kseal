@@ -60,9 +60,10 @@ test-server: ## Run Go tests.
 	cd server && go test ./...
 
 .PHONY: test-rust
-test-rust: ## Run Rust tests (default + hardened string-obfuscation feature).
+test-rust: ## Run Rust tests (default + hardened string-obfuscation feature + vm-spike decision spike).
 	cd sdk/rust-core && cargo test
 	cd sdk/rust-core && cargo test --features obfuscate-strings
+	cd sdk/rust-core && cargo test --features vm-spike
 
 .PHONY: test-integration
 test-integration: ## Run end-to-end integration tests.
@@ -78,6 +79,7 @@ lint: proto-lint ## Run all linters.
 	cd server && go vet ./...
 	cd sdk/rust-core && cargo clippy --all-targets -- -D warnings
 	cd sdk/rust-core && cargo clippy --all-targets --features obfuscate-strings -- -D warnings
+	cd sdk/rust-core && cargo clippy --all-targets --features vm-spike -- -D warnings
 
 ## ---- docker (prod-mirroring local stack) ----
 
