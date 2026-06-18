@@ -76,10 +76,9 @@ request-proof tag
 718bb06df45dc4bbc5bf483bd65acf7609429966adba8baff66fa965857ebd0d
 ```
 
-is asserted in **five** source files — three on the Go server, two in the Rust
+is asserted in **four** source files — two on the Go server, two in the Rust
 core — so the device and server can never drift on how a proof is computed:
 
-- `server/shared/proof/proof.go`
 - `server/shared/proof/proof_test.go`
 - `server/shared/crypto/crypto_test.go`
 - `sdk/rust-core/kseal-core/src/crypto.rs`
