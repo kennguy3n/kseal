@@ -97,7 +97,7 @@ properties for fingerprinting, `_dyld`-private SPI, or undocumented
 
 App Store Review Guideline **2.5.2** prohibits downloading or executing code that
 changes the app's behavior. kseal is designed so that **config is data, never
-code** (see [What to avoid](../ARCHITECTURE.md#what-to-avoid)):
+code** (see [What to avoid](../ARCHITECTURE.md#what-kseal-deliberately-avoids)):
 
 - **Signed remote config only.** Policy and module configuration are fetched as
   **signed data**, validated against an embedded public key, and *interpreted*
@@ -231,7 +231,7 @@ tenant's CI**:
   tenant's own build output — standard, App-Review-safe transformations that
   preserve a valid code signature.
 - kseal explicitly **avoids heavy VM/virtualization obfuscation**
-  ([What to avoid](../ARCHITECTURE.md#what-to-avoid)) because of its App Store
+  ([What to avoid](../ARCHITECTURE.md#what-kseal-deliberately-avoids)) because of its App Store
   risk and marginal benefit given server-side enforcement.
 - Crash symbolication is preserved (mapping material retained), so the hardened
   app still produces usable crash reports — avoiding the "broken app" rejection

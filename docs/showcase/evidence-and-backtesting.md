@@ -42,7 +42,7 @@ magnitude under the **< 40 ms** startup budget — because there is **no launch-
 network call**; the heavy primitives (Ed25519 config verification) only run when a
 *new signed config* arrives, not per request. The per-request proof is a single
 HMAC, sub-microsecond. This is what "lightweight or it doesn't count" means in
-numbers, and it backs the budget table in the [README](../../README.md#performance-budgets).
+numbers, and it backs the budget table in the [README](../../README.md#performance).
 
 ---
 

@@ -44,7 +44,7 @@ explains *how* each kseal claim is made true.
 
 ## RASP Modules (1–9)
 
-The nine kseal [runtime modules](../ARCHITECTURE.md#runtime-protection-modules).
+The nine kseal [runtime modules](../ARCHITECTURE.md#rasp-probes).
 Most incumbents cover the classic RASP detections well; kseal's differentiation
 is less about *having* a detection and more about **feeding it into a server-side
 decision** (covered in [API Attestation](#api-attestation--backend-trust)).
@@ -124,7 +124,7 @@ verified across `aarch64`/`arm`/`x86_64`/`x86` and recorded in the
 
 Guardsquare is still the build-hardening leader (its heritage is ProGuard/
 DexGuard). kseal deliberately
-[avoids heavy VM obfuscation](../ARCHITECTURE.md#what-to-avoid): it ships string/
+[avoids heavy VM obfuscation](../ARCHITECTURE.md#what-kseal-deliberately-avoids): it ships string/
 resource/symbol encryption, native hardening, per-build polymorphism and
 mapping-aware R8, but **does not ship a Guardsquare-class source/IR obfuscator** —
 hence those two rows stay **partial**. kseal competes on **local-CI execution**
