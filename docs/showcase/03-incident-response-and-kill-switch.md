@@ -57,6 +57,13 @@ Three properties make it safe:
   takes effect on the next attestation — globally, in seconds, with no client-side trust in a
   plaintext flag.
 
+The console scopes the switch to an app (or a specific build) and shows its current state; the
+signing and authority stay server-side — the console only requests the change:
+
+![kseal console — kill switch](screenshots/06-kill-switch.png)
+*The kill switch scoped to `pay-android`: armed and enforcing normally, with a single
+`Disable enforcement…` action that issues the signed command for incident response.*
+
 ### The receipts: a hash-chained audit trail
 
 Every control-plane action — issuing the kill switch, rolling policy, rotating a connector — is
@@ -65,6 +72,11 @@ written to a **tamper-evident, hash-chained audit log** in
 hash linking it to the previous entry. The console recomputes the chain on load and refuses to
 show "verified" if a single row was edited or deleted. That is the difference between *a log*
 and *evidence*: a deleted or altered row breaks the chain and is provably detectable.
+
+![kseal console — audit trail](screenshots/08-audit-trail.png)
+*Meridian's audit trail: the console reports the chain **verified** and lists every mutation —
+`tenant.create`, `app.create`, `policy.activate`, `killswitch.issue`, `canary.set` — with its
+actor and the resource it touched.*
 
 ### The same events reach the SOC
 

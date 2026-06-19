@@ -81,6 +81,16 @@ running `BLOCK` mode would have the same `HIGH_RISK` level denied outright. The
 minimized event for this scenario is committed at
 [`events/risk-event.json`](https://github.com/kennguy3n/kseal/blob/main/docs/reference/fixtures/events/risk-event.json).
 
+Each fraud-vector hit lands as its own server-scored event in the console — here
+in `pay-android`'s stream, `Malicious keyboard`, `Screen capture` and
+`Runtime tamper` sit alongside the ordinary `Policy decision` rows:
+
+![kseal console — fraud-vector events for pay-android](img/05-app-detail.png)
+
+*`pay-android`'s recent events: the fraud-vector probes (`Malicious keyboard`,
+`Screen capture`) surface as discrete events with their own risk band, next to
+the policy decisions they feed into.*
+
 ## What the SOC sees
 
 Because the decision is server-side, every fraud-vector hit becomes a structured

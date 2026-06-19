@@ -53,6 +53,15 @@ So a coordinated wave is met with elevated friction *for that cohort* while legi
 keep working — no one is locked out, and the on-call engineer is neither paged nor asked to
 configure anything.
 
+The raw material the guard learns from is the per-event signal population the console already
+shows — every event carries the `build` and `region` that define its cohort, so a surge of one
+signal in one `(build, region)` slice is exactly what the engine watches for:
+
+![kseal console — the tenant event stream](screenshots/02-events.png)
+*The tenant-wide event stream: each row carries its risk band, the `build` it was scored
+against, and the `region` it came from — the per-cohort dimensions Fleet Anomaly Guard
+baselines automatically.*
+
 The design is built for the SME-at-scale economics that make this affordable:
 
 - **O(1) per event**, in-process — no extra service to run.

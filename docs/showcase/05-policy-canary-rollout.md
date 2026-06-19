@@ -47,6 +47,13 @@ everyone:
 - **Tamper-evident record**: the revert (and any manual promotion) writes a hash-chained audit
   entry recording the breach and the action — no human in the loop, no 2 a.m. page.
 
+The candidate policy lives alongside the active one in the console — here `payments-canary-tighter`
+(v2) waits to be promoted while `payments-baseline` (v1) stays active:
+
+![kseal console — policies](screenshots/03-policies.png)
+*Meridian's policies for `pay-android`: `payments-baseline` is **active**, while the stricter
+`payments-canary-tighter` candidate is staged and ready to activate.*
+
 The mechanism: kseal deterministically buckets each instance into candidate or stable,
 attributes every live trust decision to its cohort, and the controller drives the guardrail.
 Promotion and rollback are also available as explicit controls when the engineer wants to drive
@@ -56,6 +63,15 @@ device verifies each policy offline against the pinned key before applying it.
 
 This is the release engineer's seatbelt: stage small, measure automatically, revert
 automatically, and keep a tamper-evident record of what happened.
+
+The canary monitor shows the live rollout — what fraction of traffic is on the candidate, the
+candidate's measured block rate against the rollback threshold, and whether auto-rollback is
+armed:
+
+![kseal console — canary monitor](screenshots/11-canary-monitor.png)
+*The `pay-android` rollout at **25%**, **Active** with **auto-rollback armed**: candidate block
+rate 0.0% against a 5.0% rollback threshold, so the guardrail holds and the candidate keeps
+serving its slice.*
 
 ---
 
