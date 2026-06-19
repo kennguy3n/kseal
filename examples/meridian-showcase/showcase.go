@@ -236,6 +236,14 @@ var currentBuildHashes = map[string]string{
 	"com.meridianpay.merchant": hashID("com.meridianpay.merchant/2.8.0"),
 }
 
+// repackedBuildHashes mirrors the repacked build hash seedApp derives for each
+// app, so the events-only reseed attributes the fraud campaign to the same
+// malicious build the kill switch targets.
+var repackedBuildHashes = map[string]string{
+	"com.meridianpay.wallet":   hashID("com.meridianpay.wallet/4.2.0-repack"),
+	"com.meridianpay.merchant": hashID("com.meridianpay.merchant/2.8.0-repack"),
+}
+
 // runEventsOnly re-ingests just the telemetry stream for the already-seeded
 // "meridian" tenant. The control-plane state (apps, policies, audit, …) lives in
 // Postgres and survives restarts, but the analytics store is in-memory and is
@@ -270,7 +278,11 @@ func (s *seeder) runEventsOnly() error {
 		if !ok {
 			continue
 		}
-		if err := s.ingestEvents(tenant.Id, appSeed{app: app, currentBuild: hash}); err != nil {
+		if err := s.ingestEvents(tenant.Id, appSeed{
+			app:           app,
+			currentBuild:  hash,
+			repackedBuild: repackedBuildHashes[app.PackageId],
+		}); err != nil {
 			return err
 		}
 		ingested++
@@ -475,7 +487,8 @@ func (s *seeder) seedAudit(tenantID string, pay, merchant appSeed) error {
 		{Action: "webhook.create", ResourceType: "webhook", ResourceID: "soc.meridianpay.com", ActorKeyID: "soc-admin", Metadata: map[string]string{"events": "attestation_fail,app_integrity_fail,policy_decision"}},
 		{Action: "siem.connector.create", ResourceType: "siem_connector", ResourceID: "splunk-hec", ActorKeyID: "soc-admin", Metadata: map[string]string{"kind": "splunk_hec", "index": "mobile_risk"}},
 		{Action: "data_processing.update", ResourceType: "data_processing", ResourceID: pay.app.Id, ActorKeyID: "compliance-owner", Metadata: map[string]string{"retention_days": "30"}},
-		{Action: "canary.create", ResourceType: "canary", ResourceID: pay.app.Id, ActorKeyID: "release-eng", Metadata: map[string]string{"percent": "25"}},
+		// Note: the canary action is recorded by SetCanary (step 11) as a
+		// canary.set entry, so it is not duplicated here.
 	}
 	for _, e := range entries {
 		if _, err := s.comp.AppendAudit(ctx, tenantID, e); err != nil {

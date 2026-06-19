@@ -83,11 +83,19 @@ func run(dsn, kekB64, ingestURL string, eventsOnly bool) error {
 	store := registry.NewPostgresStore(database, enc)
 	defer store.Close()
 
+	// The siem_connectors table is self-provisioned by the server on boot, not
+	// by the control-plane migration set. Provision it here too so the seeder
+	// also succeeds against a database the server has never started against.
+	siemStore := siem.NewPostgresConnectorStore(database, enc)
+	if err := siemStore.EnsureSchema(ctx); err != nil {
+		return fmt.Errorf("ensure siem schema: %w", err)
+	}
+
 	s := &seeder{
 		ctx:    ctx,
 		store:  store,
 		comp:   compliance.NewPostgresStore(database, store),
-		siem:   siem.NewPostgresConnectorStore(database, enc),
+		siem:   siemStore,
 		ingest: ksealv1connect.NewIngestServiceClient(http.DefaultClient, ingestURL),
 		rng:    mrand.New(mrand.NewSource(20240617)),
 	}
