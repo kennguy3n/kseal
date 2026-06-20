@@ -16,6 +16,4 @@ Tenant provisioning and tenant enumeration are platform-admin operations. `Creat
 
 ## Device-plane compatibility
 
-Public pre-attestation calls remain limited to nonce issuance and attestation verification, and both require a known app record. `GetConfig` is policy-marked as requiring an app/device credential, and `SubmitTelemetry` / `ValidateRequestProof` require trust-token credential semantics. In all cases, config and telemetry calls must run under a validated tenant/device credential context; a request body `tenant_id` is treated as a claim, not authority. SDKs that previously called config or telemetry without a credential need to roll out app/trust-token credentials before enabling those flows.
-
-The authoritative list is `ProcedurePolicies()` in `server/shared/middleware/policy.go`; tests assert that every generated Connect procedure has an explicit policy entry.
+Public pre-attestation calls remain limited to nonce issuance and attestation verification, and both require a known app record. Config and telemetry calls must run under a validated tenant/device credential context; a request body `tenant_id` is treated as a claim, not authority. SDKs that previously called config or telemetry without a credential need to roll out app/trust-token credentials before enabling those flows.
