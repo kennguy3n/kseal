@@ -45,6 +45,7 @@ func ParseCatalog(markdown string) (*Catalog, error) {
 	// dangle a held pointer. -1 means "no open category".
 	curIdx := -1
 	expectObjective, inObjective := false, false
+	cols := unsetTableColumns()
 
 	for sc.Scan() {
 		trimmed := strings.TrimSpace(sc.Text())
@@ -53,10 +54,12 @@ func ParseCatalog(markdown string) (*Catalog, error) {
 			cat.Categories = append(cat.Categories, Category{Name: name})
 			curIdx = len(cat.Categories) - 1
 			expectObjective, inObjective = true, false
+			cols = unsetTableColumns()
 			continue
 		}
 		if strings.HasPrefix(trimmed, "## ") {
 			curIdx, expectObjective, inObjective = -1, false, false
+			cols = unsetTableColumns()
 			continue
 		}
 		if curIdx < 0 {
@@ -77,14 +80,24 @@ func ParseCatalog(markdown string) (*Catalog, error) {
 			}
 		}
 		if cells, ok := tableRow(trimmed); ok {
-			if isHeaderOrSeparator(cells) {
+			if isSeparator(cells) {
 				continue
 			}
-			if len(cells) < 4 {
-				return nil, fmt.Errorf("category %q: malformed control row %q (want 4 columns, got %d)", cur.Name, trimmed, len(cells))
+			if parsed, ok := parseHeader(cells); ok {
+				cols = parsed
+				continue
+			}
+			if !cols.valid() {
+				return nil, fmt.Errorf("category %q: control table missing required header before row %q", cur.Name, trimmed)
+			}
+			if len(cells) <= cols.max() {
+				return nil, fmt.Errorf("category %q: malformed control row %q (want columns %v, got %d)", cur.Name, trimmed, cols.names(), len(cells))
 			}
 			cur.Controls = append(cur.Controls, Control{
-				Objective: cells[0], Control: cells[1], Module: cells[2], MASTG: cells[3],
+				Objective: cells[cols.objective],
+				Control:   cells[cols.control],
+				Module:    cells[cols.module],
+				MASTG:     cells[cols.mastg],
 			})
 		}
 	}
@@ -120,10 +133,7 @@ func tableRow(line string) ([]string, bool) {
 	return cells, true
 }
 
-func isHeaderOrSeparator(cells []string) bool {
-	if len(cells) > 0 && strings.EqualFold(cells[0], "MASVS objective") {
-		return true
-	}
+func isSeparator(cells []string) bool {
 	for _, c := range cells {
 		if c == "" {
 			continue
@@ -133,4 +143,56 @@ func isHeaderOrSeparator(cells []string) bool {
 		}
 	}
 	return true
+}
+
+type tableColumns struct {
+	objective int
+	control   int
+	module    int
+	mastg     int
+}
+
+func unsetTableColumns() tableColumns {
+	return tableColumns{objective: -1, control: -1, module: -1, mastg: -1}
+}
+
+func (c tableColumns) valid() bool {
+	return c.objective >= 0 && c.control >= 0 && c.module >= 0 && c.mastg >= 0
+}
+
+func (c tableColumns) max() int {
+	max := c.objective
+	for _, v := range []int{c.control, c.module, c.mastg} {
+		if v > max {
+			max = v
+		}
+	}
+	return max
+}
+
+func (c tableColumns) names() []string {
+	return []string{"MASVS objective", "kseal control", "Module / component", "MASTG verification"}
+}
+
+func parseHeader(cells []string) (tableColumns, bool) {
+	cols := unsetTableColumns()
+	for i, cell := range cells {
+		switch normalizedHeader(cell) {
+		case "masvs objective":
+			cols.objective = i
+		case "kseal control":
+			cols.control = i
+		case "module component":
+			cols.module = i
+		case "mastg verification":
+			cols.mastg = i
+		}
+	}
+	return cols, cols.valid()
+}
+
+func normalizedHeader(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	s = strings.ReplaceAll(s, "/", " ")
+	return strings.Join(strings.Fields(s), " ")
 }
