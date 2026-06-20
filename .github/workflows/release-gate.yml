@@ -203,9 +203,21 @@ jobs:
     steps:
       - name: Enforce all gates passed
         run: |
-          results='${{ join(needs.*.result, ',') }}'
-          echo "gate inputs: $results"
-          if echo "$results" | tr ',' '\n' | grep -qvE '^success$'; then
+          failed=0
+          for result in \
+            "proto-drift=${{ needs.proto-drift.result }}" \
+            "buf-breaking=${{ needs.buf-breaking.result }}" \
+            "build-test=${{ needs.build-test.result }}" \
+            "integration=${{ needs.integration.result }}" \
+            "images=${{ needs.images.result }}" \
+            "deploy-validate=${{ needs.deploy-validate.result }}"; do
+            echo "gate input: $result"
+            if ! [[ "$result" =~ =success$ ]]; then
+              echo "::error::$result"
+              failed=1
+            fi
+          done
+          if [[ "$failed" -ne 0 ]]; then
             echo "::error::one or more release-gate jobs did not succeed"
             exit 1
           fi
