@@ -53,6 +53,11 @@ var (
 func requireRedpanda(t *testing.T) []string {
 	t.Helper()
 	redpandaOnce.Do(func() {
+		defer func() {
+			if r := recover(); r != nil {
+				redpandaErr = fmt.Errorf("start Redpanda container: %v", r)
+			}
+		}()
 		ctx := context.Background()
 		c, err := tcredpanda.Run(ctx, redpandaImage, tcredpanda.WithAutoCreateTopics())
 		if err != nil {
@@ -100,6 +105,11 @@ func createKafkaTopic(t *testing.T, brokers []string, partitions int32) string {
 func requireClickHouse(t *testing.T) string {
 	t.Helper()
 	clickhouseOnce.Do(func() {
+		defer func() {
+			if r := recover(); r != nil {
+				clickhouseErr = fmt.Errorf("start ClickHouse container: %v", r)
+			}
+		}()
 		ctx := context.Background()
 		c, err := tcclickhouse.Run(ctx, clickhouseImage,
 			tcclickhouse.WithDatabase(chDatabase),

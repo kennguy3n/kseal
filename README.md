@@ -68,22 +68,25 @@ make docker-down        # use `make docker-clean` to also drop the volume
 
 | Service | Plane | Auth | Notes |
 |---|---|---|---|
-| `RegistryService` | Control | **API key required** (`Authorization: Bearer ksk_…`) | Tenants, apps, builds, policies, webhooks |
-| `TrustService` | Device | Tenant from request body + signed proof | `GetNonce` → `VerifyAttestation` → `ValidateRequestProof` |
-| `ConfigService` | Device | Tenant from request body | Signed, cacheable policy config |
-| `IngestService` | Device | Tenant from request body | zstd-compressed telemetry batches |
-| `QueryService` | Control | API key required | Dashboard overview, event listing, trust stats |
-| `WebhookService` | Control | API key required | HMAC-signed event fan-out |
+| `RegistryService` | Control | **Scoped API key** (`Authorization: Bearer ksk_…`) | Tenants, apps, builds, policies, webhooks; tenant APIs require tenant binding and scopes, while tenant create/list require platform-admin credentials |
+| `TrustService` | Device | Public nonce/attestation entrypoints, then trust-token proof | `GetNonce` → `VerifyAttestation` require a known app; `ValidateRequestProof` requires the issued trust token |
+| `ConfigService` | Device / control | Device credential for `GetConfig`; scoped API key for `GetPolicy` | Signed, cacheable policy config |
+| `IngestService` | Device | Trust-token/device credential | zstd-compressed telemetry batches; request-body `tenant_id` is a claim, not authority |
+| `QueryService` | Control | Scoped API key (`query:read`) | Dashboard overview, event listing, trust stats |
+| `WebhookService` | Control | Scoped API key (`webhook:*`) | HMAC-signed event fan-out |
 
-> **Bootstrapping the first API key.** Control-plane procedures
-> (`RegistryService`, `QueryService`, `WebhookService`) require a valid API key;
-> an unauthenticated control-plane call returns `401 Unauthenticated`. The
-> initial admin tenant and key are seeded through the registry store
+> **Bootstrapping the first API key.** Control-plane procedures are governed by
+> the per-procedure policy table in
+> [`server/shared/middleware/policy.go`](server/shared/middleware/policy.go);
+> an unauthenticated protected call returns `401 Unauthenticated`, while a valid
+> key missing a required scope returns `403 PermissionDenied`. The initial
+> platform-admin tenant and key are seeded through the registry store
 > (`registry.Store.CreateTenant` + `CreateAPIKey`), exactly as the integration
-> harness does in [`tests/harness_test.go`](tests/harness_test.go). The
-> device-plane flow (`TrustService` / `ConfigService` / `IngestService`) needs
-> no API key — it is scoped by the `tenant_id` in the request body and gated by
-> signed proofs.
+> harness does in [`tests/harness_test.go`](tests/harness_test.go). Device-plane
+> config and telemetry calls require a validated tenant/device credential; a
+> body `tenant_id` alone is treated only as a claim. See
+> [`docs/authz-hardening.md`](docs/authz-hardening.md) for the current scope and
+> device-credential model.
 
 The device-plane trust flow is exercised end-to-end (challenge → platform
 attestation → trust token → signed request proof → `ALLOW` / `STEP_UP` / `DENY`)
@@ -154,7 +157,8 @@ curl -s -o /dev/null -w '%{http_code}\n' \
   -H "Content-Type: application/json" -d '{}'      # => 401
 ```
 
-Start the trust flow (device plane — no API key; scoped by `tenant_id`):
+Start the public pre-attestation trust flow (device plane — nonce/attestation
+are public entrypoints, but the tenant/app must already exist):
 
 ```bash
 curl -fsS localhost:8080/kseal.v1.TrustService/GetNonce \

@@ -159,7 +159,12 @@ func setupHarness() (func(), error) {
 	return cleanup, nil
 }
 
-func startPostgres(ctx context.Context) (string, func(), error) {
+func startPostgres(ctx context.Context) (dsn string, cleanup func(), err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("start postgres container: %v", r)
+		}
+	}()
 	c, err := tcpostgres.Run(ctx, "postgres:16-alpine",
 		tcpostgres.WithDatabase("kseal"),
 		tcpostgres.WithUsername("kseal"),
@@ -172,7 +177,7 @@ func startPostgres(ctx context.Context) (string, func(), error) {
 		return "", nil, err
 	}
 	clean := func() { _ = c.Terminate(context.Background()) }
-	dsn, err := c.ConnectionString(ctx, "sslmode=disable")
+	dsn, err = c.ConnectionString(ctx, "sslmode=disable")
 	if err != nil {
 		clean()
 		return "", nil, err
@@ -180,7 +185,12 @@ func startPostgres(ctx context.Context) (string, func(), error) {
 	return dsn, clean, nil
 }
 
-func startRedis(ctx context.Context) (string, func(), error) {
+func startRedis(ctx context.Context) (addr string, cleanup func(), err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("start redis container: %v", r)
+		}
+	}()
 	c, err := tcredis.Run(ctx, "redis:7-alpine")
 	if err != nil {
 		return "", nil, err

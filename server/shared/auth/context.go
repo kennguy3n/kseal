@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"strings"
 )
 
 type ctxKey int
@@ -17,19 +18,28 @@ const (
 // from the validated request body; for control-plane calls the API key fields
 // are also present.
 type Principal struct {
-	TenantID string
-	APIKeyID string
-	Scopes   []string
+	TenantID      string
+	APIKeyID      string
+	Scopes        []string
+	PlatformAdmin bool
 }
 
-// HasScope reports whether the principal carries the named scope. An empty scope
-// set is treated as full access for first-party control-plane keys.
+// HasScope reports whether the principal carries the named scope. Scopes are
+// explicit: an empty scope set grants no privileges. A literal "*" grants every
+// non-platform scope. Platform scopes are only honored for principals that were
+// explicitly marked as platform admins.
 func (p *Principal) HasScope(scope string) bool {
-	if len(p.Scopes) == 0 {
-		return true
-	}
 	for _, s := range p.Scopes {
-		if s == scope || s == "*" {
+		if s == scope {
+			return true
+		}
+		if strings.HasSuffix(s, ":*") && strings.HasPrefix(scope, strings.TrimSuffix(s, "*")) && !strings.HasPrefix(scope, "platform:") {
+			return true
+		}
+		if s == "*" && !strings.HasPrefix(scope, "platform:") {
+			return true
+		}
+		if p.PlatformAdmin && s == "platform:*" && strings.HasPrefix(scope, "platform:") {
 			return true
 		}
 	}

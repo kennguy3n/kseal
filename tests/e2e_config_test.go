@@ -10,6 +10,7 @@ import (
 
 	cfgsvc "github.com/kennguy3n/kseal/server/data-plane/config"
 	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
+	"github.com/kennguy3n/kseal/server/shared/auth"
 	kcrypto "github.com/kennguy3n/kseal/server/shared/crypto"
 )
 
@@ -20,6 +21,7 @@ func TestE2EConfig(t *testing.T) {
 	store := newStore(t)
 	tenant := makeTenant(t, store, "config")
 	app := makeApp(t, store, tenant.Id, "com.kseal.config")
+	configCtx := auth.WithTenant(ctx, tenant.Id)
 	const rulesV1 = `{"rules":[{"id":"r1","risk_mask":1,"min_score":40,"action":"step_up"}],"signal_weights":{"0":40}}`
 	const thresholds = `{"HIGH_RISK":90,"MEDIUM_RISK":50}`
 	activatePolicy(t, store, tenant.Id, app.Id, ksealv1.EnforcementMode_ENFORCEMENT_MODE_STEP_UP, rulesV1, thresholds)
@@ -33,7 +35,7 @@ func TestE2EConfig(t *testing.T) {
 		if ifNoneMatch != "" {
 			req.Header().Set("If-None-Match", ifNoneMatch)
 		}
-		resp, err := svc.GetConfig(ctx, req)
+		resp, err := svc.GetConfig(configCtx, req)
 		if err != nil {
 			t.Fatalf("get config: %v", err)
 		}

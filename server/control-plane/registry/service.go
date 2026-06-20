@@ -34,6 +34,17 @@ func requireTenant(ctx context.Context, bodyTenant string) error {
 	return nil
 }
 
+func requirePlatformAdmin(ctx context.Context) error {
+	p, ok := auth.PrincipalFrom(ctx)
+	if !ok {
+		return connect.NewError(connect.CodeUnauthenticated, errors.New("missing principal"))
+	}
+	if !p.PlatformAdmin {
+		return connect.NewError(connect.CodePermissionDenied, errors.New("platform admin required"))
+	}
+	return nil
+}
+
 func toConnectErr(err error) error {
 	switch {
 	case err == nil:
@@ -56,6 +67,9 @@ func toConnectErr(err error) error {
 // ---- Tenants ----
 
 func (s *Service) CreateTenant(ctx context.Context, req *connect.Request[ksealv1.CreateTenantRequest]) (*connect.Response[ksealv1.CreateTenantResponse], error) {
+	if err := requirePlatformAdmin(ctx); err != nil {
+		return nil, err
+	}
 	t, err := s.store.CreateTenant(ctx, CreateTenantInput{Name: req.Msg.Name, Slug: req.Msg.Slug, Tier: req.Msg.Tier})
 	if err != nil {
 		return nil, toConnectErr(err)
@@ -75,6 +89,9 @@ func (s *Service) GetTenant(ctx context.Context, req *connect.Request[ksealv1.Ge
 }
 
 func (s *Service) ListTenants(ctx context.Context, req *connect.Request[ksealv1.ListTenantsRequest]) (*connect.Response[ksealv1.ListTenantsResponse], error) {
+	if err := requirePlatformAdmin(ctx); err != nil {
+		return nil, err
+	}
 	tenants, next, err := s.store.ListTenants(ctx, Page{Size: int(req.Msg.PageSize), Token: req.Msg.PageToken})
 	if err != nil {
 		return nil, toConnectErr(err)
