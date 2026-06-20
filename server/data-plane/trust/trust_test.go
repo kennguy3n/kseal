@@ -240,3 +240,51 @@ func TestVerifyAttestationRejectsFailedAttestation(t *testing.T) {
 		t.Fatal("expected rejection reason")
 	}
 }
+
+func TestVerifyAttestationRejectsUnknownApp(t *testing.T) {
+	svc, _, tn, _ := setupService(t, &attestation.Result{Accepted: true})
+	ctx := context.Background()
+	nonce, _, err := svc.nonces.Issue(ctx, tn.Id, "00000000-0000-0000-0000-000000000000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := svc.VerifyAttestation(ctx, connect.NewRequest(&ksealv1.AttestationRequest{
+		TenantId: tn.Id, AppId: "00000000-0000-0000-0000-000000000000", Platform: ksealv1.Platform_PLATFORM_ANDROID, Nonce: nonce,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Msg.Accepted || resp.Msg.RejectionReason == "" {
+		t.Fatalf("expected unknown app rejection, got %+v", resp.Msg)
+	}
+}
+
+type captureVerifier struct{ in attestation.Input }
+
+func (c *captureVerifier) Verify(_ context.Context, in attestation.Input) (*attestation.Result, error) {
+	c.in = in
+	if in.AppID != "com.x" {
+		return &attestation.Result{Accepted: false, Reason: "package mismatch"}, nil
+	}
+	return &attestation.Result{Accepted: true, AppRecognized: true, DeviceIntegrity: true}, nil
+}
+
+func TestVerifyAttestationBindsKnownAppIdentity(t *testing.T) {
+	store := registry.NewMemStore()
+	ctx := context.Background()
+	tn, _ := store.CreateTenant(ctx, registry.CreateTenantInput{Name: "T", Slug: "t-bind"})
+	app, _ := store.CreateApp(ctx, registry.CreateAppInput{TenantID: tn.Id, Name: "A", PackageID: "com.x", Platform: ksealv1.Platform_PLATFORM_ANDROID})
+	cv := &captureVerifier{}
+	svc := NewService(store, NewNonceStore(newRedis(t), time.Minute), attestation.NewVerifier(cv, cv), time.Minute, appconfig.FeatureFlags{})
+	nonceResp, err := svc.GetNonce(ctx, connect.NewRequest(&ksealv1.NonceRequest{TenantId: tn.Id, AppId: app.Id, Platform: ksealv1.Platform_PLATFORM_ANDROID}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := svc.VerifyAttestation(ctx, connect.NewRequest(&ksealv1.AttestationRequest{TenantId: tn.Id, AppId: app.Id, Platform: ksealv1.Platform_PLATFORM_ANDROID, Nonce: nonceResp.Msg.Nonce}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resp.Msg.Accepted || cv.in.AppID != "com.x" {
+		t.Fatalf("expected app-bound acceptance, accepted=%v appID=%q", resp.Msg.Accepted, cv.in.AppID)
+	}
+}

@@ -10,6 +10,7 @@ import (
 	"github.com/kennguy3n/kseal/server/control-plane/registry"
 	"github.com/kennguy3n/kseal/server/data-plane/canary"
 	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
+	"github.com/kennguy3n/kseal/server/shared/auth"
 	appconfig "github.com/kennguy3n/kseal/server/shared/config"
 )
 
@@ -42,7 +43,7 @@ func createPolicy(t *testing.T, store registry.Store, tenantID, appID, name stri
 
 func servedVersion(t *testing.T, svc *Service, tenantID, appID, instanceID string) int64 {
 	t.Helper()
-	resp, err := svc.GetConfig(context.Background(), connect.NewRequest(&ksealv1.ConfigRequest{
+	resp, err := svc.GetConfig(auth.WithTenant(context.Background(), tenantID), connect.NewRequest(&ksealv1.ConfigRequest{
 		TenantId: tenantID, AppId: appID, InstanceId: instanceID,
 	}))
 	if err != nil {
@@ -96,7 +97,7 @@ func TestKillSwitchDeliveryFlagGated(t *testing.T) {
 
 	// Flag OFF: no kill switch delivered.
 	svc.AttachCompliance(nil, cs, mustFlags(t, ""))
-	resp, err := svc.GetConfig(context.Background(), connect.NewRequest(&ksealv1.ConfigRequest{TenantId: tn.Id, AppId: app.Id}))
+	resp, err := svc.GetConfig(auth.WithTenant(context.Background(), tn.Id), connect.NewRequest(&ksealv1.ConfigRequest{TenantId: tn.Id, AppId: app.Id}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +107,7 @@ func TestKillSwitchDeliveryFlagGated(t *testing.T) {
 
 	// Flag ON: signed DISABLE delivered in the config envelope.
 	svc.AttachCompliance(nil, cs, mustFlags(t, "*:"+compliance.FlagKillSwitch+"=true"))
-	resp, err = svc.GetConfig(context.Background(), connect.NewRequest(&ksealv1.ConfigRequest{TenantId: tn.Id, AppId: app.Id}))
+	resp, err = svc.GetConfig(auth.WithTenant(context.Background(), tn.Id), connect.NewRequest(&ksealv1.ConfigRequest{TenantId: tn.Id, AppId: app.Id}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +130,7 @@ func TestKillSwitchChangesETag(t *testing.T) {
 	cs := compliance.NewMemStore(store)
 	svc.AttachCompliance(nil, cs, mustFlags(t, "*:"+compliance.FlagKillSwitch+"=true"))
 
-	base, err := svc.GetConfig(context.Background(), connect.NewRequest(&ksealv1.ConfigRequest{TenantId: tn.Id, AppId: app.Id}))
+	base, err := svc.GetConfig(auth.WithTenant(context.Background(), tn.Id), connect.NewRequest(&ksealv1.ConfigRequest{TenantId: tn.Id, AppId: app.Id}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +139,7 @@ func TestKillSwitchChangesETag(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	after, err := svc.GetConfig(context.Background(), connect.NewRequest(&ksealv1.ConfigRequest{TenantId: tn.Id, AppId: app.Id}))
+	after, err := svc.GetConfig(auth.WithTenant(context.Background(), tn.Id), connect.NewRequest(&ksealv1.ConfigRequest{TenantId: tn.Id, AppId: app.Id}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +162,7 @@ func TestBuildScopedKillSwitchDeliveredViaConfig(t *testing.T) {
 	svc.AttachCompliance(nil, cs, mustFlags(t, "*:"+compliance.FlagKillSwitch+"=true"))
 
 	// No build hash: the build-scoped switch must not apply.
-	resp, err := svc.GetConfig(context.Background(), connect.NewRequest(&ksealv1.ConfigRequest{TenantId: tn.Id, AppId: app.Id}))
+	resp, err := svc.GetConfig(auth.WithTenant(context.Background(), tn.Id), connect.NewRequest(&ksealv1.ConfigRequest{TenantId: tn.Id, AppId: app.Id}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +171,7 @@ func TestBuildScopedKillSwitchDeliveredViaConfig(t *testing.T) {
 	}
 
 	// Matching build hash: the build-scoped switch is delivered.
-	resp, err = svc.GetConfig(context.Background(), connect.NewRequest(&ksealv1.ConfigRequest{TenantId: tn.Id, AppId: app.Id, BuildHash: build}))
+	resp, err = svc.GetConfig(auth.WithTenant(context.Background(), tn.Id), connect.NewRequest(&ksealv1.ConfigRequest{TenantId: tn.Id, AppId: app.Id, BuildHash: build}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +192,7 @@ func TestCacheControlPrivateWhenInstanceSpecific(t *testing.T) {
 	svc.AttachCompliance(reg, nil, mustFlags(t, tn.Id+":"+compliance.FlagCanaryRollout+"=true"))
 
 	// Stable (no candidate, no kill switch) stays publicly cacheable.
-	stableResp, err := svc.GetConfig(context.Background(), connect.NewRequest(&ksealv1.ConfigRequest{TenantId: tn.Id, AppId: app.Id}))
+	stableResp, err := svc.GetConfig(auth.WithTenant(context.Background(), tn.Id), connect.NewRequest(&ksealv1.ConfigRequest{TenantId: tn.Id, AppId: app.Id}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +201,7 @@ func TestCacheControlPrivateWhenInstanceSpecific(t *testing.T) {
 	}
 
 	// A served canary candidate is instance-specific and must be private.
-	candResp, err := svc.GetConfig(context.Background(), connect.NewRequest(&ksealv1.ConfigRequest{TenantId: tn.Id, AppId: app.Id, InstanceId: "inst-1"}))
+	candResp, err := svc.GetConfig(auth.WithTenant(context.Background(), tn.Id), connect.NewRequest(&ksealv1.ConfigRequest{TenantId: tn.Id, AppId: app.Id, InstanceId: "inst-1"}))
 	if err != nil {
 		t.Fatal(err)
 	}

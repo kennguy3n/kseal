@@ -10,6 +10,7 @@ import (
 
 	"github.com/kennguy3n/kseal/server/control-plane/registry"
 	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
+	"github.com/kennguy3n/kseal/server/shared/auth"
 	"github.com/kennguy3n/kseal/server/shared/crypto"
 )
 
@@ -51,7 +52,7 @@ func TestGetConfigSignsAssembledPolicy(t *testing.T) {
 		`{"rules":[{"id":"r1","risk_mask":1,"min_score":50,"action":"block","description":"root"}],"signal_weights":{"0":70}}`,
 		`{"HIGH_RISK":90}`)
 
-	resp, err := svc.GetConfig(context.Background(), connect.NewRequest(&ksealv1.ConfigRequest{TenantId: tn.Id, AppId: app.Id}))
+	resp, err := svc.GetConfig(auth.WithTenant(context.Background(), tn.Id), connect.NewRequest(&ksealv1.ConfigRequest{TenantId: tn.Id, AppId: app.Id}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +95,7 @@ func TestGetConfigCarriesReattestInterval(t *testing.T) {
 	activatePolicy(t, store, tn.Id, app.Id,
 		`{"rules":[],"reattest_interval_secs":900}`, "{}")
 
-	resp, err := svc.GetConfig(context.Background(), connect.NewRequest(&ksealv1.ConfigRequest{TenantId: tn.Id, AppId: app.Id}))
+	resp, err := svc.GetConfig(auth.WithTenant(context.Background(), tn.Id), connect.NewRequest(&ksealv1.ConfigRequest{TenantId: tn.Id, AppId: app.Id}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,9 +108,16 @@ func TestGetConfigCarriesReattestInterval(t *testing.T) {
 	}
 
 	// A policy without the field keeps continuous mode off (default 0).
-	_, _, tn2, app2 := setup(t)
+	tn2, err := store.CreateTenant(context.Background(), registry.CreateTenantInput{Name: "T2", Slug: "t-cfg-2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	app2, err := store.CreateApp(context.Background(), registry.CreateAppInput{TenantID: tn2.Id, Name: "A2", PackageID: "com.cfg2", Platform: ksealv1.Platform_PLATFORM_ANDROID})
+	if err != nil {
+		t.Fatal(err)
+	}
 	activatePolicy(t, store, tn2.Id, app2.Id, "[]", "{}")
-	resp2, err := svc.GetConfig(context.Background(), connect.NewRequest(&ksealv1.ConfigRequest{TenantId: tn2.Id, AppId: app2.Id}))
+	resp2, err := svc.GetConfig(auth.WithTenant(context.Background(), tn2.Id), connect.NewRequest(&ksealv1.ConfigRequest{TenantId: tn2.Id, AppId: app2.Id}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +132,7 @@ func TestGetConfigCarriesReattestInterval(t *testing.T) {
 
 func TestGetConfigNoPolicyIsNotFound(t *testing.T) {
 	svc, _, tn, app := setup(t)
-	_, err := svc.GetConfig(context.Background(), connect.NewRequest(&ksealv1.ConfigRequest{TenantId: tn.Id, AppId: app.Id}))
+	_, err := svc.GetConfig(auth.WithTenant(context.Background(), tn.Id), connect.NewRequest(&ksealv1.ConfigRequest{TenantId: tn.Id, AppId: app.Id}))
 	if connect.CodeOf(err) != connect.CodeNotFound {
 		t.Fatalf("expected not found, got %v", err)
 	}
@@ -133,13 +141,13 @@ func TestGetConfigNoPolicyIsNotFound(t *testing.T) {
 func TestGetConfigETagShortCircuit(t *testing.T) {
 	svc, store, tn, app := setup(t)
 	activatePolicy(t, store, tn.Id, app.Id, "[]", "{}")
-	first, err := svc.GetConfig(context.Background(), connect.NewRequest(&ksealv1.ConfigRequest{TenantId: tn.Id, AppId: app.Id}))
+	first, err := svc.GetConfig(auth.WithTenant(context.Background(), tn.Id), connect.NewRequest(&ksealv1.ConfigRequest{TenantId: tn.Id, AppId: app.Id}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	req := connect.NewRequest(&ksealv1.ConfigRequest{TenantId: tn.Id, AppId: app.Id})
 	req.Header().Set("If-None-Match", first.Msg.Etag)
-	second, err := svc.GetConfig(context.Background(), req)
+	second, err := svc.GetConfig(auth.WithTenant(context.Background(), tn.Id), req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,11 +162,28 @@ func TestGetConfigETagShortCircuit(t *testing.T) {
 func TestGetPolicyReturnsAssembled(t *testing.T) {
 	svc, store, tn, app := setup(t)
 	activatePolicy(t, store, tn.Id, app.Id, "[]", "{}")
-	resp, err := svc.GetPolicy(context.Background(), connect.NewRequest(&ksealv1.PolicyRequest{TenantId: tn.Id, AppId: app.Id}))
+	resp, err := svc.GetPolicy(auth.WithTenant(context.Background(), tn.Id), connect.NewRequest(&ksealv1.PolicyRequest{TenantId: tn.Id, AppId: app.Id}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if resp.Msg.Policy == nil || resp.Msg.Policy.PolicyHash == "" {
 		t.Fatalf("missing policy: %+v", resp.Msg.Policy)
+	}
+}
+
+func TestGetConfigRejectsUnauthenticatedTenantBodyOnlyRequest(t *testing.T) {
+	svc, store, tn, app := setup(t)
+	activatePolicy(t, store, tn.Id, app.Id, "[]", "{}")
+	_, err := svc.GetConfig(context.Background(), connect.NewRequest(&ksealv1.ConfigRequest{TenantId: tn.Id, AppId: app.Id}))
+	if connect.CodeOf(err) != connect.CodeUnauthenticated {
+		t.Fatalf("expected unauthenticated, got %v", err)
+	}
+}
+
+func TestGetConfigRejectsUnknownApp(t *testing.T) {
+	svc, _, tn, _ := setup(t)
+	_, err := svc.GetConfig(auth.WithTenant(context.Background(), tn.Id), connect.NewRequest(&ksealv1.ConfigRequest{TenantId: tn.Id, AppId: "00000000-0000-0000-0000-000000000000"}))
+	if connect.CodeOf(err) != connect.CodeNotFound {
+		t.Fatalf("expected not found, got %v", err)
 	}
 }

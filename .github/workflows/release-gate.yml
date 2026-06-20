@@ -188,10 +188,22 @@ jobs:
         with:
           terraform_version: "1.9.8"
       - name: terraform fmt + validate
+        env:
+          TF_PLUGIN_CACHE_DIR: ${{ runner.temp }}/terraform-plugin-cache
         run: |
+          mkdir -p "$TF_PLUGIN_CACHE_DIR"
           terraform -chdir=deploy/terraform fmt -check -recursive
           for dir in deploy/terraform/modules/* deploy/terraform/envs/*; do
-            terraform -chdir="$dir" init -backend=false -input=false
+            for attempt in 1 2 3; do
+              if terraform -chdir="$dir" init -backend=false -input=false; then
+                break
+              fi
+              if [[ "$attempt" -eq 3 ]]; then
+                echo "::error::terraform init failed for $dir after $attempt attempts"
+                exit 1
+              fi
+              sleep "$((attempt * 5))"
+            done
             terraform -chdir="$dir" validate
           done
 
@@ -203,9 +215,21 @@ jobs:
     steps:
       - name: Enforce all gates passed
         run: |
-          results='${{ join(needs.*.result, ',') }}'
-          echo "gate inputs: $results"
-          if echo "$results" | tr ',' '\n' | grep -qvE '^success$'; then
+          failed=0
+          for result in \
+            "proto-drift=${{ needs.proto-drift.result }}" \
+            "buf-breaking=${{ needs.buf-breaking.result }}" \
+            "build-test=${{ needs.build-test.result }}" \
+            "integration=${{ needs.integration.result }}" \
+            "images=${{ needs.images.result }}" \
+            "deploy-validate=${{ needs.deploy-validate.result }}"; do
+            echo "gate input: $result"
+            if ! [[ "$result" =~ =success$ ]]; then
+              echo "::error::$result"
+              failed=1
+            fi
+          done
+          if [[ "$failed" -ne 0 ]]; then
             echo "::error::one or more release-gate jobs did not succeed"
             exit 1
           fi

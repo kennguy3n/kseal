@@ -59,7 +59,8 @@ func (p *pipeline) submit(t *testing.T, tenantID, appID string, batch *ksealv1.T
 	if err != nil {
 		t.Fatalf("marshal batch: %v", err)
 	}
-	resp, err := p.ingest.SubmitTelemetry(context.Background(), connect.NewRequest(&ksealv1.SubmitTelemetryRequest{
+	ctx := auth.WithTenant(context.Background(), tenantID)
+	resp, err := p.ingest.SubmitTelemetry(ctx, connect.NewRequest(&ksealv1.SubmitTelemetryRequest{
 		TenantId:        tenantID,
 		AppId:           appID,
 		CompressedBatch: zstdCompress(t, raw),
