@@ -14,6 +14,7 @@ import (
 	"github.com/kennguy3n/kseal/server/data-plane/webhook"
 	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
 	"github.com/kennguy3n/kseal/server/gen/kseal/v1/ksealv1connect"
+	"github.com/kennguy3n/kseal/server/shared/auth"
 	"github.com/kennguy3n/kseal/server/shared/middleware"
 	"github.com/kennguy3n/kseal/server/shared/telemetry"
 	"github.com/rs/zerolog"
@@ -34,6 +35,17 @@ type testServer struct {
 	Analytics *ingest.InMemoryAnalyticsStore
 }
 
+type testValidator struct{ *registry.MemStore }
+
+func (v testValidator) ValidateAPIKey(ctx context.Context, plaintext string) (*auth.Principal, error) {
+	p, err := v.MemStore.ValidateAPIKey(ctx, plaintext)
+	if err != nil {
+		return nil, err
+	}
+	p.PlatformAdmin = true
+	return p, nil
+}
+
 // newTestServer builds the harness, seeding one tenant + API key so control
 // -plane calls authenticate. t.Cleanup stops the server.
 func newTestServer(t *testing.T) *testServer {
@@ -45,7 +57,7 @@ func newTestServer(t *testing.T) *testServer {
 	if err != nil {
 		t.Fatalf("seed tenant: %v", err)
 	}
-	apiKey, _, err := store.CreateAPIKey(ctx, tenant.Id, "cli-test", []string{"admin"})
+	apiKey, _, err := store.CreateAPIKey(ctx, tenant.Id, "cli-test", []string{"*", "platform:*"})
 	if err != nil {
 		t.Fatalf("seed api key: %v", err)
 	}
@@ -63,11 +75,11 @@ func newTestServer(t *testing.T) *testServer {
 	t.Cleanup(func() { _ = tel.Shutdown(context.Background()) })
 
 	ic := &middleware.Interceptors{
-		Logger:      testLogger(),
-		Metrics:     tel.Metrics,
-		Tracer:      *tel,
-		Validator:   store,
-		RequireAuth: requireAuthProcedures(),
+		Logger:    testLogger(),
+		Metrics:   tel.Metrics,
+		Tracer:    *tel,
+		Validator: testValidator{store},
+		Policies:  middleware.ProcedurePolicies(),
 	}
 	opts := ic.Chain()
 
@@ -82,34 +94,6 @@ func newTestServer(t *testing.T) *testServer {
 	return &testServer{
 		URL: srv.URL, APIKey: apiKey, TenantID: tenant.Id,
 		Store: store, Analytics: analytics,
-	}
-}
-
-// requireAuthProcedures mirrors the server's controlPlaneProcedures set.
-func requireAuthProcedures() map[string]bool {
-	return map[string]bool{
-		ksealv1connect.RegistryServiceCreateTenantProcedure:            true,
-		ksealv1connect.RegistryServiceGetTenantProcedure:               true,
-		ksealv1connect.RegistryServiceListTenantsProcedure:             true,
-		ksealv1connect.RegistryServiceUpdateTenantProcedure:            true,
-		ksealv1connect.RegistryServiceCreateAppProcedure:               true,
-		ksealv1connect.RegistryServiceGetAppProcedure:                  true,
-		ksealv1connect.RegistryServiceListAppsProcedure:                true,
-		ksealv1connect.RegistryServiceCreateBuildProcedure:             true,
-		ksealv1connect.RegistryServiceGetBuildProcedure:                true,
-		ksealv1connect.RegistryServiceListBuildsProcedure:              true,
-		ksealv1connect.RegistryServiceCreatePolicyProcedure:            true,
-		ksealv1connect.RegistryServiceGetActivePolicyProcedure:         true,
-		ksealv1connect.RegistryServiceListPoliciesProcedure:            true,
-		ksealv1connect.RegistryServiceActivatePolicyProcedure:          true,
-		ksealv1connect.RegistryServiceCreateProtectionProfileProcedure: true,
-		ksealv1connect.RegistryServiceListProtectionProfilesProcedure:  true,
-		ksealv1connect.WebhookServiceRegisterWebhookProcedure:          true,
-		ksealv1connect.WebhookServiceListWebhooksProcedure:             true,
-		ksealv1connect.WebhookServiceDeleteWebhookProcedure:            true,
-		ksealv1connect.QueryServiceListEventsProcedure:                 true,
-		ksealv1connect.QueryServiceGetTenantOverviewProcedure:          true,
-		ksealv1connect.QueryServiceGetTrustSessionStatsProcedure:       true,
 	}
 }
 

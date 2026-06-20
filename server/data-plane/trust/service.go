@@ -179,6 +179,15 @@ func (s *Service) GetNonce(ctx context.Context, req *connect.Request[ksealv1.Non
 	if req.Msg.TenantId == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("tenant_id required"))
 	}
+	if req.Msg.AppId == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("app_id required"))
+	}
+	if _, err := s.store.GetApp(ctx, req.Msg.TenantId, req.Msg.AppId); err != nil {
+		if errors.Is(err, registry.ErrNotFound) {
+			return nil, connect.NewError(connect.CodeNotFound, errors.New("unknown tenant or app"))
+		}
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
 	nonce, expires, err := s.nonces.Issue(ctx, req.Msg.TenantId, req.Msg.AppId)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeUnavailable, err)
@@ -211,12 +220,17 @@ func (s *Service) VerifyAttestation(ctx context.Context, req *connect.Request[ks
 	}
 
 	// Resolve the expected platform app identity (package / bundle id).
-	expectedAppID := ""
-	if app, err := s.store.GetApp(ctx, m.TenantId, m.AppId); err == nil {
-		expectedAppID = app.PackageId
-	} else if !errors.Is(err, registry.ErrNotFound) {
+	app, err := s.store.GetApp(ctx, m.TenantId, m.AppId)
+	if errors.Is(err, registry.ErrNotFound) {
+		return reject("unknown tenant or app"), nil
+	}
+	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
+	if app.PackageId == "" {
+		return reject("app identity is not configured"), nil
+	}
+	expectedAppID := app.PackageId
 
 	res, err := s.verifier.Verify(ctx, attestation.Input{
 		Platform: m.Platform,

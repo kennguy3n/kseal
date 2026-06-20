@@ -15,6 +15,7 @@ import (
 	"github.com/kennguy3n/kseal/server/data-plane/canary"
 	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
 	"github.com/kennguy3n/kseal/server/gen/kseal/v1/ksealv1connect"
+	"github.com/kennguy3n/kseal/server/shared/auth"
 	appconfig "github.com/kennguy3n/kseal/server/shared/config"
 )
 
@@ -61,6 +62,15 @@ func (s *Service) GetConfig(ctx context.Context, req *connect.Request[ksealv1.Co
 	m := req.Msg
 	if m.TenantId == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("tenant_id required"))
+	}
+	if err := auth.EnforceTenant(ctx, m.TenantId); err != nil {
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("device credential required"))
+	}
+	if _, err := s.store.GetApp(ctx, m.TenantId, m.AppId); err != nil {
+		if errors.Is(err, registry.ErrNotFound) {
+			return nil, connect.NewError(connect.CodeNotFound, errors.New("unknown tenant or app"))
+		}
+		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	policy, candidate, err := s.resolvePolicy(ctx, m)
 	if errors.Is(err, registry.ErrNotFound) {

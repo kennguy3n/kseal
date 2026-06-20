@@ -18,6 +18,7 @@ import (
 	"github.com/kennguy3n/kseal/server/control-plane/registry"
 	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
 	"github.com/kennguy3n/kseal/server/gen/kseal/v1/ksealv1connect"
+	"github.com/kennguy3n/kseal/server/shared/auth"
 	"github.com/kennguy3n/kseal/server/shared/risk"
 )
 
@@ -165,6 +166,9 @@ func (s *Service) SubmitTelemetry(ctx context.Context, req *connect.Request[ksea
 	m := req.Msg
 	if m.TenantId == "" || m.AppId == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("tenant_id and app_id required"))
+	}
+	if err := auth.EnforceTenant(ctx, m.TenantId); err != nil {
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("device credential required"))
 	}
 
 	ctx, span := s.tracer.Start(ctx, "ingest.SubmitTelemetry", trace.WithAttributes(

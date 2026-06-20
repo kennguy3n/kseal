@@ -14,6 +14,7 @@ import (
 
 	"github.com/kennguy3n/kseal/server/control-plane/registry"
 	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
+	"github.com/kennguy3n/kseal/server/shared/auth"
 	"github.com/kennguy3n/kseal/server/shared/risk"
 )
 
@@ -113,7 +114,7 @@ func TestCachedAppValidatorBoundsCache(t *testing.T) {
 func TestSubmitTelemetryAcceptsCompressedBatch(t *testing.T) {
 	svc, _, tn, app, _ := setupIngest(t, 1000)
 	raw := sampleBatch(3)
-	resp, err := svc.SubmitTelemetry(context.Background(), connect.NewRequest(&ksealv1.SubmitTelemetryRequest{
+	resp, err := svc.SubmitTelemetry(auth.WithTenant(context.Background(), tn.Id), connect.NewRequest(&ksealv1.SubmitTelemetryRequest{
 		TenantId: tn.Id, AppId: app.Id, Compression: ksealv1.Compression_COMPRESSION_ZSTD, CompressedBatch: zstdCompress(t, raw),
 	}))
 	if err != nil {
@@ -126,7 +127,7 @@ func TestSubmitTelemetryAcceptsCompressedBatch(t *testing.T) {
 
 func TestSubmitTelemetryUncompressed(t *testing.T) {
 	svc, _, tn, app, _ := setupIngest(t, 1000)
-	resp, err := svc.SubmitTelemetry(context.Background(), connect.NewRequest(&ksealv1.SubmitTelemetryRequest{
+	resp, err := svc.SubmitTelemetry(auth.WithTenant(context.Background(), tn.Id), connect.NewRequest(&ksealv1.SubmitTelemetryRequest{
 		TenantId: tn.Id, AppId: app.Id, Compression: ksealv1.Compression_COMPRESSION_NONE, CompressedBatch: sampleBatch(2),
 	}))
 	if err != nil {
@@ -139,7 +140,7 @@ func TestSubmitTelemetryUncompressed(t *testing.T) {
 
 func TestSubmitTelemetryUnknownApp(t *testing.T) {
 	svc, _, tn, _, _ := setupIngest(t, 1000)
-	resp, err := svc.SubmitTelemetry(context.Background(), connect.NewRequest(&ksealv1.SubmitTelemetryRequest{
+	resp, err := svc.SubmitTelemetry(auth.WithTenant(context.Background(), tn.Id), connect.NewRequest(&ksealv1.SubmitTelemetryRequest{
 		TenantId: tn.Id, AppId: "00000000-0000-0000-0000-000000000000", CompressedBatch: sampleBatch(1),
 	}))
 	if err != nil {
@@ -152,7 +153,7 @@ func TestSubmitTelemetryUnknownApp(t *testing.T) {
 
 func TestSubmitTelemetryMalformed(t *testing.T) {
 	svc, _, tn, app, _ := setupIngest(t, 1000)
-	resp, err := svc.SubmitTelemetry(context.Background(), connect.NewRequest(&ksealv1.SubmitTelemetryRequest{
+	resp, err := svc.SubmitTelemetry(auth.WithTenant(context.Background(), tn.Id), connect.NewRequest(&ksealv1.SubmitTelemetryRequest{
 		TenantId: tn.Id, AppId: app.Id, Compression: ksealv1.Compression_COMPRESSION_NONE, CompressedBatch: []byte("not-a-proto"),
 	}))
 	if err != nil {
@@ -165,7 +166,7 @@ func TestSubmitTelemetryMalformed(t *testing.T) {
 
 func TestSubmitTelemetryQuotaExceeded(t *testing.T) {
 	svc, _, tn, app, _ := setupIngest(t, 2)
-	resp, err := svc.SubmitTelemetry(context.Background(), connect.NewRequest(&ksealv1.SubmitTelemetryRequest{
+	resp, err := svc.SubmitTelemetry(auth.WithTenant(context.Background(), tn.Id), connect.NewRequest(&ksealv1.SubmitTelemetryRequest{
 		TenantId: tn.Id, AppId: app.Id, Compression: ksealv1.Compression_COMPRESSION_NONE, CompressedBatch: sampleBatch(5),
 	}))
 	if err != nil {
@@ -264,7 +265,7 @@ func TestSubmitTelemetryTranslatesWireBitsAndTagsLayout(t *testing.T) {
 			{EventType: ksealv1.EventType_EVENT_TYPE_DEBUGGER, RiskBits: wireDebugger, CoarseTimeBucket: 100},
 		},
 	})
-	resp, err := svc.SubmitTelemetry(context.Background(), connect.NewRequest(&ksealv1.SubmitTelemetryRequest{
+	resp, err := svc.SubmitTelemetry(auth.WithTenant(context.Background(), tn.Id), connect.NewRequest(&ksealv1.SubmitTelemetryRequest{
 		TenantId: tn.Id, AppId: app.Id, Compression: ksealv1.Compression_COMPRESSION_NONE, CompressedBatch: batch,
 	}))
 	if err != nil || resp.Msg.Accepted != 1 {
@@ -298,7 +299,7 @@ func TestSubmitTelemetryNormalizesMillisBucket(t *testing.T) {
 			{EventType: ksealv1.EventType_EVENT_TYPE_ROOT_RISK, RiskBits: 1, CoarseTimeBucket: millisBucket},
 		},
 	})
-	resp, err := svc.SubmitTelemetry(context.Background(), connect.NewRequest(&ksealv1.SubmitTelemetryRequest{
+	resp, err := svc.SubmitTelemetry(auth.WithTenant(context.Background(), tn.Id), connect.NewRequest(&ksealv1.SubmitTelemetryRequest{
 		TenantId: tn.Id, AppId: app.Id, Compression: ksealv1.Compression_COMPRESSION_NONE, CompressedBatch: batch,
 	}))
 	if err != nil {
@@ -314,5 +315,15 @@ func TestSubmitTelemetryNormalizesMillisBucket(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("no event published to broker")
+	}
+}
+
+func TestSubmitTelemetryRejectsUnauthenticatedTenantBodyOnlyRequest(t *testing.T) {
+	svc, _, tn, app, _ := setupIngest(t, 1000)
+	_, err := svc.SubmitTelemetry(context.Background(), connect.NewRequest(&ksealv1.SubmitTelemetryRequest{
+		TenantId: tn.Id, AppId: app.Id, Compression: ksealv1.Compression_COMPRESSION_NONE, CompressedBatch: sampleBatch(1),
+	}))
+	if connect.CodeOf(err) != connect.CodeUnauthenticated {
+		t.Fatalf("expected unauthenticated, got %v", err)
 	}
 }
