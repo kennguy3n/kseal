@@ -211,7 +211,11 @@ jobs:
   gate:
     needs: [proto-drift, buf-breaking, build-test, integration, images, deploy-validate]
     runs-on: ubuntu-latest
-    if: always()
+    # Do not convert a superseded/cancelled workflow run into a red required
+    # check. The latest non-cancelled run still has to make every gate job
+    # succeed before release because cancelled/skipped jobs are not accepted
+    # when this enforcement job runs.
+    if: ${{ always() && !cancelled() }}
     steps:
       - name: Enforce all gates passed
         run: |
