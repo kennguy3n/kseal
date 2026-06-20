@@ -13,8 +13,11 @@ secrets and policy. It's where the data plane gets everything it executes. Three
 
 - **The registry** (`registry/`) — tenants, apps, builds, policies, API keys, webhooks. This
   is the relational source of truth (Postgres/CockroachDB). Control-plane RPCs require an API
-  key (`Authorization: Bearer ksk_…`); an unauthenticated call returns `401`. The device-plane
-  RPCs need no API key — they're scoped by `tenant_id` and gated by signed proofs.
+  key (`Authorization: Bearer ksk_…`) with the scope required by the per-procedure policy
+  table; an unauthenticated call returns `401`, while an authenticated key without the
+  required scope returns `403`. Tenant creation and tenant enumeration additionally require
+  an explicitly platform-admin principal. Device-plane config and telemetry RPCs require a
+  validated tenant/device credential, so a body `tenant_id` is a claim rather than authority.
 - **Compliance & audit** (`compliance/`) — the hash-chained audit log and the data-processing
   registry (more below).
 - **Policy authoring + the simulator** — policies are authored here and *signed* before the

@@ -14,6 +14,7 @@ Start with the top-level [README](../README.md) and [ARCHITECTURE](../ARCHITECTU
 ## Guides and references
 
 - **Threat model** — [threat-model.md](threat-model.md): attacker profiles and STRIDE analysis.
+- **Authorization** — [authz-hardening.md](authz-hardening.md): current per-procedure policy, scope, platform-admin, and device-credential model.
 - **Compliance** — [MASVS mapping](masvs-mapping.md), [MASVS evidence](masvs-evidence.md), and [MASTG procedures](mastg-procedures.md), plus the [Android](android-policy-review.md) and [iOS](ios-app-review.md) store-policy reviews.
 - **Economics** — [cost model](cost-model.md): ingest/storage/retention math at 10M / 100M / 300M MAU.
 - **Competitive** — [feature parity matrix](feature-parity-matrix.md) versus AppSealing/DoveRunner and other incumbents.
