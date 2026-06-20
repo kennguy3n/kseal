@@ -73,6 +73,28 @@ func TestProcedureDerivation(t *testing.T) {
 	}
 }
 
+func TestParseCatalogUsesHeaderNamesAndIgnoresPhaseColumn(t *testing.T) {
+	md := `## MASVS-AUTH
+
+Objective: authentication controls are enforced.
+
+| MASVS objective | kseal control | Phase | Module / component | MASTG verification |
+|---|---|---|---|---|
+| Proof binding | Request proof bound to build | P1/P2 | Rust trust core | MASTG-AUTH: replay request proof and assert deny |
+`
+	cat, err := ParseCatalog(md)
+	if err != nil {
+		t.Fatalf("parse catalog with phase column: %v", err)
+	}
+	ctrl := cat.Categories[0].Controls[0]
+	if ctrl.Module != "Rust trust core" {
+		t.Fatalf("module parsed from wrong column: %q", ctrl.Module)
+	}
+	if ctrl.MASTG != "MASTG-AUTH: replay request proof and assert deny" {
+		t.Fatalf("mastg parsed from wrong column: %q", ctrl.MASTG)
+	}
+}
+
 func TestRunDefaultsAreFailSafe(t *testing.T) {
 	rep := fixtureCatalog(t).Run(&Evidence{}, RunOptions{})
 	// No evidence: device procedures pending, others informational; nothing
@@ -85,6 +107,19 @@ func TestRunDefaultsAreFailSafe(t *testing.T) {
 	}
 	if rep.Summary[StatusPending] == 0 {
 		t.Error("expected device procedures to be pending")
+	}
+}
+
+func TestRunRequirePassBlocksPending(t *testing.T) {
+	rep := fixtureCatalog(t).Run(&Evidence{}, RunOptions{RequirePass: true})
+	if !rep.Gating.Blocked {
+		t.Fatal("require-pass should block pending device procedures")
+	}
+	if rep.Gating.Failed != 0 {
+		t.Fatalf("require-pass should not synthesize failures: %+v", rep.Gating)
+	}
+	if rep.Gating.Pending == 0 || len(rep.Gating.PendingIDs) == 0 {
+		t.Fatalf("pending device procedures should be reported: %+v", rep.Gating)
 	}
 }
 
@@ -143,6 +178,21 @@ func TestLoadEvidenceRejectsBadStatus(t *testing.T) {
 	}
 }
 
+func TestLoadEvidenceAcceptsAllExplicitStatuses(t *testing.T) {
+	ev, err := LoadEvidence([]byte(`{"release":"fixture","results":[
+		{"match":"logs","status":"pass","note":"device passed"},
+		{"match":"storage","status":"fail","note":"device failed"},
+		{"match":"crypto","status":"pending","note":"lab queued"},
+		{"match":"serialization","status":"not-applicable","note":"not shipped"}
+	]}`))
+	if err != nil {
+		t.Fatalf("load evidence: %v", err)
+	}
+	if len(ev.Results) != 4 {
+		t.Fatalf("results=%d, want 4", len(ev.Results))
+	}
+}
+
 func TestGolden(t *testing.T) {
 	cat := fixtureCatalog(t)
 	base := cat.Run(&Evidence{}, RunOptions{})
@@ -168,6 +218,14 @@ func TestGolden(t *testing.T) {
 	}
 	assertGolden(t, "report-evidenced.json", jsonBytes)
 	assertGolden(t, "report-evidenced.md", rep.Markdown())
+
+	failed := cat.Run(&Evidence{
+		Release: "2.1",
+		Results: []AssertedResult{
+			{Match: "No sensitive data in logs", Status: StatusFail, Note: "PII leaked to logcat"},
+		},
+	}, RunOptions{})
+	assertGolden(t, "report-failed.md", failed.Markdown())
 }
 
 func findCategory(c *Catalog, name string) (*Category, bool) {

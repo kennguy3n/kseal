@@ -177,21 +177,24 @@ func (s *InMemoryAnalyticsStore) TenantIDs(_ context.Context) ([]string, error) 
 // PurgeRawEventsOlderThan deletes the tenant's raw events strictly older than
 // cutoffBucket and returns the number removed. It only ever touches the named
 // tenant's events, preserving cross-tenant isolation.
-func (s *InMemoryAnalyticsStore) PurgeRawEventsOlderThan(_ context.Context, tenantID string, cutoffBucket int64) (int, error) {
+func (s *InMemoryAnalyticsStore) PurgeRawEventsOlderThan(ctx context.Context, tenantID string, cutoffBucket int64) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	kept := s.events[:0]
+	kept := make([]StoredEvent, 0, len(s.events))
 	purged := 0
-	for _, e := range s.events {
+	for i, e := range s.events {
+		if i&1023 == 0 {
+			if err := ctx.Err(); err != nil {
+				// The assignment below is intentionally skipped: cancellation
+				// must not leave the raw-event store partially purged.
+				return purged, err
+			}
+		}
 		if e.TenantID == tenantID && e.TimeBucket < cutoffBucket {
 			purged++
 			continue
 		}
 		kept = append(kept, e)
-	}
-	// Release references to purged events from the tail of the backing array.
-	for i := len(kept); i < len(s.events); i++ {
-		s.events[i] = StoredEvent{}
 	}
 	s.events = kept
 	return purged, nil

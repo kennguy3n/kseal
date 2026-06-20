@@ -3,6 +3,7 @@ package io.kseal.gradle
 import io.kseal.gradle.tasks.BuildProofManifestTask
 import io.kseal.gradle.tasks.GenerateMasvsReportTask
 import io.kseal.gradle.tasks.GeneratePolymorphismSeedTask
+import io.kseal.gradle.tasks.GenerateVirtualizationArtifactsTask
 import io.kseal.gradle.tasks.HardenNativeLibrariesTask
 import io.kseal.gradle.tasks.HardenResourcesTask
 import io.kseal.gradle.tasks.ObfuscateBytecodeTask
@@ -52,6 +53,7 @@ class KsealAndroidHardenPlugin : Plugin<Project> {
 
         ext.obfuscation.enabled.convention(false)
         ext.obfuscation.strength.convention("low")
+        ext.virtualization.candidates.convention(emptyList())
 
         ext.polymorphism.randomize.convention(false)
         ext.polymorphism.masterKeyProperty.convention("kseal.polySeedKey")
@@ -150,6 +152,17 @@ class KsealAndroidHardenPlugin : Plugin<Project> {
             reportFile.set(ksealOut.map { it.file("reports/native.json") })
         }
 
+        val virtualization = project.tasks.register<GenerateVirtualizationArtifactsTask>("ksealGenerateVirtualizationArtifacts") {
+            group = GROUP
+            description = "Emits private selective-virtualization retrace artifacts for HIGH-strength builds."
+            onlyIf { enabledProvider.getOrElse(true) }
+            strength.set(obfuscationStrength)
+            candidates.set(ext.virtualization.candidates)
+            seedFile.set(seed.flatMap { it.seedFile })
+            retraceMapFile.set(ksealOut.map { it.file("private/vm-retrace.map") })
+            reportFile.set(ksealOut.map { it.file("reports/virtualization.json") })
+        }
+
         val manifest = project.tasks.register<BuildProofManifestTask>("ksealBuildProofManifest") {
             group = GROUP
             description = "Emits the build-proof manifest and computes the build hash."
@@ -169,6 +182,7 @@ class KsealAndroidHardenPlugin : Plugin<Project> {
             transformReports.from(
                 classes.flatMap { it.reportFile },
                 obfuscate.flatMap { it.reportFile },
+                virtualization.flatMap { it.reportFile },
                 resources.flatMap { it.reportFile },
                 native.flatMap { it.reportFile },
             )
@@ -219,7 +233,7 @@ class KsealAndroidHardenPlugin : Plugin<Project> {
             dependsOn(masvsReport)
         }
 
-        return KsealTasks(seed, resources, classes, obfuscate, native, manifest, register, harden)
+        return KsealTasks(seed, resources, classes, obfuscate, virtualization, native, manifest, register, harden)
     }
 
     /** Resolves a secret from a Gradle property (by name) or, failing that, an env var. */
@@ -238,6 +252,7 @@ class KsealAndroidHardenPlugin : Plugin<Project> {
         val resources: org.gradle.api.tasks.TaskProvider<HardenResourcesTask>,
         val classes: org.gradle.api.tasks.TaskProvider<StripDebugMetadataTask>,
         val obfuscate: org.gradle.api.tasks.TaskProvider<ObfuscateBytecodeTask>,
+        val virtualization: org.gradle.api.tasks.TaskProvider<GenerateVirtualizationArtifactsTask>,
         val native: org.gradle.api.tasks.TaskProvider<HardenNativeLibrariesTask>,
         val manifest: org.gradle.api.tasks.TaskProvider<BuildProofManifestTask>,
         val register: org.gradle.api.tasks.TaskProvider<RegisterBuildTask>,

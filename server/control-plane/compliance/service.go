@@ -125,12 +125,15 @@ func (s *Service) PutDataProcessingRecord(ctx context.Context, req *connect.Requ
 		return nil, toConnectErr(err)
 	}
 	// Best-effort audit of the disclosure change; never blocks the write.
-	_, _ = s.store.AppendAudit(ctx, tenant, Entry{
-		Action:       "dataprocessing.put",
-		ResourceType: "data_processing_record",
-		ResourceID:   m.AppId,
-		ActorKeyID:   actor,
-	})
+	_, _ = s.store.AppendAudit(ctx, tenant, dataProcessingAuditEntry(DataProcessingInput{
+		TenantID:          rec.TenantId,
+		AppID:             rec.AppId,
+		DataCategories:    rec.DataCategories,
+		Purpose:           rec.Purpose,
+		RetentionDays:     rec.RetentionDays,
+		LegalBasis:        rec.LegalBasis,
+		ThirdPartySharing: rec.ThirdPartySharing,
+	}, actor))
 	return connect.NewResponse(&ksealv1.PutDataProcessingRecordResponse{Record: rec}), nil
 }
 

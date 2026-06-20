@@ -140,22 +140,23 @@ func (s *MemStore) VerifyAudit(_ context.Context, tenantID string) (VerifyResult
 }
 
 func (s *MemStore) PutDataProcessing(_ context.Context, in DataProcessingInput) (*ksealv1.DataProcessingRecord, error) {
-	if in.TenantID == "" {
-		return nil, fmt.Errorf("%w: tenant_id required", ErrInvalidInput)
+	normalized, err := normalizeDataProcessingInput(in)
+	if err != nil {
+		return nil, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	rec := &ksealv1.DataProcessingRecord{
-		TenantId:          in.TenantID,
-		AppId:             in.AppID,
-		DataCategories:    append([]string(nil), in.DataCategories...),
-		Purpose:           in.Purpose,
-		RetentionDays:     in.RetentionDays,
-		LegalBasis:        in.LegalBasis,
-		ThirdPartySharing: in.ThirdPartySharing,
+		TenantId:          normalized.TenantID,
+		AppId:             normalized.AppID,
+		DataCategories:    append([]string(nil), normalized.DataCategories...),
+		Purpose:           normalized.Purpose,
+		RetentionDays:     normalized.RetentionDays,
+		LegalBasis:        normalized.LegalBasis,
+		ThirdPartySharing: normalized.ThirdPartySharing,
 		UpdatedAt:         nowMillis(),
 	}
-	s.dataProc[scopeKey(in.TenantID, in.AppID, "")] = rec
+	s.dataProc[scopeKey(normalized.TenantID, normalized.AppID, "")] = rec
 	return cloneDataProc(rec), nil
 }
 

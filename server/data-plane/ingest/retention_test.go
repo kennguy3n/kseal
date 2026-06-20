@@ -205,6 +205,77 @@ func TestPurgeContinuesPastPerTenantError(t *testing.T) {
 	}
 }
 
+type aggregateAwareStore struct {
+	raw       map[string][]StoredEvent
+	aggregate map[string]int
+}
+
+func (s *aggregateAwareStore) TenantIDs(context.Context) ([]string, error) {
+	ids := make([]string, 0, len(s.raw))
+	for tenantID := range s.raw {
+		ids = append(ids, tenantID)
+	}
+	return ids, nil
+}
+
+func (s *aggregateAwareStore) PurgeRawEventsOlderThan(_ context.Context, tenantID string, cutoff int64) (int, error) {
+	events := s.raw[tenantID]
+	kept := events[:0]
+	purged := 0
+	for _, e := range events {
+		if e.TimeBucket < cutoff {
+			purged++
+			continue
+		}
+		kept = append(kept, e)
+	}
+	s.raw[tenantID] = kept
+	return purged, nil
+}
+
+func TestPurgeNeverDeletesAggregateData(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 6, 13, 0, 0, 0, 0, time.UTC)
+	store := &aggregateAwareStore{
+		raw: map[string][]StoredEvent{
+			"tenant-a": {{ID: "raw-old", TenantID: "tenant-a", TimeBucket: ageBucket(now, 90)}},
+		},
+		aggregate: map[string]int{"tenant-a": 42},
+	}
+	p := NewPurger(store, fakeRetentionResolver{days: map[string]int{"tenant-a": 30}}, 30, WithClock(fakeClock{now}))
+	report, err := p.PurgeOnce(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.EventsPurged != 1 {
+		t.Fatalf("expected one raw event purged, got %d", report.EventsPurged)
+	}
+	if store.aggregate["tenant-a"] != 42 {
+		t.Fatalf("aggregate data must be retained, got %d", store.aggregate["tenant-a"])
+	}
+}
+
+func TestPurgeCancellationStopsBeforeTenantMutation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	now := time.Date(2026, 6, 13, 0, 0, 0, 0, time.UTC)
+	store := NewInMemoryAnalyticsStore()
+	_ = store.Write(context.Background(), []StoredEvent{
+		{ID: "old", TenantID: "tenant-x", TimeBucket: ageBucket(now, 90)},
+	})
+	p := NewPurger(store, fakeRetentionResolver{days: map[string]int{"tenant-x": 30}}, 30, WithClock(fakeClock{now}))
+	report, err := p.PurgeOnce(ctx)
+	if err == nil {
+		t.Fatal("expected cancellation error")
+	}
+	if report.EventsPurged != 0 {
+		t.Fatalf("canceled pass should not purge, got %d", report.EventsPurged)
+	}
+	if got := idsByTenant(t, store)["tenant-x"]; len(got) != 1 || got[0] != "old" {
+		t.Fatalf("canceled purge should leave raw event intact, got %v", got)
+	}
+}
+
 // signalStore wraps the in-memory store and signals once a purge pass has
 // actually mutated the store, so tests can synchronize on the real event
 // instead of polling on timing.

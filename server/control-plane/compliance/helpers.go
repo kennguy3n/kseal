@@ -3,6 +3,7 @@ package compliance
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
 	"google.golang.org/protobuf/proto"
@@ -77,6 +78,76 @@ func canaryEntry(action, appID, actorKeyID string, md map[string]string) Entry {
 		ActorKeyID:   actorKeyID,
 		Metadata:     md,
 	}
+}
+
+func normalizeDataProcessingInput(in DataProcessingInput) (DataProcessingInput, error) {
+	if in.TenantID == "" {
+		return DataProcessingInput{}, fmt.Errorf("%w: tenant_id required", ErrInvalidInput)
+	}
+	if in.RetentionDays < 0 {
+		return DataProcessingInput{}, fmt.Errorf("%w: retention_days must be >= 0", ErrInvalidInput)
+	}
+	out := in
+	out.AppID = strings.TrimSpace(in.AppID)
+	out.Purpose = strings.TrimSpace(in.Purpose)
+	out.LegalBasis = strings.TrimSpace(in.LegalBasis)
+	out.DataCategories = normalizeDataCategories(in.DataCategories)
+	if len(out.DataCategories) == 0 {
+		return DataProcessingInput{}, fmt.Errorf("%w: at least one data category required", ErrInvalidInput)
+	}
+	if out.Purpose == "" {
+		return DataProcessingInput{}, fmt.Errorf("%w: purpose required", ErrInvalidInput)
+	}
+	if out.LegalBasis == "" {
+		return DataProcessingInput{}, fmt.Errorf("%w: legal_basis required", ErrInvalidInput)
+	}
+	return out, nil
+}
+
+func normalizeDataCategories(categories []string) []string {
+	if len(categories) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(categories))
+	out := make([]string, 0, len(categories))
+	for _, c := range categories {
+		c = strings.ToLower(strings.TrimSpace(c))
+		c = strings.Join(strings.Fields(c), "_")
+		if c == "" {
+			continue
+		}
+		if _, ok := seen[c]; ok {
+			continue
+		}
+		seen[c] = struct{}{}
+		out = append(out, c)
+	}
+	return out
+}
+
+func dataProcessingAuditEntry(in DataProcessingInput, actorKeyID string) Entry {
+	md := map[string]string{
+		"retention_days":      strconv.FormatInt(int64(in.RetentionDays), 10),
+		"data_category_count": strconv.Itoa(len(in.DataCategories)),
+		"third_party_sharing": strconv.FormatBool(in.ThirdPartySharing),
+	}
+	if in.AppID != "" {
+		md["app_id"] = in.AppID
+	}
+	return Entry{
+		Action:       "dataprocessing.put",
+		ResourceType: "data_processing_record",
+		ResourceID:   dataProcessingResourceID(in.AppID),
+		ActorKeyID:   actorKeyID,
+		Metadata:     md,
+	}
+}
+
+func dataProcessingResourceID(appID string) string {
+	if appID == "" {
+		return "tenant"
+	}
+	return appID
 }
 
 func killSwitchResourceID(appID, buildHash string) string {

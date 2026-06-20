@@ -43,7 +43,7 @@ func TestServicePutAndListDataProcessing(t *testing.T) {
 	svc, _ := newService(t)
 	ctx := authCtx("t1", "k1")
 	_, err := svc.PutDataProcessingRecord(ctx, connect.NewRequest(&ksealv1.PutDataProcessingRecordRequest{
-		TenantId: "t1", AppId: "app1", Purpose: "fraud", RetentionDays: 30, DataCategories: []string{"device"},
+		TenantId: "t1", AppId: "app1", Purpose: "fraud", RetentionDays: 30, DataCategories: []string{"device"}, LegalBasis: "legitimate_interest",
 	}))
 	if err != nil {
 		t.Fatal(err)
@@ -62,6 +62,20 @@ func TestServicePutAndListDataProcessing(t *testing.T) {
 	}
 	if len(ev) != 1 {
 		t.Fatalf("expected 1 audit event, got %d", len(ev))
+	}
+	if ev[0].Metadata["retention_days"] != "30" || ev[0].Metadata["data_category_count"] != "1" || ev[0].Metadata["app_id"] != "app1" {
+		t.Fatalf("audit metadata should capture non-PII disclosure fields, got %+v", ev[0].Metadata)
+	}
+}
+
+func TestServicePutDataProcessingValidatesInput(t *testing.T) {
+	svc, _ := newService(t)
+	ctx := authCtx("t1", "k1")
+	_, err := svc.PutDataProcessingRecord(ctx, connect.NewRequest(&ksealv1.PutDataProcessingRecordRequest{
+		TenantId: "t1", Purpose: "fraud", RetentionDays: -1, DataCategories: []string{"device"}, LegalBasis: "legitimate_interest",
+	}))
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("expected invalid argument for negative retention, got %v", err)
 	}
 }
 

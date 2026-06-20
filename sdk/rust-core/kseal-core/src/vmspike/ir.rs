@@ -85,7 +85,7 @@ pub enum LowerError {
 
 impl Expr {
     /// Convenience constructor for a boxed binary node's children.
-    fn bx(e: Expr) -> Box<Expr> {
+    pub(crate) fn bx(e: Expr) -> Box<Expr> {
         Box::new(e)
     }
 }
@@ -518,8 +518,7 @@ mod tests {
         let expr = demo_cohort_expr();
         let lowered = lower("demo_cohort", DEMO_COHORT_INPUTS, &expr).unwrap();
         let seed = BuildSeed::from_u64(0x5EED_C0DE);
-        let program =
-            decode_with_seed(&encode_with_seed(&lowered.program, &seed), &seed).unwrap();
+        let program = decode_with_seed(&encode_with_seed(&lowered.program, &seed), &seed).unwrap();
 
         let mut rng = Rng(0xA5A5_5A5A);
         for _ in 0..5000 {
@@ -606,11 +605,13 @@ mod tests {
         // 255 distinct constants lower and round-trip cleanly through the
         // per-build encoder (count 255 fits the u8 field).
         let ok = balanced_const_sum(&distinct[..255]);
-        assert!(register_need(&ok) <= NUM_REGS, "balanced tree must fit the bank");
+        assert!(
+            register_need(&ok) <= NUM_REGS,
+            "balanced tree must fit the bank"
+        );
         let lowered = lower("const_pool_max", 0, &ok).expect("255 constants must lower");
         let seed = BuildSeed::from_u64(0xC0FF_EE00);
-        let program =
-            decode_with_seed(&encode_with_seed(&lowered.program, &seed), &seed).unwrap();
+        let program = decode_with_seed(&encode_with_seed(&lowered.program, &seed), &seed).unwrap();
         assert_eq!(
             interp::run_ir(&program, &[]).unwrap(),
             eval(&ok, &[]),
@@ -623,10 +624,12 @@ mod tests {
         let mut with_dup: Vec<u64> = distinct[..255].to_vec();
         with_dup.push(distinct[0]);
         let dup = balanced_const_sum(&with_dup);
-        assert!(register_need(&dup) <= NUM_REGS, "balanced tree must fit the bank");
+        assert!(
+            register_need(&dup) <= NUM_REGS,
+            "balanced tree must fit the bank"
+        );
         let lowered = lower("const_pool_dup", 0, &dup).expect("255 distinct + a dup must lower");
-        let program =
-            decode_with_seed(&encode_with_seed(&lowered.program, &seed), &seed).unwrap();
+        let program = decode_with_seed(&encode_with_seed(&lowered.program, &seed), &seed).unwrap();
         assert_eq!(
             interp::run_ir(&program, &[]).unwrap(),
             eval(&dup, &[]),
