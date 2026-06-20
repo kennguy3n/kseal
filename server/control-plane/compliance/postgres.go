@@ -170,15 +170,16 @@ func (s *PostgresStore) VerifyAudit(ctx context.Context, tenantID string) (Verif
 }
 
 func (s *PostgresStore) PutDataProcessing(ctx context.Context, in DataProcessingInput) (*ksealv1.DataProcessingRecord, error) {
-	if in.TenantID == "" {
-		return nil, fmt.Errorf("%w: tenant_id required", ErrInvalidInput)
+	normalized, err := normalizeDataProcessingInput(in)
+	if err != nil {
+		return nil, err
 	}
-	categories := in.DataCategories
+	categories := normalized.DataCategories
 	if categories == nil {
 		categories = []string{}
 	}
 	updated := nowMillis()
-	err := s.db.WithTenantTx(ctx, in.TenantID, func(tx pgx.Tx) error {
+	err = s.db.WithTenantTx(ctx, normalized.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `
 			INSERT INTO data_processing_records
 			    (tenant_id, app_id, data_categories, purpose, retention_days, legal_basis, third_party_sharing, updated_at_ms)
@@ -191,20 +192,20 @@ func (s *PostgresStore) PutDataProcessing(ctx context.Context, in DataProcessing
 			    third_party_sharing = EXCLUDED.third_party_sharing,
 			    updated_at_ms = EXCLUDED.updated_at_ms,
 			    updated_at = now()`,
-			in.TenantID, in.AppID, categories, in.Purpose, in.RetentionDays, in.LegalBasis, in.ThirdPartySharing, updated)
+			normalized.TenantID, normalized.AppID, categories, normalized.Purpose, normalized.RetentionDays, normalized.LegalBasis, normalized.ThirdPartySharing, updated)
 		return err
 	})
 	if err != nil {
 		return nil, err
 	}
 	return &ksealv1.DataProcessingRecord{
-		TenantId:          in.TenantID,
-		AppId:             in.AppID,
+		TenantId:          normalized.TenantID,
+		AppId:             normalized.AppID,
 		DataCategories:    append([]string(nil), categories...),
-		Purpose:           in.Purpose,
-		RetentionDays:     in.RetentionDays,
-		LegalBasis:        in.LegalBasis,
-		ThirdPartySharing: in.ThirdPartySharing,
+		Purpose:           normalized.Purpose,
+		RetentionDays:     normalized.RetentionDays,
+		LegalBasis:        normalized.LegalBasis,
+		ThirdPartySharing: normalized.ThirdPartySharing,
 		UpdatedAt:         updated,
 	}, nil
 }

@@ -38,7 +38,7 @@ internal data class BuildProofManifest(
             "app" to appMap(),
             "sdk" to sdkMap(),
             "seed_digest" to seedDigestHex,
-            "transforms" to transforms.map { linkedMapOf<String, Any?>("name" to it.name, "status" to it.status) },
+            "transforms" to buildHashTransforms().map { linkedMapOf<String, Any?>("name" to it.name, "status" to it.status) },
             "artifacts" to artifacts.sortedBy { it.path }
                 .map { linkedMapOf<String, Any?>("path" to it.path, "sha256" to it.sha256) },
         )
@@ -122,6 +122,9 @@ internal data class BuildProofManifest(
         "name" to sdkName,
         "version" to sdkVersion,
     )
+
+    private fun buildHashTransforms(): List<TransformRecord> =
+        transforms.filterNot { it.name == "selective-virtualization" && it.status == "skipped" }
 
     companion object {
         const val SCHEMA = "kseal.build-proof/v1"

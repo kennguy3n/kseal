@@ -70,11 +70,13 @@ abstract class KsealHardenExtension @Inject constructor(objects: ObjectFactory) 
 
     val polymorphism: PolymorphismOptions = objects.newInstance(PolymorphismOptions::class.java)
     val obfuscation: ObfuscationOptions = objects.newInstance(ObfuscationOptions::class.java)
+    val virtualization: VirtualizationOptions = objects.newInstance(VirtualizationOptions::class.java)
     val registry: RegistryOptions = objects.newInstance(RegistryOptions::class.java)
     val masvsReport: MasvsReportOptions = objects.newInstance(MasvsReportOptions::class.java)
 
     fun polymorphism(action: Action<PolymorphismOptions>) = action.execute(polymorphism)
     fun obfuscation(action: Action<ObfuscationOptions>) = action.execute(obfuscation)
+    fun virtualization(action: Action<VirtualizationOptions>) = action.execute(virtualization)
     fun registry(action: Action<RegistryOptions>) = action.execute(registry)
     fun masvsReport(action: Action<MasvsReportOptions>) = action.execute(masvsReport)
 }
@@ -103,6 +105,19 @@ abstract class ObfuscationOptions {
 
     /** Exact string literals that must never be encrypted (e.g. reflection keys). */
     abstract val keepStrings: ListProperty<String>
+}
+
+/**
+ * Selective Rust-core virtualization controls.
+ *
+ * This is intentionally a closed allow-list: only cold, non-crypto glue
+ * candidates are accepted, and any non-empty candidate list requires
+ * `obfuscation.strength = "high"`. The encrypted retrace map is emitted as a
+ * private build artifact for crash triage; it is not shipped in the app.
+ */
+abstract class VirtualizationOptions {
+    /** Candidate routine names to virtualize at HIGH strength. Default empty. */
+    abstract val candidates: ListProperty<String>
 }
 
 /** Per-build polymorphism seed controls. */

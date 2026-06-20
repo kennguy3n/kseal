@@ -1,13 +1,14 @@
-//! # Phase 5.3 DECISION SPIKE — selective code virtualization (NOT production)
+//! # Phase 5.3 — selective code virtualization (default-off production path)
 //!
-//! This module is a **bounded proof-of-concept** that demonstrates the
-//! code-virtualization technique end-to-end on one representative function, so
-//! the team can make an evidence-backed go/no-go decision. It is compiled only
-//! under the default-off `vm-spike` cargo feature and is deliberately isolated:
+//! This module contains the default-off selective virtualization tier. It keeps
+//! the original measurement spike and adds a bounded production path for a
+//! closed allow-list of cold, non-crypto glue routines. It is compiled only
+//! under the default-off `vm-spike` cargo feature and remains deliberately
+//! isolated:
 //!
-//! * It does **not** touch the real trust, crypto, kill-switch, proof-signing,
-//!   risk, or FFI paths. The function it virtualizes ([`isa::native_tag_mix`])
-//!   is a self-contained toy mixer invented purely for measurement.
+//! * It does **not** touch hot trust/crypto/risk/FFI paths.
+//! * The allow-list rejects golden-vector crypto, hot paths, and whole-program
+//!   virtualization before code generation.
 //! * It adds **nothing** to the public C ABI.
 //! * With the feature off, the standard build is byte-for-byte unchanged.
 //!
@@ -34,6 +35,7 @@ pub mod encode;
 pub mod interp;
 pub mod ir;
 pub mod isa;
+pub mod production;
 pub mod retrace;
 pub mod strength;
 
@@ -45,6 +47,11 @@ pub use interp::{run, run_ir, VmError, VmFrame};
 pub use ir::{lower, Expr, LowerError};
 #[doc(inline)]
 pub use isa::{lower_tag_mix, native_tag_mix, LoweredProgram, Program};
+#[doc(inline)]
+pub use production::{
+    build_candidate_artifacts, select_candidate, Candidate, CandidateArtifacts, RejectedTarget,
+    SelectionError, VirtualCandidate,
+};
 #[doc(inline)]
 pub use retrace::{encrypt_map, ResolvedSite, Symbolicator};
 #[doc(inline)]
@@ -161,8 +168,7 @@ pub mod measure {
         let t1 = Instant::now();
         let mut acc2 = 0u64;
         for d in 0..iterations {
-            acc2 ^= super::interp::run(&program, black_box(&input), u64::from(d))
-                .expect("vm runs");
+            acc2 ^= super::interp::run(&program, black_box(&input), u64::from(d)).expect("vm runs");
         }
         black_box(acc2);
         let vm_ns = t1.elapsed().as_nanos() as f64 / f64::from(iterations);
@@ -210,11 +216,19 @@ pub mod measure {
             .expect("demo cohort lowers");
         let bytecode = encode_with_seed(&lowered.program, &seed);
         let program = super::decode_with_seed(&bytecode, &seed).expect("demo cohort decodes");
-        let retrace_map =
-            encrypt_map(&lowered.retrace, &seed, &build_hash_from_seed(&seed), "demo_cohort");
+        let retrace_map = encrypt_map(
+            &lowered.retrace,
+            &seed,
+            &build_hash_from_seed(&seed),
+            "demo_cohort",
+        );
 
         for d in 0..1000u64 {
-            black_box(demo_cohort_native(black_box(d), d ^ 0x55, d.wrapping_mul(7)));
+            black_box(demo_cohort_native(
+                black_box(d),
+                d ^ 0x55,
+                d.wrapping_mul(7),
+            ));
             let _ = black_box(super::interp::run_ir(
                 &program,
                 black_box(&[d, d ^ 0x55, d.wrapping_mul(7)]),
@@ -269,8 +283,7 @@ mod tests {
     fn virtualized_is_byte_identical_to_native_over_random_inputs() {
         let lowered = lower_tag_mix();
         let seed = BuildSeed::from_u64(0xABCD_1234);
-        let program =
-            decode_with_seed(&encode_with_seed(&lowered.program, &seed), &seed).unwrap();
+        let program = decode_with_seed(&encode_with_seed(&lowered.program, &seed), &seed).unwrap();
 
         let mut rng = Rng(0xDEAD_BEEF_0BAD_F00D);
         for _ in 0..4000 {
@@ -324,10 +337,13 @@ mod tests {
         assert_eq!(site.function, "native_tag_mix");
 
         // And nobody without the build key can read the map.
-        assert!(
-            Symbolicator::open(&encrypted, &BuildSeed::from_u64(0x9999), &build_hash, "native_tag_mix")
-                .is_err()
-        );
+        assert!(Symbolicator::open(
+            &encrypted,
+            &BuildSeed::from_u64(0x9999),
+            &build_hash,
+            "native_tag_mix"
+        )
+        .is_err());
     }
 
     #[test]
