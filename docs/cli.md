@@ -33,8 +33,51 @@ The CLI never stores secret values. The API key is resolved at runtime from
 2. the file at the active profile's `api_key_file`, if set.
 
 The key is sent as `Authorization: Bearer <key>`. Control-plane procedures
-require a valid key; the server rejects an invalid/absent key with
-`Unauthenticated`, which the CLI surfaces as exit code `3`.
+require a valid key with the necessary scopes; the server rejects an invalid or
+missing key with `Unauthenticated` and a valid key without required scopes with
+`PermissionDenied`, both of which the CLI surfaces as exit code `3`.
+
+### API key scopes
+
+Tenant API keys must carry the scopes needed by the RPC they call. Empty scope
+lists no longer imply full access. Supported scopes follow a hierarchical
+namespace model:
+
+| Scope namespace | Grants access to |
+|-----------------|------------------|
+| `platform:tenant:read` | List tenants |
+| `platform:tenant:write` | Create tenants |
+| `registry:*` | All registry operations (apps, builds, policies) |
+| `registry:read` | Read registry data (apps, builds, policies) |
+| `registry:write` | Write registry data (create apps, builds, policies) |
+| `policy:*` | All policy operations |
+| `policy:read` | Read policies |
+| `policy:write` | Write/activate policies |
+| `query:*` | All query/telemetry operations |
+| `query:read` | Query events and overviews |
+| `webhook:*` | All webhook operations |
+| `webhook:read` | List webhooks |
+| `webhook:write` | Register/delete webhooks |
+| `siem:*` | All SIEM connector operations |
+| `siem:read` | List SIEM connectors |
+| `siem:write` | Register/delete SIEM connectors |
+| `compliance:*` | All compliance operations |
+| `compliance:read` | Read audit trails, compliance data |
+| `compliance:write` | Issue kill switches, manage canary rollouts |
+| `*` | All non-platform tenant scopes |
+
+**Platform administration**: Tenant provisioning and tenant enumeration are
+platform-admin operations. `CreateTenant` requires `platform:tenant:write`;
+`ListTenants` requires `platform:tenant:read`. The principal must also be marked
+as a platform admin, so a tenant API key cannot satisfy platform scopes
+accidentally.
+
+**Device-plane compatibility**: Public pre-attestation calls remain limited to
+nonce issuance and attestation verification, and both require a known app record.
+Config and telemetry calls must run under a validated tenant/device credential
+context; a request body `tenant_id` is treated as a claim, not authority.
+
+See `docs/authz-hardening.md` for the full authorization hardening model.
 
 Connection settings are supplied by flags, environment variables, or a named
 profile. Precedence is always **flag > environment variable > profile**:
@@ -73,7 +116,7 @@ code.
 | `0` | success |
 | `1` | generic error |
 | `2` | usage error (bad flags/args, missing tenant scope, invalid policy file) |
-| `3` | authentication failure (invalid/missing API key) |
+| `3` | authentication failure (invalid/missing API key) or permission denied (missing required scopes) |
 | `4` | not found |
 | `5` | server unavailable |
 | `6` | invalid input rejected by the server |
@@ -163,6 +206,11 @@ kseal tenant update <tenant-id> --tier enterprise --status active
 `--tier` is one of `starter|growth|enterprise|regulated`; `--status` is one of
 `active|suspended|deleted`.
 
+**Required scopes**: `tenant create` requires `platform:tenant:write`; `tenant
+list` requires `platform:tenant:read`; `tenant get` and `tenant update` require
+`registry:read` and `registry:write` respectively. Platform administration
+commands additionally require the principal to be marked as a platform admin.
+
 ### app
 
 Manage apps within a tenant.
@@ -178,6 +226,9 @@ kseal app list
 ```
 
 `--platform` is `android|ios`; `--signing-identity` is repeatable.
+
+**Required scopes**: `app create` requires `registry:write`; `app get` and
+`app list` require `registry:read`.
 
 ### build
 
@@ -207,6 +258,9 @@ Manifest file shape:
 
 `app_id` and `build_hash` are required (from the file or via `--app-id` /
 `--build-hash`).
+
+**Required scopes**: `build register` requires `registry:write`; `build get` and
+`build list` require `registry:read`.
 
 ### policy
 
@@ -240,6 +294,10 @@ Policy authoring file shape:
 names (`LOW_RISK|MEDIUM_RISK|HIGH_RISK|CRITICAL`); `signal_weights` keys are risk
 bit indices (`0`–`63`).
 
+**Required scopes**: `policy author` and `policy activate` require `policy:write`;
+`policy list` and `policy get-active` require `policy:read`; `policy simulate`
+requires `query:read`.
+
 #### policy simulate
 
 Replay recent stored traffic to forecast how a candidate policy would change
@@ -267,6 +325,9 @@ kseal profile create --name "high-security" --default-mode block --module rasp -
 kseal profile list
 ```
 
+**Required scopes**: `profile create` requires `policy:write`; `profile list`
+requires `policy:read`.
+
 ### webhook
 
 Manage tenant webhooks for event fan-out.
@@ -277,6 +338,9 @@ kseal webhook register --url https://hooks.acme.example.com/kseal \
 kseal webhook list
 kseal webhook delete <webhook-id>
 ```
+
+**Required scopes**: `webhook register` and `webhook delete` require `webhook:write`;
+`webhook list` requires `webhook:read`.
 
 ### events
 
@@ -293,6 +357,28 @@ kseal events tail --interval 2s --risk-level CRITICAL
 
 Filters (`--event-type`, `--risk-level`) are repeatable; time bounds are unix
 milliseconds (`0` = unbounded).
+
+**Required scopes**: `events query` and `events tail` require `query:read`.
+
+### compliance
+
+Generate store-disclosure artifacts and read compliance/audit state.
+
+```bash
+# Local generators (offline, no server required)
+kseal compliance privacy-manifest --format plist --out PrivacyInfo.xcprivacy
+kseal compliance data-safety --format md --out datasafety.md
+kseal compliance mastg --catalog ./mastg-catalog.md --evidence ./evidence.json
+
+# Server-backed reads (require authentication + tenant scope)
+kseal compliance audit-trail --action policy.activate
+kseal compliance kill-switch --app <app-id>
+kseal compliance data-processing-registry
+```
+
+**Required scopes**: Local generators (`privacy-manifest`, `data-safety`, `mastg`)
+require no server access. Server-backed commands require `compliance:read` for
+audit-trail, kill-switch, and data-processing-registry reads.
 
 ## Scripting examples
 
@@ -324,6 +410,44 @@ Preview any mutation without performing it:
 ```bash
 kseal policy activate "$POLICY_ID" --dry-run
 ```
+
+## Troubleshooting
+
+### Permission denied (exit code 3)
+
+If you receive a permission denied error with exit code 3, your API key is valid
+but lacks the required scope for the command you're trying to run.
+
+```bash
+$ kseal tenant list
+error: PermissionDenied: missing required scope platform:tenant:read
+hint: Ensure your API key includes the platform:tenant:read scope
+# Exit code: 3
+```
+
+**To fix this**:
+1. Check the required scopes for your command in the command reference above
+2. Create or update your API key to include the required scopes
+3. If using a platform admin command (e.g., `tenant create`), ensure your
+   principal is marked as a platform admin in addition to having the required
+   scopes
+
+### Authentication failure (exit code 3)
+
+If you receive an authentication failure error with exit code 3, your API key is
+invalid or missing.
+
+```bash
+$ kseal app list
+error: Unauthenticated: invalid API key
+hint: Check that KSEAL_API_KEY is set and valid
+# Exit code: 3
+```
+
+**To fix this**:
+1. Verify that `KSEAL_API_KEY` (or your profile's `api_key_env`) is set correctly
+2. Check that the API key hasn't been revoked or expired
+3. Ensure you're using the correct endpoint for your environment
 
 ## Discoverability
 
