@@ -59,6 +59,23 @@ func TestLevelCustomThresholds(t *testing.T) {
 	}
 }
 
+func TestLevelCustomThresholdsMostSevereWins(t *testing.T) {
+	// When a score exceeds multiple thresholds, the most severe qualifying
+	// level should win — not the one with the highest threshold value.
+	// This also ensures deterministic results when thresholds are equal
+	// (map iteration order is randomized in Go).
+	th := map[string]uint32{"LOW_RISK": 10, "MEDIUM_RISK": 10, "HIGH_RISK": 10}
+	if l := Level(10, th); l != ksealv1.TrustLevel_TRUST_LEVEL_HIGH_RISK {
+		t.Fatalf("equal thresholds: score 10 -> %v, want HIGH_RISK", l)
+	}
+	// Inverted thresholds: CRITICAL has a lower minimum than HIGH_RISK.
+	// A score exceeding both must still return CRITICAL (most severe).
+	inverted := map[string]uint32{"CRITICAL": 50, "HIGH_RISK": 100}
+	if l := Level(100, inverted); l != ksealv1.TrustLevel_TRUST_LEVEL_CRITICAL {
+		t.Fatalf("inverted thresholds: score 100 -> %v, want CRITICAL", l)
+	}
+}
+
 func TestDecision(t *testing.T) {
 	cases := []struct {
 		level ksealv1.TrustLevel

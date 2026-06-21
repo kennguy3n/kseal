@@ -213,19 +213,21 @@ var defaultThresholds = []struct {
 }
 
 // Level maps a score to a TrustLevel. Optional thresholds (keyed by TrustLevel
-// name, e.g. "HIGH_RISK") override the defaults.
+// name, e.g. "HIGH_RISK") override the defaults. When custom thresholds are
+// supplied, the most severe level whose minimum the score meets is returned
+// (e.g. if both HIGH_RISK and CRITICAL thresholds are satisfied, CRITICAL wins).
+// This matches the default-threshold path's semantics and is deterministic
+// regardless of map iteration order or threshold value ordering.
 func Level(score uint32, thresholds map[string]uint32) ksealv1.TrustLevel {
 	if len(thresholds) > 0 {
 		best := ksealv1.TrustLevel_TRUST_LEVEL_TRUSTED
-		bestMin := int64(-1)
 		for name, min := range thresholds {
 			lvl := levelByName(name)
 			if lvl == ksealv1.TrustLevel_TRUST_LEVEL_UNSPECIFIED {
 				continue
 			}
-			if score >= min && int64(min) > bestMin {
+			if score >= min && lvl > best {
 				best = lvl
-				bestMin = int64(min)
 			}
 		}
 		return best
