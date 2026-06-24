@@ -120,9 +120,9 @@ carries the server-assigned risk band the weighted sum and thresholds produced:
 
 ![kseal console — the tenant event stream](img/02-events.png)
 
-*The engine's verdicts in the console: every event is tagged with the trust
-level the scoring pipeline assigned, the build it was scored against, and the
-region it came from.*
+*The engine's verdicts in the refreshed console: every event is tagged with the
+trust level the scoring pipeline assigned, the build it was scored against, and
+the region it came from, presented in the KChat-family UI.*
 
 Every figure below is computed by the real server logic and committed in
 [`scenarios.json`](https://github.com/kennguy3n/kseal/blob/main/docs/reference/fixtures/scenarios.json):

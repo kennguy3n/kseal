@@ -100,6 +100,18 @@ func VerifySecret(secret, encodedHash string) (bool, error) {
 	if _, err := fmt.Sscanf(parts[3], "m=%d,t=%d,p=%d", &memory, &time, &threads); err != nil {
 		return false, ErrMalformedHash
 	}
+	// Bound the parsed parameters to prevent a DoS via a corrupted or manipulated
+	// hash that specifies extreme values. The limits are generous (4x the server's
+	// own parameters) to allow future parameter increases without rejecting stored
+	// hashes, while still rejecting pathological values.
+	const (
+		maxMemory  = 256 * 1024 // 256 MiB
+		maxTime    = 4
+		maxThreads = 16
+	)
+	if memory == 0 || memory > maxMemory || time == 0 || time > maxTime || threads == 0 || threads > maxThreads {
+		return false, ErrMalformedHash
+	}
 	salt, err := base64.RawStdEncoding.DecodeString(parts[4])
 	if err != nil {
 		return false, ErrMalformedHash

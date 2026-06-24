@@ -37,8 +37,8 @@ export function DashboardPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Overview"
-        description="Tenant trust posture at a glance."
+        title="Security overview"
+        description="See how your apps are protected and spot anything that needs attention."
       />
 
       <Onboarding />

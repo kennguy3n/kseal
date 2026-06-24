@@ -24,26 +24,26 @@
   --c-subtle: 100 116 139; /* slate-500 */
   --c-line: 226 232 240; /* slate-200 */
   --c-line-strong: 203 213 225; /* slate-300 */
-  --c-accent: 79 70 229; /* indigo-600 */
-  --c-accent-strong: 67 56 202; /* indigo-700 */
+  --c-accent: 123 63 228; /* KChat purple #7b3fe4 */
+  --c-accent-strong: 81 97 206; /* KChat blue-purple #5161ce */
   --c-accent-fg: 255 255 255;
 }
 
 .dark {
-  --c-page: 11 16 32; /* ink #0b1020 */
-  --c-panel: 17 24 43; /* panel #11182b */
-  --c-raised: 30 41 59; /* slate-800 */
-  --c-hover: 30 41 59; /* slate-800 */
-  --c-field: 15 23 42; /* slate-900 */
-  --c-heading: 248 250 252; /* slate-50 */
-  --c-content: 226 232 240; /* slate-200 */
-  --c-muted: 148 163 184; /* slate-400 */
-  --c-subtle: 100 116 139; /* slate-500 */
-  --c-line: 30 41 59; /* slate-800 */
-  --c-line-strong: 51 65 85; /* slate-700 */
-  --c-accent: 99 102 241; /* indigo-500 */
-  --c-accent-strong: 129 140 248; /* indigo-400 */
-  --c-accent-fg: 255 255 255;
+  --c-page: 12 10 24; /* deep ink */
+  --c-panel: 22 18 38; /* raised panel */
+  --c-raised: 34 30 54; /* card hover / dropdown */
+  --c-hover: 34 30 54; /* card hover / dropdown */
+  --c-field: 15 12 28; /* input backgrounds */
+  --c-heading: 248 246 255; /* headings */
+  --c-content: 232 229 244; /* body text */
+  --c-muted: 160 152 190; /* secondary text */
+  --c-subtle: 115 107 145; /* placeholders */
+  --c-line: 40 35 64; /* subtle borders */
+  --c-line-strong: 58 52 90; /* focused borders */
+  --c-accent: 176 135 255; /* soft lavender #b087ff */
+  --c-accent-strong: 139 110 246; /* violet #8b6ef6 */
+  --c-accent-fg: 15 12 28;
 }
 
 :root {
@@ -63,8 +63,10 @@ body {
   margin: 0;
   background-color: rgb(var(--c-page));
   color: rgb(var(--c-content));
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
     Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* Honor reduced-motion for spinners/transitions. */
@@ -80,13 +82,13 @@ body {
 
 @layer components {
   .card {
-    @apply rounded-xl border border-line bg-panel p-5 shadow-sm;
+    @apply rounded-2xl border border-line bg-panel p-5 shadow-[0_2px_8px_rgba(0,0,0,0.04)];
   }
   .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-3.5 py-2.5 text-sm font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-50;
   }
   .btn-primary {
-    @apply btn bg-accent text-accent-fg hover:bg-accent-strong;
+    @apply btn bg-gradient-to-br from-accent to-accent-strong text-accent-fg shadow-md shadow-accent/25 hover:shadow-lg hover:shadow-accent/30 hover:-translate-y-0.5;
   }
   .btn-ghost {
     @apply btn border border-line-strong text-content hover:bg-hover;
@@ -95,13 +97,13 @@ body {
     @apply btn border border-rose-500/60 text-rose-600 hover:bg-rose-500/10 dark:text-rose-300 dark:hover:bg-rose-900/30;
   }
   .input {
-    @apply w-full rounded-lg border border-line-strong bg-field px-3 py-2 text-sm text-heading outline-none placeholder:text-subtle focus:border-accent;
+    @apply w-full rounded-xl border border-line-strong bg-field px-3.5 py-2.5 text-sm text-heading outline-none placeholder:text-subtle focus:border-accent-strong focus:ring-2 focus:ring-accent/20;
   }
   .label {
-    @apply mb-1 block text-xs font-medium uppercase tracking-wide text-muted;
+    @apply mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted;
   }
   .badge {
-    @apply inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium;
+    @apply inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold;
   }
   .th {
     @apply px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted;

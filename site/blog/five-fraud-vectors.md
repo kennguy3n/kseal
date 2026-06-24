@@ -87,9 +87,9 @@ in `pay-android`'s stream, `Malicious keyboard`, `Screen capture` and
 
 ![kseal console — fraud-vector events for pay-android](img/05-app-detail.png)
 
-*`pay-android`'s recent events: the fraud-vector probes (`Malicious keyboard`,
-`Screen capture`) surface as discrete events with their own risk band, next to
-the policy decisions they feed into.*
+*`pay-android`'s recent events in the refreshed console: the fraud-vector probes
+(`Malicious keyboard`, `Screen capture`) surface as discrete events with their
+own risk band, next to the policy decisions they feed into.*
 
 ## What the SOC sees
 

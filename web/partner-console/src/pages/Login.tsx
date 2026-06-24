@@ -41,13 +41,36 @@ export function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-full items-center justify-center p-6">
-      <form onSubmit={onSubmit} className="card w-full max-w-md space-y-4">
-        <div>
-          <h1 className="text-xl font-semibold text-heading">
+    <div className="relative flex min-h-full items-center justify-center overflow-hidden p-6">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 -z-10 bg-gradient-to-br from-[#5161ce] via-[#7b3fe4] to-[#9b59e2]"
+      />
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.18),transparent_40%)]"
+      />
+
+      <form onSubmit={onSubmit} className="relative w-full max-w-md space-y-5 rounded-3xl border border-white/20 bg-panel/95 p-7 shadow-2xl shadow-black/20 backdrop-blur">
+        <div className="text-center">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-accent to-accent-strong text-accent-fg shadow-lg shadow-accent/30">
+            <svg
+              className="h-6 w-6"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M12 2 4 5v6c0 5 3.5 9 8 11 4.5-2 8-6 8-11V5l-8-3z" />
+            </svg>
+          </div>
+          <h1 className="mt-4 text-2xl font-bold tracking-tight text-heading">
             kseal partner console
           </h1>
-          <p className="mt-1 text-sm text-muted">
+          <p className="mt-1 text-sm leading-relaxed text-muted">
             Sign in with a partner API key to monitor your managed tenant fleet.
           </p>
         </div>
@@ -96,7 +119,7 @@ export function LoginPage() {
         </div>
 
         {error && (
-          <div role="alert" className="text-sm text-rose-600 dark:text-rose-300">
+          <div role="alert" className="rounded-xl bg-rose-500/10 px-3 py-2 text-sm text-rose-600 dark:text-rose-300">
             {error}
           </div>
         )}

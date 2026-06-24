@@ -75,9 +75,9 @@ either path keeps the decision well away from `ALLOW`.
 
 ![kseal console — Meridian Pay tenant overview](img/01-dashboard.png)
 
-*Every decision is the server's, and the console makes that visible: trust
-sessions bucketed by the server-assigned level (`TRUSTED` through `CRITICAL`),
-alongside how many attestations failed server-side.*
+*Every decision is the server's, and the refreshed KChat-family console makes
+that visible: trust sessions bucketed by the server-assigned level (`TRUSTED`
+through `CRITICAL`), alongside how many attestations failed server-side.*
 
 ## Why this is also fast
 

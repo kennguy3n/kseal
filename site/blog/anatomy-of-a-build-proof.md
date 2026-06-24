@@ -68,9 +68,10 @@ the exact transforms its manifest records.
 
 ![kseal console — build proof and applied transforms](img/10-masvs-evidence.png)
 
-*A registered `pay-android` release: the build-proof digest, and the applied
-transforms (`control-flow-flattening`, `mixed-boolean-arithmetic`,
-`native-symbol-encryption`, `string-obfuscation`) read out of the proof manifest.*
+*A registered `pay-android` release in the refreshed console: the build-proof
+digest, and the applied transforms (`control-flow-flattening`,
+`mixed-boolean-arithmetic`, `native-symbol-encryption`, `string-obfuscation`)
+read out of the proof manifest.*
 
 ## Reproducible by default
 

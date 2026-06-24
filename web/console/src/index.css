@@ -24,30 +24,30 @@
   --c-fg-muted: 71 85 105; /* slate-600 */
   --c-fg-subtle: 100 116 139; /* slate-500 */
 
-  --c-accent: 67 56 202; /* indigo-700 — AA on light surfaces */
-  --c-accent-strong: 79 70 229; /* indigo-600 */
+  --c-accent: 123 63 228; /* KChat purple #7b3fe4 — AA on light surfaces */
+  --c-accent-strong: 81 97 206; /* KChat blue-purple #5161ce */
   --c-accent-contrast: 255 255 255;
 }
 
 .dark {
   color-scheme: dark;
 
-  --c-canvas: 11 16 32; /* #0b1020 (ink)   */
-  --c-surface: 17 24 43; /* #11182b (panel) */
-  --c-elevated: 30 41 59; /* slate-800 */
-  --c-field: 15 23 42; /* slate-900 */
+  --c-canvas: 12 10 24; /* deep ink */
+  --c-surface: 22 18 38; /* raised panel */
+  --c-elevated: 34 30 54; /* card hover / dropdown */
+  --c-field: 15 12 28; /* input backgrounds */
 
-  --c-line: 30 41 59; /* slate-800 */
-  --c-line-strong: 51 65 85; /* slate-700 */
+  --c-line: 40 35 64; /* subtle borders */
+  --c-line-strong: 58 52 90; /* focused borders */
 
-  --c-fg: 226 232 240; /* slate-200 */
-  --c-fg-strong: 248 250 252; /* slate-50  */
-  --c-fg-muted: 148 163 184; /* slate-400 */
-  --c-fg-subtle: 100 116 139; /* slate-500 */
+  --c-fg: 232 229 244; /* high-contrast text */
+  --c-fg-strong: 248 246 255; /* headings */
+  --c-fg-muted: 160 152 190; /* secondary text */
+  --c-fg-subtle: 115 107 145; /* placeholders */
 
-  --c-accent: 165 180 252; /* indigo-300 — AA on dark surfaces */
-  --c-accent-strong: 99 102 241; /* indigo-500 */
-  --c-accent-contrast: 255 255 255;
+  --c-accent: 176 135 255; /* soft lavender #b087ff — AA on dark surfaces */
+  --c-accent-strong: 139 110 246; /* violet #8b6ef6 */
+  --c-accent-contrast: 15 12 28;
 }
 
 html,
@@ -60,8 +60,10 @@ body {
   margin: 0;
   background-color: rgb(var(--c-canvas));
   color: rgb(var(--c-fg));
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
     Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   transition: background-color 150ms ease, color 150ms ease;
 }
 
@@ -77,13 +79,13 @@ body {
 
 @layer components {
   .card {
-    @apply rounded-xl border border-line bg-surface p-5 shadow-sm;
+    @apply rounded-2xl border border-line bg-surface p-5 shadow-[0_2px_8px_rgba(0,0,0,0.04)];
   }
   .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-3.5 py-2.5 text-sm font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-50;
   }
   .btn-primary {
-    @apply btn bg-accent-strong text-white hover:opacity-90;
+    @apply btn bg-gradient-to-br from-accent to-accent-strong text-white shadow-md shadow-accent/25 hover:shadow-lg hover:shadow-accent/30 hover:-translate-y-0.5;
   }
   .btn-ghost {
     @apply btn border border-line-strong text-fg hover:bg-elevated;
@@ -92,13 +94,13 @@ body {
     @apply btn border border-rose-500/60 text-rose-600 hover:bg-rose-500/10 dark:text-rose-300 dark:hover:bg-rose-900/30;
   }
   .input {
-    @apply w-full rounded-lg border border-line-strong bg-field px-3 py-2 text-sm text-fg-strong outline-none placeholder:text-fg-subtle focus:border-accent-strong;
+    @apply w-full rounded-xl border border-line-strong bg-field px-3.5 py-2.5 text-sm text-fg-strong outline-none placeholder:text-fg-subtle focus:border-accent-strong focus:ring-2 focus:ring-accent/20;
   }
   .label {
-    @apply mb-1 block text-xs font-medium uppercase tracking-wide text-fg-muted;
+    @apply mb-1.5 block text-xs font-semibold uppercase tracking-wide text-fg-muted;
   }
   .badge {
-    @apply inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium;
+    @apply inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold;
   }
   .th {
     @apply px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-fg-muted;

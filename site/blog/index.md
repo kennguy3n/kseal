@@ -6,7 +6,18 @@ Every number is measured or taken from source — the
 [reference docs](https://github.com/kennguy3n/kseal/tree/main/docs/reference)
 hold the fixtures and benchmarks each post cites.
 
+The console screenshots in the posts below are from the latest UI, which has been
+aligned with the [KChat](https://kchat.com/) design language: Inter typography, a
+purple-gradient brand palette, and polished cards, buttons, and empty states.
+
 ---
+
+## [Designing the kseal console: a KChat-family product experience](designing-the-kseal-console.md)
+
+A tour of the recent UI/UX polish: the shared Inter typeface, the KChat purple
+gradient tokens, the rounded cards and gradient buttons, and the redesigned login
+and onboarding flows that make the first impression as polished as the
+architecture underneath.
 
 ## [Why the trust decision lives on the server](trust-on-the-server.md)
 

@@ -119,12 +119,14 @@ func (s *seeder) ingestEvents(tenantID string, a appSeed) error {
 		if err != nil {
 			return fmt.Errorf("marshal batch: %w", err)
 		}
-		resp, err := s.ingest.SubmitTelemetry(s.ctx, connect.NewRequest(&ksealv1.SubmitTelemetryRequest{
+		req := connect.NewRequest(&ksealv1.SubmitTelemetryRequest{
 			TenantId:        tenantID,
 			AppId:           a.app.Id,
 			CompressedBatch: raw,
 			Compression:     ksealv1.Compression_COMPRESSION_NONE,
-		}))
+		})
+		req.Header().Set("Authorization", "Bearer "+s.apiKey)
+		resp, err := s.ingest.SubmitTelemetry(s.ctx, req)
 		if err != nil {
 			return fmt.Errorf("submit telemetry: %w", err)
 		}

@@ -98,15 +98,15 @@ function NavSections({ onNavigate }: { onNavigate?: () => void }) {
 
 function Brand() {
   return (
-    <div className="flex items-center gap-2">
-      <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent-strong/15 text-accent">
+    <div className="flex items-center gap-2.5">
+      <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-accent to-accent-strong text-white shadow-md shadow-accent/25">
         <ShieldIcon className="h-4 w-4" />
       </span>
       <div>
-        <div className="text-lg font-semibold leading-none text-fg-strong">
+        <div className="text-lg font-bold leading-none tracking-tight text-fg-strong">
           kseal
         </div>
-        <div className="text-xs text-fg-subtle">console</div>
+        <div className="text-xs font-medium text-fg-subtle">console</div>
       </div>
     </div>
   );

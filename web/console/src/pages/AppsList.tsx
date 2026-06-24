@@ -18,8 +18,8 @@ export function AppsListPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Apps"
-        description="Applications registered to this tenant. Each app binds the SDK and CLI to its own signing keys."
+        title="Your apps"
+        description="The apps you protect with kseal. Each one gets its own SDK keys and policies."
       />
 
       <Card>

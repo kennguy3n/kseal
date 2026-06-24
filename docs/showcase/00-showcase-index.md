@@ -37,11 +37,14 @@ Each chapter's examples are drawn from the five canonical scenarios D1–D5 in
 The console screenshots throughout this series are captured from the kseal console driven by
 the canonical Meridian Pay dataset — the same tenant, apps, policies and events the fixtures
 describe, seeded by [`examples/meridian-showcase`](../../examples/meridian-showcase) so the
-views regenerate from a clean checkout.
+views regenerate from a clean checkout. They reflect the latest UI: Inter typography, the
+KChat purple-gradient brand palette, and rounded cards with polished buttons and empty
+states.
 
 ![kseal console — the Meridian Pay tenant overview](screenshots/01-dashboard.png)
 *The Meridian Pay tenant at a glance: two registered apps, the 24-hour event volume, issued
-trust sessions, and the server-derived trust-level distribution.*
+trust sessions, and the server-derived trust-level distribution — shown in the refreshed
+KChat-family console design.*
 
 ---
 

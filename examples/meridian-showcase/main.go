@@ -111,6 +111,7 @@ type seeder struct {
 	comp   compliance.Store
 	siem   siem.ConnectorStore
 	ingest ksealv1connect.IngestServiceClient
+	apiKey string
 	rng    *mrand.Rand
 }
 

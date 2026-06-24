@@ -6,12 +6,12 @@ hide:
 
 <div class="kseal-hero" markdown>
 
-# Ship apps attackers can't quietly break
+# Protect your apps. Trust every request.
 
-**kseal** is a four-plane mobile & desktop app-security platform: build-time
-hardening, on-device RASP, and server-authoritative API attestation — operated
-NoOps for thousands of tenants. The decision to trust a request is made on the
-**server**, so a tampered client can't talk its way past your backend.
+**kseal** hardens mobile and desktop apps at build time, protects them at
+runtime, and proves every API request came from an untampered device — all
+without adding ops overhead. The trust decision is made on the **server**, so
+attackers can't talk their way past your backend.
 
 [Secure your app in 4 steps :material-arrow-right:](secure-your-app.md){ .md-button .md-button--primary }
 [Read the architecture](ARCHITECTURE.md){ .md-button }

@@ -133,9 +133,11 @@ func (d *Dispatcher) Submit(e Event) {
 func (d *Dispatcher) dispatchLoop() {
 	defer d.dispatchWG.Done()
 	for e := range d.events {
-		if err := d.fanout(context.Background(), e); err != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), d.cfg.Timeout)
+		if err := d.fanout(ctx, e); err != nil {
 			d.record("lookup_error")
 		}
+		cancel()
 	}
 }
 
@@ -186,7 +188,9 @@ func (d *Dispatcher) deliver(j job) {
 
 	body := []byte(j.event.Payload)
 	sig := crypto.HMACSHA256(j.target.Secret, body)
-	req, err := http.NewRequest(http.MethodPost, j.target.Webhook.Url, bytes.NewReader(body))
+	ctx, cancel := context.WithTimeout(context.Background(), d.cfg.Timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, j.target.Webhook.Url, bytes.NewReader(body))
 	if err != nil {
 		d.record("error")
 		return
