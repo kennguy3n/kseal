@@ -144,6 +144,7 @@ export function useKillSwitchState(appId: string) {
     queryKey: complianceKeys.killSwitch(tenantId, appId),
     queryFn: () =>
       clients.compliance.getKillSwitchState({ tenantId, appId }),
+    enabled: !!appId,
     retry: retryUnlessUnavailable,
   });
 }
@@ -208,6 +209,7 @@ export function useCanaryStatus(appId: string) {
         throw err;
       }
     },
+    enabled: !!appId,
     retry: retryUnlessUnavailable,
   });
 }

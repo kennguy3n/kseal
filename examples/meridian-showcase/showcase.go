@@ -168,17 +168,11 @@ func (s *seeder) run() error {
 	}
 
 	// 5. API key for console login (and telemetry submission until SDK device
-	// credentials are implemented). Include every read scope the console pages
-	// use so the showcase can be navigated end-to-end without auth errors.
+	// credentials are implemented). Grant the full non-platform scope set so
+	// the demo console can read and write across every page without manual
+	// scope provisioning.
 	apiKey, _, err := s.store.CreateAPIKey(ctx, tenant.Id, "soc-console",
-		[]string{
-			"control:read", "control:write",
-			"data:read",
-			"query:read",
-			"registry:read",
-			"policy:read",
-			"compliance:read",
-		})
+		[]string{"*"})
 	if err != nil {
 		return fmt.Errorf("create api key: %w", err)
 	}
