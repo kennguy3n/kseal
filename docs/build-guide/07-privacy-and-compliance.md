@@ -51,7 +51,7 @@ The MASVS view's *Gaps & notes* panel explicitly states that coverage is derived
 registered build-manifest module set and the build-hash proof, and that it does **not** ship
 per-control signed attestation artifacts it doesn't have. A compliance tool that over-claims is
 worse than useless — stating exactly what the evidence *is and isn't* is what keeps an auditor
-comfortable. (See [MediToken](../showcase/04-meditoken-compliance.md).)
+comfortable. (See [Compliance evidence](../showcase/04-compliance-evidence.md).)
 
 And because every compliance mutation is a hash-chained audit entry
 ([Chapter 6](06-control-plane-registry-policy-audit.md)), *the act of documenting is itself

@@ -74,6 +74,12 @@ class NativeHardeningFunctionalTest {
         assertTrue(doc.contains("\"pac_unsupported\": 1"), "x86_64 PAC must be tallied as unsupported")
         assertTrue(doc.contains("\"cfi_unsupported\": 0"), "both ABIs support CFI, so none are unsupported")
 
+        // Phase 5.2: the string-obfuscation posture is recorded too. The fixture
+        // libraries are not the kseal trust core (no kseal_* exports), so both are
+        // reported as not-applicable rather than falsely "clean".
+        assertTrue(doc.contains("\"string_obfuscation_not_applicable\": 2"), "non-core libs must be not-applicable")
+        assertTrue(doc.contains("\"string_obfuscation\": \"not-applicable\""), "per-library posture must be recorded")
+
         val report = File(projectDir, "build/kseal/reports/native.json").readText()
         assertTrue(report.contains("\"library_count\": 2"))
         assertTrue(report.contains("\"status\": \"applied\""))

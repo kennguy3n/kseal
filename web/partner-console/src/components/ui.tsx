@@ -3,21 +3,28 @@ import { ConnectError } from "@connectrpc/connect";
 
 export function Card({
   title,
+  description,
   actions,
   children,
 }: {
   title?: ReactNode;
+  description?: ReactNode;
   actions?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <section className="card">
-      {(title || actions) && (
-        <header className="mb-4 flex items-center justify-between">
-          {title && (
-            <h2 className="text-sm font-semibold text-heading">{title}</h2>
-          )}
-          {actions}
+      {(title || actions || description) && (
+        <header className="mb-5 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            {title && (
+              <h2 className="text-base font-semibold text-heading">{title}</h2>
+            )}
+            {description && (
+              <p className="mt-1 text-sm text-muted">{description}</p>
+            )}
+          </div>
+          {actions && <div className="shrink-0">{actions}</div>}
         </header>
       )}
       {children}
@@ -28,8 +35,8 @@ export function Card({
 export function Stat({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="card">
-      <div className="text-xs uppercase tracking-wide text-muted">{label}</div>
-      <div className="mt-2 text-2xl font-semibold text-heading tabular-nums">
+      <div className="text-xs font-semibold uppercase tracking-wider text-muted">{label}</div>
+      <div className="mt-2 text-3xl font-bold tracking-tight text-heading tabular-nums">
         {value}
       </div>
     </div>
@@ -61,7 +68,7 @@ export function Spinner({ label = "Loading…" }: { label?: string }) {
 
 export function EmptyState({ children }: { children: ReactNode }) {
   return (
-    <div className="rounded-lg border border-dashed border-line-strong p-6 text-center text-sm text-muted">
+    <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-line-strong bg-raised/40 p-8 text-center text-sm text-muted">
       {children}
     </div>
   );
@@ -107,7 +114,7 @@ export function ErrorNotice({ error }: { error: unknown }) {
   return (
     <div
       role="alert"
-      className="rounded-lg border border-rose-500/40 bg-rose-500/10 p-4 text-sm text-rose-700 dark:border-rose-700/50 dark:bg-rose-900/20 dark:text-rose-200"
+      className="rounded-xl border border-rose-500/40 bg-rose-500/10 p-4 text-sm text-rose-700 dark:border-rose-700/50 dark:bg-rose-900/20 dark:text-rose-200"
     >
       {message}
     </div>

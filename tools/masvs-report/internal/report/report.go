@@ -65,7 +65,6 @@ type CategoryReport struct {
 type ControlReport struct {
 	Objective string   `json:"objective"`
 	Control   string   `json:"ksealControl"`
-	Phase     string   `json:"phase"`
 	Module    string   `json:"module"`
 	MASTG     string   `json:"mastg"`
 	Evidence  Evidence `json:"evidence"`
@@ -160,7 +159,6 @@ func (g *Generator) Generate(m *buildproof.Manifest, cat *catalog.Catalog) *Repo
 			cr.Controls = append(cr.Controls, ControlReport{
 				Objective: ctl.Objective,
 				Control:   ctl.Control,
-				Phase:     ctl.Phase,
 				Module:    ctl.Module,
 				MASTG:     ctl.MASTG,
 				Evidence:  ev,

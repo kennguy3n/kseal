@@ -63,7 +63,7 @@ worker floor, a $300 streaming-cluster floor), not for data volume. The data its
 zstd ~4× on the wire, ClickHouse ~8× columnar on disk, raw events **off by default**
 (aggregates path is cheaper still).
 
-> The compression cost is microseconds, not a tax: `batch_and_compress_10` ≈ 33 µs on device,
+> The compression cost is microseconds, not a tax: `batch_and_compress_10` ≈ 35 µs on device,
 > `decompress_batch_10` ≈ 16 µs on the server ([Chapter 3](03-device-plane-rasp-and-rust-core.md)).
 
 ---
@@ -76,7 +76,7 @@ the cost model *doesn't* show. The platform removes the roles the incumbent path
 | Role the incumbent path needs | How kseal removes it |
 |---|---|
 | Security analyst (tune abuse rules) | Fleet baselines are *learned*, zero-config ([Chapter 5](05-data-plane-ingest-fleet-and-risk.md)) |
-| Data engineer (build the pipeline) | Signed webhooks + minimized SIEM stream out of the box ([NovaPay](../showcase/01-novapay-fintech.md)) |
+| Data engineer (build the pipeline) | Signed webhooks + minimized SIEM stream out of the box ([Server-authoritative trust](../showcase/01-server-authoritative-trust.md)) |
 | Compliance analyst (gather evidence) | MASVS + data-processing derived from build proof ([Chapter 7](07-privacy-and-compliance.md)) |
 | Release/SRE (safe policy rollout) | Canary + auto-rollback built into the trust layer ([Chapter 6](06-control-plane-registry-policy-audit.md)) |
 

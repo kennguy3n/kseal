@@ -166,11 +166,11 @@ export function Onboarding() {
           <div>
             <h2
               id={headingId}
-              className="text-sm font-semibold text-fg-strong"
+              className="text-base font-semibold text-fg-strong"
             >
               {allDone ? "Your app is protected" : "Secure your app"}
             </h2>
-            <p className="mt-0.5 text-xs text-fg-muted">
+            <p className="mt-1 text-sm leading-relaxed text-fg-muted">
               {allDone
                 ? "Every setup step is complete. You can revisit these areas any time from the sidebar."
                 : "A guided path from registering an app to live protection. Each step explains why it matters."}

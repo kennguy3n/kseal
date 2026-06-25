@@ -26,7 +26,6 @@ type Procedure struct {
 	Category   string   `json:"category"`
 	Objective  string   `json:"objective"`
 	Control    string   `json:"control"`
-	Phase      string   `json:"phase"`
 	MASTGTests []string `json:"mastg_tests"`
 	Method     string   `json:"method"`
 	Plane      Plane    `json:"plane"`
@@ -56,7 +55,6 @@ func deriveProcedure(category string, ctrl Control) Procedure {
 		Category:   category,
 		Objective:  ctrl.Objective,
 		Control:    ctrl.Control,
-		Phase:      ctrl.Phase,
 		MASTGTests: tests,
 		Method:     method,
 		Plane:      classifyPlane(method, tests),

@@ -26,13 +26,13 @@ export function Card({
   return (
     <section className="card">
       {(title || actions || description) && (
-        <header className="mb-4 flex items-start justify-between gap-3">
+        <header className="mb-5 flex items-start justify-between gap-3">
           <div className="min-w-0">
             {title && (
-              <h2 className="text-sm font-semibold text-fg-strong">{title}</h2>
+              <h2 className="text-base font-semibold text-fg-strong">{title}</h2>
             )}
             {description && (
-              <p className="mt-0.5 text-xs text-fg-muted">{description}</p>
+              <p className="mt-1 text-sm text-fg-muted">{description}</p>
             )}
           </div>
           {actions && <div className="shrink-0">{actions}</div>}
@@ -57,9 +57,9 @@ export function PageHeader({
   return (
     <header className="flex flex-wrap items-start justify-between gap-3">
       <div className="min-w-0">
-        <h1 className="text-xl font-semibold text-fg-strong">{title}</h1>
+        <h1 className="text-2xl font-bold tracking-tight text-fg-strong">{title}</h1>
         {description && (
-          <p className="mt-1 max-w-2xl text-sm text-fg-muted">{description}</p>
+          <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-fg-muted">{description}</p>
         )}
       </div>
       {actions && <div className="shrink-0">{actions}</div>}
@@ -83,11 +83,11 @@ export function Stat({
   if (loading) return <SkeletonStat />;
   return (
     <div className="card">
-      <div className="flex items-center gap-1.5 text-xs uppercase tracking-wide text-fg-muted">
+      <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-fg-muted">
         {label}
         {hint && <InfoHint label={`About ${label}`}>{hint}</InfoHint>}
       </div>
-      <div className="mt-2 text-2xl font-semibold text-fg-strong">{value}</div>
+      <div className="mt-2 text-3xl font-bold tracking-tight text-fg-strong">{value}</div>
     </div>
   );
 }
@@ -171,14 +171,14 @@ export function EmptyState({
   children?: ReactNode;
 }) {
   return (
-    <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-line-strong p-6 text-center">
-      <span className="text-fg-subtle" aria-hidden="true">
+    <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-line-strong bg-elevated/40 p-8 text-center">
+      <span className="flex h-10 w-10 items-center justify-center rounded-full bg-fg-subtle/10 text-fg-subtle" aria-hidden="true">
         {icon}
       </span>
       {title && (
-        <div className="text-sm font-medium text-fg-strong">{title}</div>
+        <div className="text-base font-semibold text-fg-strong">{title}</div>
       )}
-      {children && <div className="text-sm text-fg-muted">{children}</div>}
+      {children && <div className="max-w-md text-sm leading-relaxed text-fg-muted">{children}</div>}
       {action && <div className="mt-1">{action}</div>}
     </div>
   );

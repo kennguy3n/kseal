@@ -30,11 +30,12 @@ type Interceptors struct {
 	Tracer    telemetry.Telemetry
 	Limiter   *RedisRateLimiter
 	Validator APIKeyValidator
-	// RequireAuth is the set of fully-qualified procedures that demand a valid
-	// API key (control-plane surfaces). Device-plane procedures authenticate via
-	// request body + signed proofs and are absent here.
-	RequireAuth map[string]bool
+	// Policies is the fail-closed authorization table keyed by fully-qualified
+	// Connect procedure name. Nil uses ProcedurePolicies().
+	Policies map[string]ProcedurePolicy
 }
+
+var errUnknownProcedure = errors.New("unknown rpc procedure")
 
 // Chain returns the ordered interceptor options for connect handlers.
 func (i *Interceptors) Chain() connect.Option {
@@ -147,26 +148,66 @@ func (i *Interceptors) authn() connect.UnaryInterceptorFunc {
 	return func(next connect.UnaryFunc) connect.UnaryFunc {
 		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
 			procedure := req.Spec().Procedure
+			policies := i.Policies
+			if policies == nil {
+				policies = ProcedurePolicies()
+			}
+			policy, err := policyFor(procedure, policies)
+			if err != nil {
+				return nil, err
+			}
 			key := bearerToken(req.Header().Get("Authorization"))
 			if key == "" {
 				key = req.Header().Get("X-API-Key")
 			}
 
+			var principal *auth.Principal
 			if key != "" && i.Validator != nil {
-				principal, err := i.Validator.ValidateAPIKey(ctx, key)
+				principal, err = i.Validator.ValidateAPIKey(ctx, key)
 				if err != nil {
 					return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("invalid api key"))
 				}
 				ctx = auth.WithPrincipal(ctx, principal)
-			} else if i.RequireAuth[procedure] {
+			} else if policy.AuthRequired {
 				return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("api key required"))
 			}
 
-			// Device-plane: derive tenant from the request body when not already
-			// established by an API key.
+			if principal != nil {
+				if policy.PlatformAdminRequired && !principal.PlatformAdmin {
+					return nil, connect.NewError(connect.CodePermissionDenied, errors.New("platform admin required"))
+				}
+				for _, scope := range policy.RequiredScopes {
+					if !principal.HasScope(scope) {
+						return nil, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("missing scope %q", scope))
+					}
+				}
+			} else if len(policy.RequiredScopes) > 0 || policy.PlatformAdminRequired {
+				return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("api key required"))
+			}
+
+			// Public pre-attestation endpoints may rate-limit by the body tenant.
+			// Authenticated/device-credential endpoints must get their tenant from
+			// a validated principal; the body is only a claim handlers enforce.
 			if _, err := auth.TenantFrom(ctx); err != nil {
-				if tb, ok := req.Any().(interface{ GetTenantId() string }); ok && tb.GetTenantId() != "" {
-					ctx = auth.WithTenant(ctx, tb.GetTenantId())
+				if policy.DeviceCredential == DeviceCredentialPublicNonce {
+					if tb, ok := req.Any().(interface{ GetTenantId() string }); ok && tb.GetTenantId() != "" {
+						ctx = auth.WithTenant(ctx, tb.GetTenantId())
+					}
+				}
+			}
+			if policy.TenantRequired {
+				tenant, err := auth.TenantFrom(ctx)
+				if err != nil || tenant == "" {
+					return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("tenant credential required"))
+				}
+				if tb, ok := req.Any().(interface{ GetTenantId() string }); ok && tb.GetTenantId() != "" && tb.GetTenantId() != tenant {
+					return nil, connect.NewError(connect.CodePermissionDenied, errors.New("cross-tenant request denied"))
+				}
+				if !policy.AuthRequired && policy.DeviceCredential != DeviceCredentialPublicNonce && principal == nil {
+					// Temporary server-side hardening until SDK device credentials are
+					// added: callers must present a validated principal for config and
+					// telemetry instead of relying on body tenant ids.
+					return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("device credential required"))
 				}
 			}
 			return next(ctx, req)

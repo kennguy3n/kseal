@@ -35,6 +35,25 @@ func TestParseAPIKeyRejectsMalformed(t *testing.T) {
 	}
 }
 
+func TestVerifySecretRejectsExtremeParams(t *testing.T) {
+	gen, err := GenerateAPIKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, secret, _ := ParseAPIKey(gen.Plaintext)
+
+	for _, hash := range []string{
+		"$argon2id$v=19$m=999999999,t=1,p=1$AA$AA",
+		"$argon2id$v=19$m=65536,t=999,p=1$AA$AA",
+		"$argon2id$v=19$m=65536,t=1,p=999$AA$AA",
+		"$argon2id$v=19$m=0,t=1,p=1$AA$AA",
+	} {
+		if _, err := VerifySecret(secret, hash); err != ErrMalformedHash {
+			t.Errorf("expected ErrMalformedHash for %q, got %v", hash, err)
+		}
+	}
+}
+
 func TestTenantContext(t *testing.T) {
 	ctx := WithTenant(context.Background(), "t1")
 	got, err := TenantFrom(ctx)

@@ -11,11 +11,11 @@ Ignored non-category section.
 Objective: sensitive data is stored securely and not exposed via logs or
 backups.
 
-| MASVS objective | kseal control | Phase | Module / component | MASTG verification |
-|---|---|---|---|---|
-| No sensitive data in logs | Privacy guard strips identifiers at source | P1/P2 | Device plane: privacy guard | MASTG-STORAGE: inspect logcat/oslog; assert no PII |
-| No secrets in app storage | No static secrets; keys hardware-bound | P1 | Secret protection | MASTG-STORAGE + MASTG-RESILIENCE: static scan binary; runtime sandbox dump |
-| Tenant data isolated at rest | Logical tenant_id namespacing | P1/P4 | Control plane | Server test: attempt cross-tenant_id read; assert deny |
+| MASVS objective | kseal control | Module / component | MASTG verification |
+|---|---|---|---|
+| No sensitive data in logs | Privacy guard strips identifiers at source | Device plane: privacy guard | MASTG-STORAGE: inspect logcat/oslog; assert no PII |
+| No secrets in app storage | No static secrets; keys hardware-bound | Secret protection | MASTG-STORAGE + MASTG-RESILIENCE: static scan binary; runtime sandbox dump |
+| Tenant data isolated at rest | Logical tenant_id namespacing | Control plane | Server test: attempt cross-tenant_id read; assert deny |
 
 ---
 
@@ -23,17 +23,17 @@ backups.
 
 Objective: cryptography uses current algorithms and hardware-backed keys.
 
-| MASVS objective | kseal control | Phase | Module / component | MASTG verification |
-|---|---|---|---|---|
-| Strong, current algorithms | Modern AEAD + signatures | P1 | Rust trust core | MASTG-CRYPTO: review algorithms; assert no MD5/SHA-1/ECB |
-| Deterministic serialization | Canonical message formats | P1 | Rust core | Property test: round-trip determinism (tenant-neutral) |
+| MASVS objective | kseal control | Module / component | MASTG verification |
+|---|---|---|---|
+| Strong, current algorithms | Modern AEAD + signatures | Rust trust core | MASTG-CRYPTO: review algorithms; assert no MD5/SHA-1/ECB |
+| Deterministic serialization | Canonical message formats | Rust core | Property test: round-trip determinism (tenant-neutral) |
 
 ---
 
-## Coverage Summary by Phase
+## Coverage Summary
 
 Ignored trailing table.
 
-| Phase | Controls |
+| MASVS category | Controls |
 |---|---|
-| P1 | 5 |
+| STORAGE | 5 |

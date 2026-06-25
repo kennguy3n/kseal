@@ -179,6 +179,15 @@ func (s *Service) GetNonce(ctx context.Context, req *connect.Request[ksealv1.Non
 	if req.Msg.TenantId == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("tenant_id required"))
 	}
+	if req.Msg.AppId == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("app_id required"))
+	}
+	if _, err := s.store.GetApp(ctx, req.Msg.TenantId, req.Msg.AppId); err != nil {
+		if errors.Is(err, registry.ErrNotFound) {
+			return nil, connect.NewError(connect.CodeNotFound, errors.New("unknown tenant or app"))
+		}
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
 	nonce, expires, err := s.nonces.Issue(ctx, req.Msg.TenantId, req.Msg.AppId)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeUnavailable, err)
@@ -211,12 +220,17 @@ func (s *Service) VerifyAttestation(ctx context.Context, req *connect.Request[ks
 	}
 
 	// Resolve the expected platform app identity (package / bundle id).
-	expectedAppID := ""
-	if app, err := s.store.GetApp(ctx, m.TenantId, m.AppId); err == nil {
-		expectedAppID = app.PackageId
-	} else if !errors.Is(err, registry.ErrNotFound) {
+	app, err := s.store.GetApp(ctx, m.TenantId, m.AppId)
+	if errors.Is(err, registry.ErrNotFound) {
+		return reject("unknown tenant or app"), nil
+	}
+	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
+	if app.PackageId == "" {
+		return reject("app identity is not configured"), nil
+	}
+	expectedAppID := app.PackageId
 
 	res, err := s.verifier.Verify(ctx, attestation.Input{
 		Platform: m.Platform,
@@ -251,7 +265,11 @@ func (s *Service) VerifyAttestation(ctx context.Context, req *connect.Request[ks
 
 	// Fuse device-reported risk with attestation-derived risk and score against
 	// the active policy.
-	policy, _ := s.store.GetActivePolicy(ctx, m.TenantId, m.AppId)
+	policy, perr := s.store.GetActivePolicy(ctx, m.TenantId, m.AppId)
+	if perr != nil && !errors.Is(perr, registry.ErrNotFound) {
+		span.RecordError(perr)
+		span.SetAttributes(attribute.String("policy_lookup", "degraded"))
+	}
 	thresholds := parseThresholds(policy)
 	fused := risk.Fuse(risk.FromWire(m.RiskBitset), res.RiskBits)
 	fused = s.applyFleetGuard(m.TenantId, m.AppId, m.BuildHash, s.edgeRegion(req.Header()), fused, span)
@@ -326,6 +344,18 @@ func (s *Service) ValidateRequestProof(ctx context.Context, req *connect.Request
 	if m.TrustTokenId == "" {
 		return deny("missing trust token id"), nil
 	}
+	if len(m.RequestHash) == 0 || len(m.Nonce) == 0 {
+		return deny("invalid proof: missing request hash or nonce"), nil
+	}
+	if len(m.AppInstanceSignature) == 0 {
+		return deny("invalid proof: missing signature"), nil
+	}
+
+	ctx, span := s.tracer.Start(ctx, "trust.ValidateRequestProof", trace.WithAttributes(
+		attribute.String("trust_token_id", m.TrustTokenId),
+	))
+	defer span.End()
+
 	// Token ids are minted as UUIDs, so a malformed id can never match a stored
 	// session. Fail closed here without a DB round-trip; this also prevents a
 	// uuid-typed column from raising a 22P02 error that would surface as a 500
@@ -363,8 +393,10 @@ func (s *Service) ValidateRequestProof(ctx context.Context, req *connect.Request
 	}
 
 	mode := ksealv1.EnforcementMode_ENFORCEMENT_MODE_STEP_UP
-	if policy, err := s.store.GetActivePolicy(ctx, sess.TenantID, sess.AppID); err == nil && policy != nil {
+	if policy, perr := s.store.GetActivePolicy(ctx, sess.TenantID, sess.AppID); perr == nil && policy != nil {
 		mode = policy.EnforcementMode
+	} else if perr != nil && !errors.Is(perr, registry.ErrNotFound) {
+		span.RecordError(perr)
 	}
 	decision := risk.Decision(ksealv1.TrustLevel(sess.RiskLevel), mode)
 	s.recordCanaryHealth(sess.TenantID, sess.AppID, sess.InstanceID, decision)

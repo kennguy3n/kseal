@@ -70,6 +70,12 @@ nav:
   - Getting started:
       - Project overview: project-overview.md
       - Threat model: docs/threat-model.md
+  - Blog:
+      - All posts: blog/index.md
+      - Trust on the server: blog/trust-on-the-server.md
+      - Inside the risk engine: blog/inside-the-risk-engine.md
+      - Anatomy of a build proof: blog/anatomy-of-a-build-proof.md
+      - Five fraud vectors: blog/five-fraud-vectors.md
   - Architecture:
       - Architecture overview: ARCHITECTURE.md
       - Design proposal: PROPOSAL.md

@@ -2,9 +2,9 @@
 
 A static documentation site (MkDocs) that organizes the repository's existing
 Markdown — `docs/**` plus the root `PROPOSAL.md` / `ARCHITECTURE.md` /
-`PROGRESS.md` / `README.md` — into one navigable site: getting started,
-architecture, SDK guides (Android / iOS / desktop), server & ops, compliance,
-and the feature parity matrix.
+`README.md` — into one navigable site: getting started, architecture, SDK
+guides (Android / iOS / desktop), server & ops, compliance, and the feature
+parity matrix.
 
 **No doc bodies are duplicated.** `build.sh` assembles a staging tree
 (`.staging/`) of **symlinks** that mirrors the repo layout, so every rendered

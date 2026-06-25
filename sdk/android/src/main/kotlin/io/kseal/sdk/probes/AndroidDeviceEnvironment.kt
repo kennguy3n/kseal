@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.Debug
 import android.provider.Settings
 import android.view.inputmethod.InputMethodManager
+import io.kseal.sdk.internal.NativeBridge
 import java.io.File
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -103,6 +104,28 @@ internal class AndroidDeviceEnvironment(context: Context) : DeviceEnvironment {
         false
     }
 
+    override fun nativeDebuggerPresent(): Int =
+        if (NativeBridge.isAvailable) {
+            try {
+                NativeBridge.nativeDebuggerPresent()
+            } catch (_: Throwable) {
+                -1
+            }
+        } else {
+            -1
+        }
+
+    override fun nativeHookPresent(): Int =
+        if (NativeBridge.isAvailable) {
+            try {
+                NativeBridge.nativeHookPresent()
+            } catch (_: Throwable) {
+                -1
+            }
+        } else {
+            -1
+        }
+
     override fun installedPackages(): List<String> = try {
         val pm = appContext.packageManager
         pm.getInstalledPackages(0).map { it.packageName }
@@ -140,6 +163,26 @@ internal class AndroidDeviceEnvironment(context: Context) : DeviceEnvironment {
         signatures.map { sig -> md.digest(sig.toByteArray()).toHex() }
     } catch (_: Throwable) {
         emptyList()
+    }
+
+    override fun sha256OfFile(path: String): String? = try {
+        val f = File(path)
+        if (f.isFile && f.canRead()) {
+            val md = MessageDigest.getInstance("SHA-256")
+            f.inputStream().use { input ->
+                val buffer = ByteArray(DIGEST_BUFFER_BYTES)
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read < 0) break
+                    md.update(buffer, 0, read)
+                }
+            }
+            md.digest().toHex()
+        } else {
+            null
+        }
+    } catch (_: Throwable) {
+        null
     }
 
     override fun httpProxyHost(): String? {
@@ -224,6 +267,7 @@ internal class AndroidDeviceEnvironment(context: Context) : DeviceEnvironment {
 
     private companion object {
         const val CONNECT_TIMEOUT_MS = 120
+        const val DIGEST_BUFFER_BYTES = 64 * 1024
         val HEX = "0123456789abcdef".toCharArray()
     }
 }

@@ -1,8 +1,20 @@
 # kseal — Continuous App Trust Platform
 
-> **Build-time hardening + on-device runtime protection + server-side attestation + privacy-preserving telemetry + policy-based enforcement.**
+> **Build-time hardening · on-device runtime protection (RASP) · server-side attestation · privacy-preserving telemetry · policy-based enforcement.**
 
-kseal is a continuous app trust platform for mobile and desktop applications. It combines per-build polymorphic hardening, an on-device runtime self-protection (RASP) layer, hardware-backed cryptographic binding, platform attestation, and a server-side decision plane so that **only legitimate, untampered, policy-compliant app instances can access protected APIs**. Runtime threats are detected locally, scored privately, and enforced on the backend.
+kseal is a continuous app trust platform for mobile and desktop applications. It
+combines per-build polymorphic hardening, an on-device runtime self-protection
+(RASP) layer, hardware-backed cryptographic binding, platform attestation, and a
+server-side decision plane so that **only legitimate, untampered,
+policy-compliant app instances can reach protected APIs**. Threats are detected
+on the device, scored privately on the server, and enforced on the backend —
+where an attacker who controls the phone cannot patch them out.
+
+Everything in this documentation is grounded in one canonical reference
+deployment — **Meridian Pay**, a fictional consumer payments app — and a set of
+committed, byte-exact fixtures. The numbers come from the test and benchmark
+suites you can run yourself. See [`docs/reference/`](docs/reference/) for the
+fixtures, measured benchmarks, and the risk-scoring reference.
 
 ---
 
@@ -11,16 +23,16 @@ kseal is a continuous app trust platform for mobile and desktop applications. It
 - [Quick Start](#quick-start)
 - [Running the Tests](#running-the-tests)
 - [API Examples](#api-examples)
+- [How a Trust Decision Is Made](#how-a-trust-decision-is-made)
 - [Documentation](#documentation)
-- [Problem Statement](#problem-statement)
-- [Key Differentiators](#key-differentiators)
+- [Why Server-Side Trust](#why-server-side-trust)
+- [What Sets kseal Apart](#what-sets-kseal-apart)
 - [Architecture Overview](#architecture-overview)
-- [Planes](#planes)
-- [Tech Stack Summary](#tech-stack-summary)
-- [Performance Budgets](#performance-budgets)
+- [The Four Planes](#the-four-planes)
+- [Tech Stack](#tech-stack)
+- [Performance](#performance)
 - [Developer Journey](#developer-journey)
 - [Project Structure](#project-structure)
-- [Phased Roadmap](#phased-roadmap)
 - [Standards Alignment](#standards-alignment)
 - [License](#license)
 - [Contributing](#contributing)
@@ -29,13 +41,15 @@ kseal is a continuous app trust platform for mobile and desktop applications. It
 
 ## Quick Start
 
-The full stack — Go server, Postgres 16, Redis 7, and the React console — runs from one command.
+The full stack — Go server, Postgres 16, Redis 7, and the React console — runs
+from one command.
 
 ```bash
 make docker-up          # builds + starts server, postgres, redis, console (detached)
 ```
 
-Once up, the server listens on `:8080` and the console on `:5173`. Verify health:
+Once up, the server listens on `:8080` and the console on `:5173`. Verify
+health:
 
 ```bash
 curl -fsS localhost:8080/healthz        # 200 once the process is up
@@ -43,9 +57,8 @@ curl -fsS localhost:8080/readyz         # 200 once Postgres + Redis are reachabl
 curl -fsS localhost:8080/metrics | head # Prometheus metrics
 ```
 
-Migrations are applied automatically by the server on startup.
-
-Stop the stack (the Postgres volume is preserved):
+Migrations are applied automatically by the server on startup. Stop the stack
+(the Postgres volume is preserved):
 
 ```bash
 make docker-down        # use `make docker-clean` to also drop the volume
@@ -55,18 +68,31 @@ make docker-down        # use `make docker-clean` to also drop the volume
 
 | Service | Plane | Auth | Notes |
 |---|---|---|---|
-| `RegistryService` | Control | **API key required** (`Authorization: Bearer ksk_…`) | Tenants, apps, builds, policies, webhooks |
-| `TrustService` | Device | Tenant from request body + signed proof | `GetNonce` → `VerifyAttestation` → `ValidateRequestProof` |
-| `ConfigService` | Device | Tenant from request body | Signed, cacheable policy config |
-| `IngestService` | Device | Tenant from request body | zstd-compressed telemetry batches |
-| `QueryService` | Control | API key required | Dashboard overview, event listing, trust stats |
-| `WebhookService` | Control | API key required | HMAC-signed event fan-out |
+| `RegistryService` | Control | **Scoped API key** (`Authorization: Bearer ksk_…`) | Tenants, apps, builds, policies, webhooks; tenant APIs require tenant binding and scopes, while tenant create/list require platform-admin credentials |
+| `TrustService` | Device | Public nonce/attestation entrypoints, then trust-token proof | `GetNonce` → `VerifyAttestation` require a known app; `ValidateRequestProof` requires the issued trust token |
+| `ConfigService` | Device / control | Device credential for `GetConfig`; scoped API key for `GetPolicy` | Signed, cacheable policy config |
+| `IngestService` | Device | Trust-token/device credential | zstd-compressed telemetry batches; request-body `tenant_id` is a claim, not authority |
+| `QueryService` | Control | Scoped API key (`query:read`) | Dashboard overview, event listing, trust stats |
+| `WebhookService` | Control | Scoped API key (`webhook:*`) | HMAC-signed event fan-out |
 
-> **Bootstrapping the first API key.** Control-plane procedures (`RegistryService`, `QueryService`, `WebhookService`) require a valid API key; an unauthenticated control-plane call returns `401 Unauthenticated`. The initial admin tenant + key are currently seeded out-of-band through the registry store (`registry.Store.CreateTenant` + `CreateAPIKey`), exactly as the integration harness does in [`tests/harness_test.go`](tests/harness_test.go). A self-service onboarding RPC is on the Phase 1+ roadmap. The device-plane flow (`TrustService`/`ConfigService`/`IngestService`) needs no API key — it is scoped by the `tenant_id` in the request body and gated by signed proofs.
+> **Bootstrapping the first API key.** Control-plane procedures are governed by
+> the per-procedure policy table in
+> [`server/shared/middleware/policy.go`](server/shared/middleware/policy.go);
+> an unauthenticated protected call returns `401 Unauthenticated`, while a valid
+> key missing a required scope returns `403 PermissionDenied`. The initial
+> platform-admin tenant and key are seeded through the registry store
+> (`registry.Store.CreateTenant` + `CreateAPIKey`), exactly as the integration
+> harness does in [`tests/harness_test.go`](tests/harness_test.go). Device-plane
+> config and telemetry calls require a validated tenant/device credential; a
+> body `tenant_id` alone is treated only as a claim. See
+> [`docs/authz-hardening.md`](docs/authz-hardening.md) for the current scope and
+> device-credential model.
 
-### Run the trust flow
-
-The device-plane trust flow is exercised end-to-end (challenge → platform attestation → trust token → signed request proof → ALLOW/STEP_UP/DENY) by [`tests/e2e_trust_flow_test.go`](tests/e2e_trust_flow_test.go), which builds the request proof with the same `RequestProofPreimage` + HMAC-SHA256 construction the Rust SDK uses. See [API Examples](#api-examples) for the first call.
+The device-plane trust flow is exercised end-to-end (challenge → platform
+attestation → trust token → signed request proof → `ALLOW` / `STEP_UP` / `DENY`)
+by [`tests/e2e_trust_flow_test.go`](tests/e2e_trust_flow_test.go), which builds
+the request proof with the same `RequestProofPreimage` + HMAC-SHA256
+construction the Rust SDK uses.
 
 ---
 
@@ -77,7 +103,10 @@ make test               # Go server unit tests + Rust core tests
 make test-integration   # end-to-end suite under tests/ (cd tests && go test ./...)
 ```
 
-The integration suite drives the **real** services (registry, trust, ingest, query, config, webhook) against a real Postgres 16 + Redis 7. It provisions them automatically via [testcontainers](https://golang.testcontainers.org/) when a container runtime is available, or uses explicit endpoints when set:
+The integration suite drives the **real** services (registry, trust, ingest,
+query, config, webhook) against a real Postgres 16 + Redis 7. It provisions them
+automatically via [testcontainers](https://golang.testcontainers.org/) when a
+container runtime is available, or uses explicit endpoints when set:
 
 ```bash
 export KSEAL_TEST_POSTGRES_DSN="postgres://kseal:kseal@localhost:5432/kseal?sslmode=disable"
@@ -85,22 +114,31 @@ export KSEAL_TEST_REDIS_ADDR="localhost:6379"
 cd tests && go test ./...
 ```
 
-When neither a DSN nor a container runtime is available, the suite **skips cleanly** so `go test ./...` stays hermetic. The only mocked dependencies are the external attestation platforms (Google Play Integrity / Apple App Attest) — and only their trust-material source is swapped, so the real JWS parsing and verdict mapping still run. Coverage:
+When neither a DSN nor a container runtime is available, the suite **skips
+cleanly** so `go test ./...` stays hermetic. The only mocked dependencies are
+the external attestation platforms (Google Play Integrity / Apple App Attest) —
+and only their trust-material source is swapped, so the real JWS parsing and
+verdict mapping still run.
 
 | Test | What it proves |
 |---|---|
-| `e2e_trust_flow_test.go` | Full trust chain + anti-replay (replayed/decreasing sequence, wrong nonce/token/key all DENY) |
+| `e2e_trust_flow_test.go` | Full trust chain + anti-replay (replayed/decreasing sequence, wrong nonce/token/key all `DENY`) |
 | `e2e_telemetry_test.go` | zstd ingest → read back via `ListEvents` with filters + keyset pagination; quota enforcement |
 | `e2e_config_test.go` | Ed25519-signed config envelope, ETag/`If-None-Match` caching, TTL, version rotation |
 | `e2e_webhook_test.go` | HMAC-SHA256 signed delivery + retry/backoff on a failing endpoint |
 | `e2e_query_overview_test.go` | Per-tenant overview + trust-session stats; cross-tenant reads denied |
 | `privacy_contract_test.go` | Telemetry schema carries only minimized, non-PII fields |
 
+The full test surface — **294** Go test functions and **143** Rust device-core
+unit tests, plus the cross-language golden vectors — is catalogued in
+[`docs/reference/benchmarks.md`](docs/reference/benchmarks.md).
+
 ---
 
 ## API Examples
 
-The server speaks [Connect](https://connectrpc.com/), so every RPC is reachable as a plain JSON `POST`. Below uses `curl`; `grpcurl`/`buf curl` work too.
+The server speaks [Connect](https://connectrpc.com/), so every RPC is reachable
+as a plain JSON `POST`. Below uses `curl`; `grpcurl` / `buf curl` work too.
 
 Create a tenant (control plane — needs an API key):
 
@@ -108,7 +146,7 @@ Create a tenant (control plane — needs an API key):
 curl -fsS localhost:8080/kseal.v1.RegistryService/CreateTenant \
   -H "Authorization: Bearer $KSEAL_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"name":"Acme","slug":"acme","tier":"growth"}'
+  -d '{"name":"Meridian Pay","slug":"meridian","tier":"growth"}'
 ```
 
 An unauthenticated control-plane call is rejected:
@@ -119,7 +157,8 @@ curl -s -o /dev/null -w '%{http_code}\n' \
   -H "Content-Type: application/json" -d '{}'      # => 401
 ```
 
-Start the trust flow (device plane — no API key; scoped by `tenant_id`):
+Start the public pre-attestation trust flow (device plane — nonce/attestation
+are public entrypoints, but the tenant/app must already exist):
 
 ```bash
 curl -fsS localhost:8080/kseal.v1.TrustService/GetNonce \
@@ -127,7 +166,48 @@ curl -fsS localhost:8080/kseal.v1.TrustService/GetNonce \
   -d '{"tenant_id":"<tenant-uuid>","app_id":"<app-uuid>"}'
 ```
 
-The returned nonce is bound into a platform attestation token and submitted to `TrustService/VerifyAttestation`, which returns a short-lived trust token. A per-request proof is then validated by `TrustService/ValidateRequestProof`. The complete, runnable sequence (including proof construction) lives in [`tests/e2e_trust_flow_test.go`](tests/e2e_trust_flow_test.go).
+The returned nonce is bound into a platform attestation token and submitted to
+`TrustService/VerifyAttestation`, which returns a short-lived trust token. A
+per-request proof is then validated by `TrustService/ValidateRequestProof`. The
+complete, runnable sequence (including proof construction) lives in
+[`tests/e2e_trust_flow_test.go`](tests/e2e_trust_flow_test.go), and the exact
+request/response shapes are committed under
+[`docs/reference/fixtures/trust/`](docs/reference/fixtures/trust/).
+
+---
+
+## How a Trust Decision Is Made
+
+A device never decides whether it is trustworthy. It **reports signals**; the
+server **decides**. The pipeline is:
+
+```
+device signals (wire bits) ─FromWire─► server bits ─Fuse─► Score ─► Level ─► Decision
+```
+
+Take scenario **D3** from the canonical fixtures: a repackaged Meridian Pay build
+running on a rooted phone that fails platform attestation.
+
+```
+device reports   wireTamper (bit 6)        ─FromWire─►  BitAppTamper   (weight 60)
+attestation adds BitAttestationFail         (server)                   (weight 70)
+fused score      60 + 70 = 130
+trust level      CRITICAL          (score ≥ 130)
+enforcement      STEP_UP mode
+decision         DENY
+```
+
+The lesson is the whole product thesis: the tamper bit alone (60) is only
+`MEDIUM_RISK` and would just trigger a step-up. It is the **fusion** with the
+server-side attestation failure (70) — a signal the client cannot influence —
+that crosses `CRITICAL` and denies the action. A cracked client cannot talk its
+way out of that.
+
+The exact arithmetic for all five canonical scenarios (D1–D5), the weights, and
+the thresholds are in
+[`docs/reference/risk-signals.md`](docs/reference/risk-signals.md), and the D3
+decision document and the resulting SIEM event are committed under
+[`docs/reference/fixtures/`](docs/reference/fixtures/README.md).
 
 ---
 
@@ -135,63 +215,79 @@ The returned nonce is bound into a platform attestation token and submitted to `
 
 | Document | Contents |
 |---|---|
-| [PROPOSAL.md](PROPOSAL.md) | Business & product proposal, unit economics |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Technical architecture and design principles |
-| [PROGRESS.md](PROGRESS.md) | Phase-by-phase delivery status + change log |
+| [docs/reference/](docs/reference/) | Canonical Meridian deployment, fixtures, benchmarks, risk-scoring reference |
+| [docs/reference/fixtures/README.md](docs/reference/fixtures/README.md) | Byte-exact JSON fixtures + the five canonical scenarios |
+| [docs/reference/risk-signals.md](docs/reference/risk-signals.md) | Risk bits, weights, thresholds, scoring math |
+| [docs/reference/benchmarks.md](docs/reference/benchmarks.md) | Measured numbers + performance budgets |
 | [docs/threat-model.md](docs/threat-model.md) | STRIDE-style threat model per vertical |
 | [docs/masvs-mapping.md](docs/masvs-mapping.md) | OWASP MASVS control mapping |
-| [docs/ios-app-review.md](docs/ios-app-review.md) | iOS App Store safety review (public APIs only) |
-| [docs/android-policy-review.md](docs/android-policy-review.md) | Play policy + Play Integrity quota model |
-| [docs/feature-parity-matrix.md](docs/feature-parity-matrix.md) | Competitor feature parity matrix |
-| [docs/cost-model.md](docs/cost-model.md) | Cost model at 10M / 100M / 300M MAU |
+| [docs/masvs-evidence.md](docs/masvs-evidence.md) | MASVS evidence report + native-hardening matrix |
 | [docs/siem-integration.md](docs/siem-integration.md) | SIEM egress (Splunk / Sentinel / Elastic) |
-| [docs/masvs-evidence.md](docs/masvs-evidence.md) | Per-release MASVS evidence report + native-hardening matrix |
-| [docs/byok.md](docs/byok.md) | Customer-managed keys (BYOK) + server hardening env vars |
 | [docs/desktop-sdk.md](docs/desktop-sdk.md) | macOS + Windows desktop SDK integration |
-| [docs/policy-packs.md](docs/policy-packs.md) | Vertical policy packs + bulk apply workflow |
-| [docs/mssp-console.md](docs/mssp-console.md) | Partner/MSSP console fleet rollups |
-| [docs/multi-region.md](docs/multi-region.md) | Multi-region deployment topology |
-| [docs/deployment-private-link.md](docs/deployment-private-link.md) | Private-link connectivity for regulated tenants |
-| [docs/deployment-onprem.md](docs/deployment-onprem.md) | On-prem / air-gapped verifier bundle |
-| [docs/deployment-disaster-recovery.md](docs/deployment-disaster-recovery.md) | DR runbooks (backup/restore, region failover) |
-| [docs/README.md](docs/README.md) | Documentation index |
+| [docs/byok.md](docs/byok.md) | Customer-managed keys (BYOK) + server hardening env vars |
+| [docs/cost-model.md](docs/cost-model.md) | Cost model at 10M / 100M / 300M MAU |
+| [docs/README.md](docs/README.md) | Full documentation index |
 
 ---
 
-## Problem Statement
+## Why Server-Side Trust
 
-**Pure client-side protection is always bypassable.** Any check that runs only on a device the attacker controls — root/jailbreak detection, debugger detection, integrity checks, "is this a real app?" logic — can eventually be patched out, hooked, or emulated. Given enough time, a motivated attacker with a rooted device, a hooking framework (Frida, Xposed, objection), and a disassembler will defeat any single-layer, client-only defense.
+**Pure client-side protection is always bypassable.** Any check that runs only
+on a device the attacker controls — root/jailbreak detection, debugger
+detection, integrity checks, "is this a real app?" logic — can eventually be
+patched out, hooked, or emulated. A motivated attacker with a rooted device, a
+hooking framework (Frida, Xposed, objection), and a disassembler will defeat any
+single-layer, client-only defense.
 
-The winning design does not try to make the client unbreakable. Instead it:
+kseal does not try to make the client unbreakable. Instead it:
 
-1. **Combines local checks with backend verification.** The device gathers signals; the *server* makes the trust decision. The attacker cannot patch the server.
-2. **Uses per-build polymorphism.** Every protected build is structurally different, so a bypass crafted against one build does not automatically transfer to the next. This raises the cost of an attack from "one-time crack" to "recurring effort."
-3. **Binds API access to a server-side trust decision.** Access to protected APIs is gated by a short-lived, server-issued trust token that encodes app instance identity, build hash, current risk state, a server nonce, and the active server policy. A cracked client cannot mint its own trust.
-4. **Anchors everything to a recognized standard.** kseal is designed against the **[OWASP Mobile Application Security Verification Standard (MASVS)](https://mas.owasp.org/MASVS/)** — an open, testable, vendor-neutral baseline — rather than a proprietary vendor checklist. MASVS-RESILIENCE explicitly frames obfuscation, anti-debug, and anti-tamper as *defense-in-depth* that raises attacker cost, not as a primary control.
+1. **Combines local checks with backend verification.** The device gathers
+   signals; the *server* makes the trust decision. The attacker cannot patch the
+   server.
+2. **Uses per-build polymorphism.** Every protected build is structurally
+   different, so a bypass crafted against one build does not transfer to the
+   next. An attack goes from "one-time crack" to "recurring effort."
+3. **Binds API access to a server-side trust decision.** Access to protected
+   APIs is gated by a short-lived, server-issued trust token that encodes app
+   instance identity, build hash, current risk state, a server nonce, and the
+   active server policy. A cracked client cannot mint its own trust.
+4. **Anchors to a recognized standard.** kseal is built against the
+   **[OWASP MASVS](https://mas.owasp.org/MASVS/)** — an open, testable,
+   vendor-neutral baseline. MASVS-RESILIENCE frames obfuscation, anti-debug, and
+   anti-tamper as *defense-in-depth* that raises attacker cost, not as a primary
+   control.
 
-The result is a system where breaking the client is necessary but **not sufficient** to abuse the backend.
+The result: breaking the client is necessary but **not sufficient** to abuse the
+backend.
 
 ---
 
-## Key Differentiators
+## What Sets kseal Apart
 
-kseal competes with AppSealing/DoveRunner, Appdome, Guardsquare (DexGuard/iXGuard), Promon SHIELD, and Zimperium. Its thesis is to be simultaneously **more comprehensive, more robust, more secure, more private, more lightweight, lower cost, and NoOps**.
+kseal occupies the same space as AppSealing/DoveRunner, Appdome, Guardsquare
+(DexGuard/iXGuard), Promon SHIELD, and Zimperium, and is designed to be
+simultaneously **more comprehensive, more robust, more private, more
+lightweight, lower cost, and NoOps**.
 
-| Dimension | What kseal does | Why it beats client-only shielding |
+| Dimension | What kseal does | Why it wins over client-only shielding |
 |---|---|---|
-| **More comprehensive** | Build-time hardening **+** RASP **+** API attestation **+** privacy engineering **+** MASVS evidence **+** SIEM integration **+** CI release gates **+** policy simulator **+** desktop expansion | Competitors typically lead with one pillar (obfuscation *or* RASP *or* attestation). kseal ships the full lifecycle. |
-| **More robust** | Backend enforcement, short-lived trust tokens, hardware-backed keys (StrongBox / Secure Enclave), platform attestation (Play Integrity / App Attest), per-build polymorphism | The trust decision lives server-side and rotates constantly, so a static crack decays quickly. |
-| **More secure** | No static secrets shipped in the binary; API access is bound to *app instance + build hash + risk state + server nonce + server policy* | There is no shared secret to extract; replay and repackaging are detectable server-side. |
-| **More private** | No cross-tenant fingerprinting, no raw PII, tenant-scoped rotating identifiers, aggressive event minimization, automated store-disclosure artifacts | Avoids the privacy/regulatory liability that fingerprint-heavy SDKs carry. |
-| **More lightweight** | Lazy/risk-driven check scheduling, compact binary telemetry (protobuf + zstd), CDN-served config, optional modules, **no launch-time network call** | Keeps startup and battery cost negligible; protection scales with risk, not with a fixed heartbeat. |
-| **Lower operating cost** | Local build transforms (no per-build cloud compute), sparse telemetry, batch ingest, zstd dictionaries, sampling, edge rejection, hot/cold retention separation | Sparse, compressed, sampled events make 100M-MAU economics viable (see [Unit Economics](PROPOSAL.md#unit-economics)). |
-| **NoOps** | Self-service onboarding, vertical policy packs, policy simulator, canary rollout, automatic false-positive guardrails, MASVS reports, privacy artifacts, SIEM templates | Customers integrate and operate without a professional-services engagement. |
+| **More comprehensive** | Build-time hardening **+** RASP **+** API attestation **+** privacy engineering **+** MASVS evidence **+** SIEM integration **+** CI release gates **+** policy simulator **+** desktop SDKs | Competitors lead with one pillar (obfuscation *or* RASP *or* attestation); kseal covers the full lifecycle. |
+| **More robust** | Backend enforcement, short-lived trust tokens, hardware-backed keys (StrongBox / Secure Enclave), platform attestation, per-build polymorphism | The trust decision lives server-side and rotates constantly, so a static crack decays quickly. |
+| **More secure** | No static secrets in the binary; API access bound to *app instance + build hash + risk state + server nonce + server policy* | There is no shared secret to extract; replay and repackaging are detectable server-side. |
+| **More private** | No cross-tenant fingerprinting, no raw PII, tenant-scoped rotating identifiers, aggressive event minimization, automated store-disclosure artifacts | Avoids the privacy/regulatory liability of fingerprint-heavy SDKs. |
+| **More lightweight** | Lazy/risk-driven scheduling, compact telemetry (protobuf + zstd), CDN-served config, optional modules, **no launch-time network call** | Risk scoring is ~48 ns and a signed proof ~349 ns (see [benchmarks](docs/reference/benchmarks.md)); protection scales with risk, not a fixed heartbeat. |
+| **Lower operating cost** | Local build transforms, sparse telemetry, batch ingest, zstd dictionaries, sampling, edge rejection, hot/cold retention | Sparse, compressed, sampled events make 100M-MAU economics viable (see [cost-model.md](docs/cost-model.md)). |
+| **NoOps** | Self-service onboarding, vertical policy packs, policy simulator, canary rollout, automatic false-positive guardrails, MASVS reports, SIEM templates | Customers integrate and operate without a professional-services engagement. |
 
 ---
 
 ## Architecture Overview
 
-kseal is a four-plane system: a **Build plane** that produces protected binaries, a **Device plane** that runs inside the protected app, a **Data plane** that ingests signals and makes trust decisions at scale, and a **Control plane** that manages tenants, policies, keys, and compliance.
+kseal is a four-plane system: a **Build plane** that produces protected
+binaries, a **Device plane** that runs inside the protected app, a **Data
+plane** that ingests signals and makes trust decisions at scale, and a **Control
+plane** that manages tenants, policies, keys, and compliance.
 
 ```mermaid
 flowchart TB
@@ -240,14 +336,25 @@ flowchart TB
 
 **Reading the flow end-to-end:**
 
-- **Tenant CI/CD → protected build.** The tenant's pipeline invokes the kseal CLI or the Gradle/Xcode plugin. The protection compiler applies obfuscation, per-build polymorphism, and SDK injection, then emits a signed, protected build that ships to the App Store / Play Store.
-- **Protected app → request proof.** At runtime the native SDK delegates shared logic to the Rust trust core, which runs the local risk engine, manages hardware-backed keys and platform attestation, emits compressed signed telemetry, and produces a per-request API proof.
-- **Global edge → decision.** Telemetry and proofs hit the global edge over HTTP/2 (HTTP/3 where the stack is mature). The attestation verifier and event ingest feed a policy decision that is surfaced to the tenant's API gateway, webhooks, or SIEM.
-- **Control plane → everything.** The control plane owns tenants, apps, builds, policies, key material, risk rules, dashboards, audit, billing, and privacy disclosures, and configures the other three planes.
+- **Tenant CI/CD → protected build.** The tenant's pipeline invokes the kseal CLI
+  or the Gradle/Xcode plugin. The protection compiler applies obfuscation,
+  per-build polymorphism, and SDK injection, then emits a signed, protected build
+  that ships to the App Store / Play Store.
+- **Protected app → request proof.** At runtime the native SDK delegates shared
+  logic to the Rust trust core, which runs the local risk engine, manages
+  hardware-backed keys and platform attestation, emits compressed signed
+  telemetry, and produces a per-request API proof.
+- **Global edge → decision.** Telemetry and proofs hit the global edge over
+  HTTP/2 (HTTP/3 where the stack is mature). The attestation verifier and event
+  ingest feed a policy decision surfaced to the tenant's API gateway, webhooks,
+  or SIEM.
+- **Control plane → everything.** The control plane owns tenants, apps, builds,
+  policies, key material, risk rules, dashboards, audit, billing, and privacy
+  disclosures, and configures the other three planes.
 
 ---
 
-## Planes
+## The Four Planes
 
 | Plane | Responsibility | Primary stack |
 |---|---|---|
@@ -256,11 +363,15 @@ flowchart TB
 | **Build plane** | Build-time hardening and SDK injection, per-build polymorphism, build proof generation | Gradle plugin, Xcode plugin, Rust/C++ transforms, isolated build workers |
 | **Device plane** | On-device RASP probes, crypto binding, local risk engine, telemetry, request proof | Native iOS (Swift/ObjC), Native Android (Kotlin/Java + NDK), Rust core |
 
-> **Design principle:** the **control plane** (low-volume, strongly consistent, owns secrets and policy) is strictly separated from the **data plane** (high-volume, eventually consistent, never the source of truth for secrets). See [ARCHITECTURE.md](ARCHITECTURE.md#core-design-principle) for the full responsibility matrix.
+> **Design principle:** the **control plane** (low-volume, strongly consistent,
+> owns secrets and policy) is strictly separated from the **data plane**
+> (high-volume, eventually consistent, never the source of truth for secrets).
+> See [ARCHITECTURE.md](ARCHITECTURE.md#core-design-principle) for the full
+> responsibility matrix.
 
 ---
 
-## Tech Stack Summary
+## Tech Stack
 
 ### On-device
 
@@ -275,44 +386,67 @@ flowchart TB
 
 ### Server
 
-| Concern | Choice | Notes |
-|---|---|---|
-| Services | **Go** | Control and data plane services |
-| RPC | gRPC / Connect | HTTP/2 transport, codegen from proto |
-| Streaming / ingest | Kafka / Redpanda | Durable, partitioned event backbone |
-| Analytics store | ClickHouse | Columnar, high-ingest, fast aggregation |
-| Transactional store | Postgres / CockroachDB | Control-plane source of truth |
-| Cache / sessions | Redis / Dragonfly | Trust sessions, rate limits, hot config |
-| Object storage | S3-compatible | Build artifacts, evidence reports, cold events |
-| Key material | KMS / HSM | Per-tenant keys, signing keys, CMK for regulated tier |
-| Observability | OpenTelemetry | Traces/metrics/logs across planes |
+The server runs self-contained on a single machine and scales out by switching
+individual subsystems to their production backends via environment variables.
+Both columns are real code paths exercised by the test suite — the default
+backends are full implementations, not stubs.
 
-The production **Kafka/Redpanda** broker, **ClickHouse** analytics store, and real **OTLP** spans/metrics are delivered behind the ingest interfaces and enabled via `KSEAL_BROKER`/`KSEAL_ANALYTICS`/`KSEAL_OTLP_ENDPOINT` (default off, fail-closed); the default build runs the in-process broker + in-memory store. See [`docs/data-plane-scale.md`](docs/data-plane-scale.md) and the full delivered-vs-target tables in [ARCHITECTURE.md](ARCHITECTURE.md#tech-stack).
+| Concern | Default (single binary) | Scale-out target |
+|---|---|---|
+| Services | Go | Go |
+| RPC | Connect over HTTP/2 (h2c) | gRPC / Connect (HTTP/2) |
+| Streaming / ingest | In-process channel broker | Kafka / Redpanda (`KSEAL_BROKER=kafka`) |
+| Analytics store | In-memory store | ClickHouse (`KSEAL_ANALYTICS=clickhouse`) |
+| Transactional store | Postgres 16 (row-level-security isolation) | Postgres / CockroachDB |
+| Cache / sessions | Redis 7 | Redis / Dragonfly |
+| Key material | AES-256-GCM envelope under a 32-byte KEK | KMS / HSM-sourced KEK |
+| Observability | Prometheus `/metrics`, `/healthz`, `/readyz`; OTLP opt-in (`KSEAL_OTLP_ENDPOINT`) | OpenTelemetry collector |
+| Edge | Single Go origin over HTTP/2 | CDN with HTTP/3 termination |
+
+See [`docs/data-plane-scale.md`](docs/data-plane-scale.md) and the full tables in
+[ARCHITECTURE.md](ARCHITECTURE.md#tech-stack).
 
 ---
 
-## Performance Budgets
+## Performance
 
-kseal must be invisible to end users. The on-device SDK operates within hard budgets, enforced by SDK performance tests in CI.
+kseal is invisible to end users. The on-device SDK operates within hard budgets,
+and the trust-core hot paths are measured by a committed benchmark suite
+(`cargo bench --bench core_benches`):
 
-| Budget | Target | Notes |
-|---|---|---|
-| Startup overhead (p95) | **< 40 ms** | No blocking network call at launch |
-| Resident memory | **< 3–5 MB** | Core + active probes |
-| Android binary (AAR) | **< 500 KB** | Per-ABI native slice kept minimal |
-| iOS binary slice | **< 800 KB** | Per-arch XCFramework slice |
-| CPU (average) | **< 0.5%** | Risk-driven scheduling, not a fixed heartbeat |
-| Crash/ANR contribution | **near-zero** | SDK crash/ANR monitored as a release gate |
-| Config fetch (p95) | **< 100 ms** | CDN-served, cacheable, signed |
-| Network at launch | **none** | Telemetry batched and deferred |
+| Path | Median | Path | Median |
+|---|---|---|---|
+| Trust core construct (`core_new`) | ~158 ns | Signed request proof (`request_proof_generate`) | ~349 ns |
+| Risk score (`policy_evaluate`) | ~48 ns | Proof verify (`request_proof_verify`) | ~357 ns |
+| Config verify (Ed25519) | ~54 µs | Batch + zstd (10 events) | ~35 µs |
 
-> "Stay lightweight" rules: lazy checks, risk-driven scheduling, compact binary telemetry, CDN config, optional modules, and **no launch-time network**. See [ARCHITECTURE.md](ARCHITECTURE.md#performance-budgets).
+| Budget | Target |
+|---|---|
+| Startup overhead (p95) | **< 40 ms** |
+| Resident memory | **< 3–5 MB** |
+| Android binary (AAR) | **< 500 KB** |
+| iOS binary slice | **< 800 KB** |
+| CPU (average) | **< 0.5%** |
+| Config fetch (p95) | **< 100 ms** (CDN) |
+| Network at launch | **none** |
+
+Risk scoring costs tens of nanoseconds and a signed proof is sub-microsecond, so
+kseal can score every sensitive action locally with no user-visible cost. Full
+measurements and the budget rationale are in
+[`docs/reference/benchmarks.md`](docs/reference/benchmarks.md).
 
 ---
 
 ## Developer Journey
 
-kseal is NoOps and self-service. The journey is designed so a developer sees value in minutes and reaches production-grade enforcement without a services engagement. Start from the guided **"Secure your app"** walkthrough ([`site/secure-your-app.md`](site/secure-your-app.md)) or a runnable sample under [`examples/`](examples/) (Android, iOS, macOS, backend), and the console's first-run onboarding stepper walks you the rest of the way. The `kseal` CLI mirrors this with `kseal init` (guided setup) and `kseal doctor` (tells you exactly what to do next).
+kseal is NoOps and self-service, designed so a developer sees value in minutes
+and reaches production-grade enforcement without a services engagement. Start
+from the guided **"Secure your app"** walkthrough
+([`site/secure-your-app.md`](site/secure-your-app.md)) or a runnable sample under
+[`examples/`](examples/) (Android, iOS, macOS, backend); the console's first-run
+onboarding stepper handles the rest. The `kseal` CLI mirrors this with
+`kseal init` (guided setup) and `kseal doctor` (tells you exactly what to do
+next).
 
 | Time | Outcome |
 |---|---|
@@ -329,9 +463,7 @@ kseal is NoOps and self-service. The journey is designed so a developer sees val
 ```
 kseal/
 ├── README.md                    # Project overview (this file)
-├── PROPOSAL.md                  # Business & product proposal
 ├── ARCHITECTURE.md              # Technical architecture
-├── PROGRESS.md                  # Development progress tracker
 ├── cmd/
 │   └── kseal-cli/               # CLI: build-time protection + tenant management
 ├── server/
@@ -357,33 +489,17 @@ kseal/
 ├── proto/                       # Protobuf definitions for all services and SDK communication
 ├── deploy/                      # Deployment configs (Helm, Terraform multi-region/private-link, on-prem bundle)
 ├── examples/                    # Runnable sample apps + quickstarts (android, ios, desktop-macos, backend)
-├── site/                        # Static docs site generator
-├── docs/                        # Threat models, MASVS mapping, additional docs
+├── site/                        # Static docs site (MkDocs)
+├── docs/                        # Reference deployment, fixtures, threat model, MASVS, deployment
 └── tests/                       # Integration and end-to-end tests
 ```
 
 ---
 
-## Phased Roadmap
-
-kseal ships in six phases, starting from the highest-value, lowest-compatibility-risk product (API trust) and expanding outward.
-
-| Phase | Theme | Duration | Headline goal | Status |
-|---|---|---|---|---|
-| **Phase 0** | Research & Threat Model | 6–8 weeks | Validate threat model, MASVS mapping, attestation/perf prototypes, cost model. | DONE |
-| **Phase 1** | API Trust Product | 3–4 months | Protect APIs from fake clients and repackaged apps (SDKs + verifiers + trust sessions). | DONE |
-| **Phase 2** | Runtime Protection | 4–6 months | RASP modules with `observe → step-up → block` rollout, policy simulator, SIEM. | DONE |
-| **Phase 3** | Build-Time Hardening | 6–9 months | Gradle/Xcode plugins, obfuscation, polymorphism, build proof, CI gate, native hardening, MASVS report. | DONE |
-| **Phase 4** | Enterprise Scale | 9–12 months | Multi-region, dedicated tiers, CMK/BYOK, private link, on-prem verifier, policy packs, MSSP console, audit trail + data-processing registry, signed kill switch, canary rollout + auto-rollback, compliance tooling/console. | DONE |
-| **Phase 5** | Desktop | 6+ months post-mobile | macOS/Windows SDKs, desktop API attestation, code integrity, secure update, enterprise controls, hardware-bound proofs. | DONE |
-
-Detailed deliverables and live status are tracked in [PROGRESS.md](PROGRESS.md).
-
----
-
 ## Standards Alignment
 
-kseal is built against the **[OWASP MASVS](https://mas.owasp.org/MASVS/)** and verified with the **OWASP MASTG** test procedures. Coverage spans:
+kseal is built against the **[OWASP MASVS](https://mas.owasp.org/MASVS/)** and
+verified with the **OWASP MASTG** test procedures. Coverage spans:
 
 - **MASVS-STORAGE** — secure local storage of sensitive data
 - **MASVS-CRYPTO** — correct, current cryptography and key management
@@ -394,14 +510,21 @@ kseal is built against the **[OWASP MASVS](https://mas.owasp.org/MASVS/)** and v
 - **MASVS-RESILIENCE** — anti-tamper, anti-debug, obfuscation as defense-in-depth
 - **MASVS-PRIVACY** — data minimization, transparency, user control
 
-Every protected release can emit a **MASVS evidence report** mapping shipped controls to MASVS categories — generated by [`tools/masvs-report`](tools/masvs-report) from real build-proof data (also reachable via `kseal build masvs`). See [docs/masvs-evidence.md](docs/masvs-evidence.md).
+Every protected release can emit a **MASVS evidence report** mapping shipped
+controls to MASVS categories — generated by
+[`tools/masvs-report`](tools/masvs-report) from real build-proof data (also
+reachable via `kseal build masvs`). See
+[docs/masvs-evidence.md](docs/masvs-evidence.md).
 
 ---
 
 ## License
 
-License to be determined. A `LICENSE` file will be added before the first public release.
+License to be determined. A `LICENSE` file will be added before the first public
+release.
 
 ## Contributing
 
-Contribution guidelines are under development. A `CONTRIBUTING.md` with development setup, coding standards, and the PR process will be added as the codebase lands (see [PROGRESS.md](PROGRESS.md)). In the meantime, see [ARCHITECTURE.md](ARCHITECTURE.md) for system design and [PROPOSAL.md](PROPOSAL.md) for product direction.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for system design and
+[`docs/reference/voice-and-style.md`](docs/reference/voice-and-style.md) for the
+documentation voice. Run `make test` before opening a pull request.

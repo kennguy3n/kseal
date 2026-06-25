@@ -6,9 +6,8 @@ the [Market Analysis](../PROPOSAL.md#market-analysis): **AppSealing**
 (SHIELD), and **Zimperium** (zDefend / zShield).
 
 The intent is honest positioning, not marketing inflation: for kseal, a cell is
-only **has** if the corresponding control is actually implemented and shipped on
-`main`; capabilities still on the [roadmap](../PROGRESS.md) are marked **planned**
-with their phase. The kseal column has been refreshed against the code in
+only **has** if the corresponding control is actually implemented and shipped in
+the current codebase. The kseal column is maintained against the code in
 `server/`, `sdk/`, `plugins/`, `cmd/`, and `deploy/` — each **has** below cites
 the directory or document that implements it. The
 [Differentiation Thesis](../PROPOSAL.md#differentiation-thesis-vs-appsealing)
@@ -21,13 +20,11 @@ explains *how* each kseal claim is made true.
 | **has** | Implemented / generally available as a productized capability |
 | **partial** | Partially covered, limited, or available only in some tiers/configs |
 | **missing** | Not a productized capability of that vendor |
-| **planned (Pn)** | On the kseal roadmap, delivered in phase *n* (see [PROGRESS.md](../PROGRESS.md)) |
 
-> Competitor marks reflect publicly described product positioning at the time of
-> this Phase 0 review and the analysis in [PROPOSAL.md](../PROPOSAL.md); they are
-> a planning aid, not a contractual claim. Vendor offerings change; revalidate
-> before competitive use. Only the **kseal** column is maintained against the
-> current codebase.
+> Competitor marks reflect publicly described product positioning and the analysis
+> in [PROPOSAL.md](../PROPOSAL.md); they are a planning aid, not a contractual
+> claim. Vendor offerings change; revalidate before competitive use. Only the
+> **kseal** column is maintained against the current codebase.
 
 ## Table of Contents
 
@@ -44,7 +41,7 @@ explains *how* each kseal claim is made true.
 
 ## RASP Modules (1–9)
 
-The nine kseal [runtime modules](../ARCHITECTURE.md#runtime-protection-modules).
+The nine kseal [runtime modules](../ARCHITECTURE.md#rasp-probes).
 Most incumbents cover the classic RASP detections well; kseal's differentiation
 is less about *having* a detection and more about **feeding it into a server-side
 decision** (covered in [API Attestation](#api-attestation--backend-trust)).
@@ -74,7 +71,7 @@ is the per-request proof in `sdk/rust-core/kseal-core/src/crypto.rs` +
 (`sdk/rust-core/kseal-core/src/events.rs`).
 
 **Reading this table:** modules 1–6 are table stakes the whole market has, and
-kseal now ships the detections on Android, iOS and desktop. The differentiators
+kseal ships the detections on Android, iOS and desktop. The differentiators
 remain module 7 (per-request cryptographic proof bound to *instance + build hash
 + risk + nonce + policy*) and module 9 (an explicit, source-level
 data-minimization control) — both areas where incumbents are only partial because
@@ -109,11 +106,11 @@ claim full parity with Guardsquare/Promon there.
 no per-build cloud compute. See [build-hardening-android.md](build-hardening-android.md)
 and [build-hardening-ios.md](build-hardening-ios.md).
 
-The GA polish in this wave makes both plugins **deterministic and reproducible**:
+Both plugins are **deterministic and reproducible**:
 given identical inputs (same sources, same pinned seed) the hardened output is
 byte-for-byte identical, asserted by cross-build functional tests on both
 platforms. A misconfigured option (an unknown obfuscation strength, a malformed
-pinned seed) now **fails the build loudly** with an actionable message rather
+pinned seed) **fails the build loudly** with an actionable message rather
 than silently weakening protection. Every shipped artifact's native posture
 (RELRO+BIND_NOW, NX, PIE, stack-canary, FORTIFY, plus CFI/MTE/BTI/PAC) is
 verified across `aarch64`/`arm`/`x86_64`/`x86` and recorded in the
@@ -124,7 +121,7 @@ verified across `aarch64`/`arm`/`x86_64`/`x86` and recorded in the
 
 Guardsquare is still the build-hardening leader (its heritage is ProGuard/
 DexGuard). kseal deliberately
-[avoids heavy VM obfuscation](../ARCHITECTURE.md#what-to-avoid): it ships string/
+[avoids heavy VM obfuscation](../ARCHITECTURE.md#what-kseal-deliberately-avoids): it ships string/
 resource/symbol encryption, native hardening, per-build polymorphism and
 mapping-aware R8, but **does not ship a Guardsquare-class source/IR obfuscator** —
 hence those two rows stay **partial**. kseal competes on **local-CI execution**
@@ -166,7 +163,7 @@ in `server/data-plane/simulator/` (also exposed via `kseal policy simulate` in
 `cmd/kseal-cli/`).
 
 The **trust token bound to instance + build hash + risk + nonce + policy** and the
-**hardware-bound per-request proof** are now shipped and remain features the
+**hardware-bound per-request proof** are features the
 incumbent set does not productize — most stop at "run platform attestation and
 read the verdict." Replay is caught by single-use nonces; repackaging is caught by
 the build-hash binding in the proof preimage. That gap is the
@@ -243,7 +240,7 @@ and [data-safety.md](data-safety.md).
 
 What stays honest here: **MASTG procedures are partial** (the mapping references
 MASTG but kseal does not ship a full executable verification suite); the **iOS
-privacy-manifest generator and Google Data-Safety helper now ship** (both derive
+privacy-manifest generator and Google Data-Safety helper ship** (both derive
 their output from the enforced SDK data contract rather than hand-maintained
 lists); **audit trail is partial** (security-event query exists, but a formal
 data-processing registry / ROPA does not); and **regional retention is partial**
@@ -296,7 +293,7 @@ response, persisted in `server/control-plane/compliance/`) — gated by
 (Elastic ECS, Splunk, Sentinel) in `server/data-plane/siem/templates/`
 ([siem-integration.md](siem-integration.md)).
 
-Both **canary rollout + auto-rollback** and the **signed kill switch** now ship:
+Both **canary rollout + auto-rollback** and the **signed kill switch** ship:
 candidate policies roll out to a deterministic percentage cohort and auto-revert
 to the last-known-good policy when the guardrails detector observes a block-rate
 regression, and a cryptographically **signed**, app/build-scoped kill switch is
@@ -354,20 +351,20 @@ A candid summary for planning:
 
 | Dimension | Verdict | Why |
 |---|---|---|
-| **Server-side trust binding** | **Wins** | Trust token + per-request proof bound to instance/build/risk/nonce/policy now ship (`server/data-plane/trust`, `server/shared/proof`) — not a productized incumbent feature |
+| **Server-side trust binding** | **Wins** | Trust token + per-request proof bound to instance/build/risk/nonce/policy ship (`server/data-plane/trust`, `server/shared/proof`) — not a productized incumbent feature |
 | **Privacy** | **Wins** | Rotating tenant-scoped IDs, no cross-tenant fingerprint, on-device privacy guard, and an enforced machine-readable data contract |
 | **Open-standard evidence** | **Wins** | MASVS anchoring + auto-generated evidence report (`GenerateMasvsReportTask`, `kseal masvs`) |
 | **NoOps + enterprise isolation together** | **Wins** | Self-service CLI *and* CMK / private-link / on-prem / multi-region in one product |
 | **Lightweight footprint / unit cost** | **Wins (by design)** | < 40 ms startup, no launch network, compact telemetry, local-CI builds |
 | **Population-level abuse detection** | **Matches (NoOps edge)** | Fleet Anomaly Guard adds per-cohort baselines + volume-velocity to the server trust decision (`server/data-plane/fleet`); zero-config and flag-gated, where Castle/Arkose sell it as a tuned premium tier |
-| **Classic RASP detections (1–6)** | **Matches** | Detections now ship on Android, iOS and desktop; advantage is server-side fusion, not the detections themselves |
+| **Classic RASP detections (1–6)** | **Matches** | Detections ship on Android, iOS and desktop; advantage is server-side fusion, not the detections themselves |
 | **Build-time obfuscation depth** | **Trails Guardsquare** | kseal ships string/symbol/native hardening + polymorphism but avoids heavy VM / source-IR obfuscation on purpose; competes on polymorphism + decay, not raw obfuscation strength |
 | **MTD breadth / threat intel** | **Trails Zimperium** | kseal is app-trust-focused, not a mobile-threat-defense suite |
 | **Maturity / track record** | **Trails all** | kseal's capabilities are newly shipped; the incumbents have years of production track record. Honest near-term gap. |
 
 The strategic conclusion mirrors [Go-to-Market](../PROPOSAL.md#go-to-market):
 **lead with API trust + privacy** (where kseal wins outright and incumbents are
-weakest), with RASP detections and build hardening now shipped to match on the
+weakest), with RASP detections and build hardening shipped to match on the
 table stakes — never trying to beat Guardsquare at obfuscation depth or Zimperium
 at MTD breadth, because those are not the wedge.
 

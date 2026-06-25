@@ -2,6 +2,7 @@ package io.kseal.gradle.tasks
 
 import io.kseal.gradle.internal.ElfInspector
 import io.kseal.gradle.internal.Json
+import io.kseal.gradle.internal.NativeStringObfuscationInspector
 import java.io.File
 import org.gradle.api.DefaultTask
 import org.gradle.api.file.ConfigurableFileCollection
@@ -69,10 +70,19 @@ abstract class HardenNativeLibrariesTask : DefaultTask() {
             "canary_enabled" to 0, "canary_absent" to 0, "canary_unsupported" to 0,
             "fortify_enabled" to 0, "fortify_absent" to 0, "fortify_unsupported" to 0,
             "indeterminate" to 0,
+            // Phase 5.2 string-obfuscation posture, recorded only for the kseal
+            // trust core itself (third-party .so's are `not_applicable`).
+            "string_obfuscation_obfuscated" to 0,
+            "string_obfuscation_plaintext" to 0,
+            "string_obfuscation_not_applicable" to 0,
+            "string_obfuscation_indeterminate" to 0,
         )
 
         for ((logicalPath, file) in collectLibraries().toSortedMap()) {
-            val result = ElfInspector.inspect(file)
+            // Read each .so once and share the bytes across both inspectors; a
+            // release library is large, so re-reading per inspector doubled I/O.
+            val bytes = file.readBytes()
+            val result = ElfInspector.inspect(bytes)
             file.copyTo(File(outDir, logicalPath).also { it.parentFile?.mkdirs() }, overwrite = true)
 
             tally(summary, "cfi", result.cfi)
@@ -85,6 +95,10 @@ abstract class HardenNativeLibrariesTask : DefaultTask() {
             tally(summary, "canary", result.stackCanary)
             tally(summary, "fortify", result.fortify)
             if (result.cfi == ElfInspector.Status.INDETERMINATE) summary["indeterminate"] = summary.getValue("indeterminate") + 1
+
+            val strings = NativeStringObfuscationInspector.inspectBytes(bytes)
+            val stringsKey = "string_obfuscation_${strings.status.name.lowercase()}"
+            summary[stringsKey] = summary.getValue(stringsKey) + 1
 
             libraries += linkedMapOf<String, Any?>(
                 "path" to logicalPath,
@@ -105,6 +119,9 @@ abstract class HardenNativeLibrariesTask : DefaultTask() {
                 "mitigations_complete" to result.mitigationsComplete,
                 "notes" to result.notes,
                 "posture_notes" to result.postureNotes,
+                "string_obfuscation" to strings.status.wire,
+                "string_markers" to strings.markersFound,
+                "string_notes" to strings.notes,
             )
         }
 

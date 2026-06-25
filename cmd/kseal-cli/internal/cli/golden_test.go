@@ -5,6 +5,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -75,6 +76,9 @@ func assertGoldenJSON(t *testing.T, name string, got string) {
 	if err != nil {
 		t.Fatalf("read golden %s (run with -update to create): %v", path, err)
 	}
+	// Normalize CRLF (Windows checkout) to LF so golden files compare
+	// correctly regardless of the host's git line-ending policy.
+	want = []byte(strings.ReplaceAll(string(want), "\r\n", "\n"))
 	if string(want) != string(norm) {
 		t.Errorf("golden mismatch for %s:\n--- want ---\n%s\n--- got ---\n%s", name, want, norm)
 	}

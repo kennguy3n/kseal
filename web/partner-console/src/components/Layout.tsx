@@ -2,6 +2,39 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../state/useAuth";
 import { ThemeToggle } from "./ThemeToggle";
 
+function ShieldIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M12 2 4 5v6c0 5 3.5 9 8 11 4.5-2 8-6 8-11V5l-8-3z" />
+    </svg>
+  );
+}
+
+function Brand() {
+  return (
+    <div className="flex items-center gap-2.5">
+      <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-accent to-accent-strong text-accent-fg shadow-md shadow-accent/25">
+        <ShieldIcon className="h-4 w-4" />
+      </span>
+      <div>
+        <div className="text-lg font-bold leading-none tracking-tight text-heading">
+          kseal
+        </div>
+        <div className="text-xs font-medium text-subtle">partner console</div>
+      </div>
+    </div>
+  );
+}
+
 const navItems = [
   { to: "/", label: "Fleet", end: true },
   { to: "/tenants", label: "Tenants", end: false },
@@ -25,9 +58,8 @@ export function Layout() {
         Skip to content
       </a>
       <aside className="flex w-56 flex-col border-r border-line bg-panel/60 p-4">
-        <div className="mb-6 px-2">
-          <div className="text-lg font-semibold text-heading">kseal</div>
-          <div className="text-xs text-subtle">partner console</div>
+        <div className="mb-6 px-1">
+          <Brand />
         </div>
         <nav aria-label="Primary" className="flex flex-col gap-1">
           {navItems.map((item) => (

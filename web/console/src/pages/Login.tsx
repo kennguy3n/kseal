@@ -37,17 +37,27 @@ export function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-full items-center justify-center p-6">
-      <form onSubmit={onSubmit} className="card w-full max-w-md space-y-4">
-        <div>
-          <div className="flex items-center gap-2 text-fg-strong">
-            <span className="text-accent-strong">
-              <ShieldIcon className="h-6 w-6" />
-            </span>
-            <h1 className="text-xl font-semibold">kseal console</h1>
+    <div className="relative flex min-h-full items-center justify-center overflow-hidden p-6">
+      {/* Branded gradient backdrop — matches the KChat/docs purple gradient. */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 -z-10 bg-gradient-to-br from-[#5161ce] via-[#7b3fe4] to-[#9b59e2]"
+      />
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.18),transparent_40%)]"
+      />
+
+      <form onSubmit={onSubmit} className="relative w-full max-w-md space-y-5 rounded-3xl border border-white/20 bg-surface/95 p-7 shadow-2xl shadow-black/20 backdrop-blur">
+        <div className="text-center">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-accent to-accent-strong text-white shadow-lg shadow-accent/30">
+            <ShieldIcon className="h-6 w-6" />
           </div>
-          <p className="mt-1 text-sm text-fg-muted">
-            Sign in with a tenant API key to manage apps, policies and events.
+          <h1 className="mt-4 text-2xl font-bold tracking-tight text-fg-strong">
+            kseal console
+          </h1>
+          <p className="mt-1 text-sm leading-relaxed text-fg-muted">
+            Sign in to manage your apps, policies, and security events.
           </p>
         </div>
 
@@ -64,7 +74,7 @@ export function LoginPage() {
             autoComplete="off"
             aria-describedby="apiBaseUrl-hint"
           />
-          <p id="apiBaseUrl-hint" className="mt-1 text-xs text-fg-muted">
+          <p id="apiBaseUrl-hint" className="mt-1.5 text-xs leading-relaxed text-fg-muted">
             Defaults to this console&rsquo;s origin. In local development
             requests are proxied to the kseal API (set
             {" "}
@@ -105,7 +115,7 @@ export function LoginPage() {
         </div>
 
         {error && (
-          <div role="alert" className="text-sm text-rose-600 dark:text-rose-300">
+          <div role="alert" className="rounded-xl bg-rose-500/10 px-3 py-2 text-sm text-rose-600 dark:text-rose-300">
             {error}
           </div>
         )}

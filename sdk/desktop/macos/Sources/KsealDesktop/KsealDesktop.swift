@@ -9,6 +9,8 @@ public struct KsealDesktopOptions {
     public var buildHash: String
     /// Expected code-signing baseline for the integrity probes.
     public var integrityPolicy: DesktopIntegrityPolicy
+    /// Expected code/artifact SHA-256 baseline for the runtime self-integrity probe.
+    public var tamperPolicy: DesktopTamperPolicy
     /// Probe ids to run; nil runs the default desktop set (everything except the
     /// opt-in debugger probe, per the desktop-caution guidance).
     public var enabledProbes: Set<String>?
@@ -23,6 +25,7 @@ public struct KsealDesktopOptions {
         configPublicKey: Data = Data(repeating: 0, count: 32),
         buildHash: String = "",
         integrityPolicy: DesktopIntegrityPolicy = DesktopIntegrityPolicy(),
+        tamperPolicy: DesktopTamperPolicy = DesktopTamperPolicy(),
         enabledProbes: Set<String>? = nil,
         maxBatchEvents: Int = 32,
         enterprisePolicy: EnterprisePolicy? = nil
@@ -30,6 +33,7 @@ public struct KsealDesktopOptions {
         self.configPublicKey = configPublicKey
         self.buildHash = buildHash
         self.integrityPolicy = integrityPolicy
+        self.tamperPolicy = tamperPolicy
         self.enabledProbes = enabledProbes
         self.maxBatchEvents = maxBatchEvents
         self.enterprisePolicy = enterprisePolicy
@@ -451,7 +455,12 @@ public final class KsealDesktop {
             CodeSignatureProbe(env, policy: policy),
             NotarizationProbe(env, policy: policy),
             HardenedRuntimeProbe(env, policy: policy),
-            DylibInjectionProbe(env, isAllowed: enterprise.allowsModule),
+            SelfIntegrityProbe(env, policy: options.tamperPolicy),
+            DylibInjectionProbe(
+                env,
+                isAllowed: enterprise.allowsModule,
+                consultNativeHook: enterprise.injectionAllowlist.isEmpty
+            ),
             DebuggerProbe(env),
         ]
         let selected: [Probe]

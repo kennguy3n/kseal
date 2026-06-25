@@ -12,6 +12,7 @@ class BuildProofManifestTest {
         artifactHash: String = "h1",
         seedDerivation: String = "content",
         artifacts: List<ArtifactDigest> = listOf(ArtifactDigest("classes/A.class", artifactHash)),
+        transforms: List<TransformRecord> = listOf(TransformRecord("strip-debug-metadata", "applied")),
     ) = BuildProofManifest(
         platform = "android",
         packageId = "com.example.app",
@@ -23,7 +24,7 @@ class BuildProofManifestTest {
         seedAlgorithm = "HKDF-SHA256",
         seedDerivation = seedDerivation,
         tooling = linkedMapOf("gradle" to "8.11.1", "java" to "17"),
-        transforms = listOf(TransformRecord("strip-debug-metadata", "applied")),
+        transforms = transforms,
         artifacts = artifacts,
     )
 
@@ -46,6 +47,26 @@ class BuildProofManifestTest {
     @Test
     fun `build hash changes with artifact content`() {
         assertNotEquals(manifest("h1").computeBuildHash(), manifest("h2").computeBuildHash())
+    }
+
+    @Test
+    fun `skipped selective virtualization does not change default build hash`() {
+        val base = manifest()
+        val withSkippedVirtualization = manifest(
+            transforms = listOf(
+                TransformRecord("strip-debug-metadata", "applied"),
+                TransformRecord("selective-virtualization", "skipped"),
+            ),
+        )
+        assertEquals(base.computeBuildHash(), withSkippedVirtualization.computeBuildHash())
+
+        val appliedVirtualization = manifest(
+            transforms = listOf(
+                TransformRecord("strip-debug-metadata", "applied"),
+                TransformRecord("selective-virtualization", "applied"),
+            ),
+        )
+        assertNotEquals(base.computeBuildHash(), appliedVirtualization.computeBuildHash())
     }
 
     @Test

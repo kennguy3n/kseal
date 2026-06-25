@@ -1,6 +1,6 @@
 # kseal — Android / Play Store Policy Review
 
-A Phase 0 review confirming the kseal Android SDK complies with **Google Play
+A review confirming the kseal Android SDK complies with **Google Play
 program policies** and the **Play Integrity API** operating model. It closes the
 **"Play Integrity quota exhaustion"** risk (Medium) and supports the broader
 privacy/compliance posture from the

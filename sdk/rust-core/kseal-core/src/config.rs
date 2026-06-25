@@ -98,7 +98,9 @@ pub fn verify_and_decode(
         &signed.config_bytes,
         &signed.signature,
     ) {
-        return Err(Error::Crypto("config signature verification failed".into()));
+        return Err(Error::Crypto(obfstr_string!(
+            "config signature verification failed"
+        )));
     }
     let policy_config = PolicyConfig::decode(signed.config_bytes.as_slice())?;
     Ok(CachedConfig {

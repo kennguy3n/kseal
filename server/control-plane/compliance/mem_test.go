@@ -123,13 +123,13 @@ func TestDataProcessingUpsert(t *testing.T) {
 	s, _ := newTestStore(t)
 	const tenant = "t1"
 	if _, err := s.PutDataProcessing(ctx, DataProcessingInput{
-		TenantID: tenant, AppID: "app1", DataCategories: []string{"device"}, Purpose: "fraud", RetentionDays: 30,
+		TenantID: tenant, AppID: "app1", DataCategories: []string{"device"}, Purpose: "fraud", RetentionDays: 30, LegalBasis: "legitimate_interest",
 	}); err != nil {
 		t.Fatal(err)
 	}
 	// Update same (tenant, app) -> still one record, new values.
 	if _, err := s.PutDataProcessing(ctx, DataProcessingInput{
-		TenantID: tenant, AppID: "app1", DataCategories: []string{"device", "network"}, Purpose: "security", RetentionDays: 7,
+		TenantID: tenant, AppID: "app1", DataCategories: []string{" Device ", "network", "device"}, Purpose: "security", RetentionDays: 7, LegalBasis: "legitimate_interest",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -142,6 +142,25 @@ func TestDataProcessingUpsert(t *testing.T) {
 	}
 	if recs[0].Purpose != "security" || recs[0].RetentionDays != 7 {
 		t.Fatalf("upsert did not replace values: %+v", recs[0])
+	}
+	if got := recs[0].DataCategories; len(got) != 2 || got[0] != "device" || got[1] != "network" {
+		t.Fatalf("categories should be normalized/deduped in input order, got %v", got)
+	}
+}
+
+func TestDataProcessingValidation(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newTestStore(t)
+	cases := []DataProcessingInput{
+		{TenantID: "t", DataCategories: []string{"device"}, Purpose: "fraud", LegalBasis: "legitimate_interest", RetentionDays: -1},
+		{TenantID: "t", Purpose: "fraud", LegalBasis: "legitimate_interest"},
+		{TenantID: "t", DataCategories: []string{"device"}, LegalBasis: "legitimate_interest"},
+		{TenantID: "t", DataCategories: []string{"device"}, Purpose: "fraud"},
+	}
+	for i, tc := range cases {
+		if _, err := s.PutDataProcessing(ctx, tc); err == nil {
+			t.Fatalf("case %d: expected validation error", i)
+		}
 	}
 }
 

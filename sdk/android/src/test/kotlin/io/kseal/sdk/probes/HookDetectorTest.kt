@@ -53,4 +53,17 @@ class HookDetectorTest {
         env.packages = env.packages + "de.robv.android.xposed.installer"
         assertTrue(RiskSignal.HOOKING in HookDetector(env).evaluate())
     }
+
+    @Test
+    fun nativeHookPresentIsHooking() {
+        val env = FakeDeviceEnvironment().apply { nativeHook = 1 }
+        assertEquals(setOf(RiskSignal.HOOKING), HookDetector(env).evaluate())
+    }
+
+    @Test
+    fun nativeHookUnavailableIsClean() {
+        // The "unavailable" sentinel (-1) must never raise a signal.
+        val env = FakeDeviceEnvironment().apply { nativeHook = -1 }
+        assertTrue(HookDetector(env).evaluate().isEmpty())
+    }
 }

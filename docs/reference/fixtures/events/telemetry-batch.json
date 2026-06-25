@@ -1,0 +1,51 @@
+{
+  "description": "How Meridian Pay's SDK ships telemetry. On the wire a batch is protobuf (TelemetryBatch) compressed with zstd (default level 3, optional shared dictionary), POSTed to the data plane. This fixture shows the DECODED batch; the wire form is binary. The batch+compress and decompress paths are exercised by the Rust core benches (see reference/benchmarks.md).",
+  "wire_format": {
+    "encoding": "protobuf + zstd",
+    "default_zstd_level": 3,
+    "shared_dictionary": "optional (pre-trained) so even small batches compress hard",
+    "decompress_guard": "16 MiB cap on untrusted input (zip-bomb defense)"
+  },
+  "decoded_batch": {
+    "tenant_id": "meridian",
+    "app_id": "pay-android",
+    "events": [
+      {
+        "event_type": "EVENT_TYPE_POLICY_DECISION",
+        "risk_level": "TRUST_LEVEL_TRUSTED",
+        "risk_bits": 0,
+        "risk_signals": [],
+        "confidence": "CONFIDENCE_HIGH",
+        "build_hash": "e3bb7952a304da35ff93f5ddc20aa9220c6cc9be462016ae2985af3e76a70d73",
+        "policy_hash": "62fdc9b7f2da819931d88affe6ca7c3c22fcbbf0aeb2077a68994a1d4f508c34",
+        "install_key_hash": "152c900d3185e766f9420b6b2a0287647b475ed2d1af70894296f6c05731094f",
+        "coarse_time_bucket": 1781582400,
+        "country_or_region": "SG"
+      },
+      {
+        "event_type": "EVENT_TYPE_OVERLAY_ABUSE",
+        "risk_level": "TRUST_LEVEL_MEDIUM_RISK",
+        "risk_bits": 12288,
+        "risk_signals": ["overlay_abuse", "accessibility_abuse"],
+        "confidence": "CONFIDENCE_HIGH",
+        "build_hash": "e3bb7952a304da35ff93f5ddc20aa9220c6cc9be462016ae2985af3e76a70d73",
+        "policy_hash": "62fdc9b7f2da819931d88affe6ca7c3c22fcbbf0aeb2077a68994a1d4f508c34",
+        "install_key_hash": "152c900d3185e766f9420b6b2a0287647b475ed2d1af70894296f6c05731094f",
+        "coarse_time_bucket": 1781582400,
+        "country_or_region": "BR"
+      },
+      {
+        "event_type": "EVENT_TYPE_APP_INTEGRITY_FAIL",
+        "risk_level": "TRUST_LEVEL_CRITICAL",
+        "risk_bits": 48,
+        "risk_signals": ["app_tamper", "attestation_fail"],
+        "confidence": "CONFIDENCE_HIGH",
+        "build_hash": "e3bb7952a304da35ff93f5ddc20aa9220c6cc9be462016ae2985af3e76a70d73",
+        "policy_hash": "62fdc9b7f2da819931d88affe6ca7c3c22fcbbf0aeb2077a68994a1d4f508c34",
+        "install_key_hash": "152c900d3185e766f9420b6b2a0287647b475ed2d1af70894296f6c05731094f",
+        "coarse_time_bucket": 1781582400,
+        "country_or_region": "BR"
+      }
+    ]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "description": "Golden request-proof vector. Pinned byte-for-byte in four places: sdk/rust-core crypto.rs and whitebox/mod.rs, and server shared/proof/proof_test.go and shared/crypto/crypto_test.go. The device and the server independently reconstruct the same preimage and HMAC, so a proof minted on-device verifies server-side without ever transmitting the per-install key.",
+  "domain": "kseal/v1/request-proof",
+  "preimage_layout": "u32_be(len)||DOMAIN || u32_be(len)||token_id || u32_be(len)||request_hash || u32_be(len)||nonce || i64_be(sequence)",
+  "inputs": {
+    "instance_key_utf8": "kseal-test-instance-key",
+    "token_id": "tok",
+    "request_hash_hex": "01020304",
+    "nonce_hex": "aabb",
+    "sequence": 1
+  },
+  "expected_tag_hex": "718bb06df45dc4bbc5bf483bd65acf7609429966adba8baff66fa965857ebd0d",
+  "algorithm": "HMAC-SHA256",
+  "meridian_usage": {
+    "endpoint": "POST /v1/payments (Meridian Pay backend, behind the kseal verify middleware)",
+    "header": "X-Kseal-Proof: <token_id>.<sequence>.<tag_hex>",
+    "request_hash": "SHA-256 over the canonical request (method, path, body) the client is about to send",
+    "replay_defense": "sequence is strictly monotonic per trust token; the server rejects any non-increasing sequence"
+  }
+}

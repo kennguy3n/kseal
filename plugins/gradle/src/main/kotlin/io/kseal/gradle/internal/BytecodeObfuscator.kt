@@ -36,7 +36,7 @@ import org.objectweb.asm.tree.MethodNode
  * heavy virtualization (bytecode→custom-VM) because it wrecks crash
  * symbolication, bloats and slows the app, and trades a one-time static-analysis
  * speed-bump for permanent runtime cost — the opposite of the SDK's performance
- * budget (see `ARCHITECTURE.md#what-to-avoid`). These transforms are **name- and
+ * budget (see `ARCHITECTURE.md#what-kseal-deliberately-avoids`). These transforms are **name- and
  * mapping-preserving**: no type, method or field is renamed, so R8's `mapping.txt`
  * keeps resolving and crashes stay symbolicatable. Only a single new generated
  * class is added.

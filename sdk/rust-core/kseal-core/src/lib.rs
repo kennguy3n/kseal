@@ -30,6 +30,11 @@ pub mod proto {
     include!(concat!(env!("OUT_DIR"), "/kseal.v1.rs"));
 }
 
+// Declared before the modules that use `obfstr!`/`obfstr_string!` so the
+// macros are in scope crate-wide.
+#[macro_use]
+mod obfuscate;
+
 pub mod config;
 pub mod crypto;
 pub mod events;
@@ -37,6 +42,22 @@ pub mod policy;
 pub mod risk;
 pub mod risk_engine;
 pub mod transport;
+
+// Phase 5.3 DECISION SPIKE: selective code-virtualization prototype. Compiled
+// only under the default-off `vm-spike` feature; additive and isolated, it is
+// not wired into the trust/crypto path or the FFI surface. The standard build is
+// byte-for-byte unchanged. See `vmspike` and `docs/virtualization-tier-decision.md`.
+#[cfg(feature = "vm-spike")]
+pub mod vmspike;
+
+// Phase 6.1 DECISION SPIKE: white-box cryptography for the proof key. Compiled
+// only under the default-off `whitebox-spike` feature; additive and isolated, it
+// reproduces the EXACT production proof HMAC tag from encoded key tables but does
+// not replace the production crypto path or touch the FFI surface. The standard
+// build is byte-for-byte unchanged. See `whitebox` and
+// `docs/whitebox-crypto-decision.md`.
+#[cfg(feature = "whitebox-spike")]
+pub mod whitebox;
 
 use crate::config::ConfigCache;
 use crate::events::{EventBatch, EventInput, PrivacyGuard};

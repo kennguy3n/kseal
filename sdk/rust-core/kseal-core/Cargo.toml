@@ -7,17 +7,49 @@ repository.workspace = true
 rust-version.workspace = true
 description = "kseal device trust core: policy evaluation, risk scoring, telemetry, and request proofs."
 
+[features]
+# Compile-time string-literal obfuscation (Phase 5.2). Off by default so the
+# standard build stays debuggable; turned on for hardened/release artifacts.
+obfuscate-strings = []
+
+# Phase 5.3 DECISION SPIKE — selective code-virtualization prototype (`vmspike`).
+# Off by default and never shipped: this gates a self-contained, bounded
+# proof-of-concept (custom bytecode VM + polymorphic encoder + encrypted retrace
+# map) used to produce the go/no-go evidence in
+# `docs/virtualization-tier-decision.md`. It does NOT touch the trust/crypto path
+# or the FFI surface. See `src/vmspike/mod.rs`.
+#
+# Pulls in the vetted `chacha20poly1305` AEAD used to encrypt+authenticate the
+# retrace map. Optional + feature-gated so the default build is unaffected and
+# links none of it.
+vm-spike = ["dep:chacha20poly1305"]
+
+# Phase 6.1 DECISION SPIKE — white-box cryptography for the proof key
+# (`whitebox`). Off by default and never shipped: this gates a self-contained,
+# bounded proof-of-concept that bakes the proof key into encoded lookup tables at
+# build time and reproduces the EXACT production proof HMAC tag, used to produce
+# the go/no-go evidence in `docs/whitebox-crypto-decision.md`. It is ADDITIVE: it
+# does NOT replace or alter the production crypto path, and adds nothing to the
+# FFI surface. See `src/whitebox/mod.rs`. Pulls in `zeroize` (already in the lock
+# transitively) only when enabled, so the default build is unchanged.
+whitebox-spike = ["dep:zeroize"]
+
 [dependencies]
 prost.workspace = true
 zstd.workspace = true
 sha2.workspace = true
 hmac.workspace = true
+chacha20poly1305 = { workspace = true, optional = true }
 ed25519-dalek.workspace = true
 rand_core.workspace = true
 getrandom.workspace = true
 bitflags.workspace = true
 thiserror.workspace = true
 serde.workspace = true
+# White-box spike only (gated by `whitebox-spike`): volatile, fence-backed
+# scrubbing of the transiently-reconstructed key blocks. Already present in the
+# lock via the dalek stack, so enabling the spike adds no new resolved crate.
+zeroize = { version = "1", optional = true, default-features = false }
 
 [build-dependencies]
 prost-build = "0.13"

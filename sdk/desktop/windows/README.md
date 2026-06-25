@@ -2,7 +2,7 @@
 
 Windows desktop SDK (.NET).
 
-Provides the public SDK surface and native desktop [RASP probes](../../../ARCHITECTURE.md#runtime-protection-modules)
+Provides the public SDK surface and native desktop [RASP probes](../../../ARCHITECTURE.md#rasp-probes)
 for Windows: Authenticode signature/timestamp verification (`WinVerifyTrust` +
 `SignedCms`), integrity checks, MDM/GPO-delivered enterprise policy, and
 hardware-bound (DPAPI/TPM) proof keys. Shared trust logic is delegated to the

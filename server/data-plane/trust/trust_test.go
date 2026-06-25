@@ -137,10 +137,11 @@ func TestTrustFlowEndToEnd(t *testing.T) {
 	proofKey := DeriveProofKey(attResp.Msg.SignedToken)
 
 	// Valid proof with sequence 1 -> allow (level trusted, step-up default mode).
+	proofNonce := []byte("proof-nonce-12345678")
 	proof := func(seq int64) *ksealv1.RequestProof {
 		reqHash := []byte("req")
-		p := &ksealv1.RequestProof{TrustTokenId: tokenID, RequestHash: reqHash, MonotonicSequence: seq}
-		p.AppInstanceSignature = crypto.HMACSHA256(proofKey, ProofMessage(tokenID, reqHash, nil, seq))
+		p := &ksealv1.RequestProof{TrustTokenId: tokenID, RequestHash: reqHash, Nonce: proofNonce, MonotonicSequence: seq}
+		p.AppInstanceSignature = crypto.HMACSHA256(proofKey, ProofMessage(tokenID, reqHash, proofNonce, seq))
 		return p
 	}
 
@@ -204,6 +205,53 @@ func TestValidateRequestProofMalformedTokenIDFailsClosed(t *testing.T) {
 	}
 }
 
+func TestValidateRequestProofRejectsMissingFields(t *testing.T) {
+	svc, _, tn, app := setupService(t, &attestation.Result{Accepted: true, AppRecognized: true, DeviceIntegrity: true})
+	ctx := context.Background()
+
+	nonceResp, err := svc.GetNonce(ctx, connect.NewRequest(&ksealv1.NonceRequest{TenantId: tn.Id, AppId: app.Id, Platform: ksealv1.Platform_PLATFORM_ANDROID}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	attResp, err := svc.VerifyAttestation(ctx, connect.NewRequest(&ksealv1.AttestationRequest{
+		TenantId: tn.Id, AppId: app.Id, Platform: ksealv1.Platform_PLATFORM_ANDROID,
+		Nonce: nonceResp.Msg.Nonce, BuildHash: "bh", InstanceId: "inst",
+	}))
+	if err != nil || !attResp.Msg.Accepted {
+		t.Fatal("attestation failed")
+	}
+	tokenID := attResp.Msg.TrustToken.TokenId
+
+	cases := []struct {
+		name  string
+		proof *ksealv1.RequestProof
+	}{
+		{
+			"empty_request_hash",
+			&ksealv1.RequestProof{TrustTokenId: tokenID, Nonce: []byte("n"), MonotonicSequence: 1, AppInstanceSignature: []byte("sig")},
+		},
+		{
+			"empty_nonce",
+			&ksealv1.RequestProof{TrustTokenId: tokenID, RequestHash: []byte("rh"), MonotonicSequence: 1, AppInstanceSignature: []byte("sig")},
+		},
+		{
+			"empty_signature",
+			&ksealv1.RequestProof{TrustTokenId: tokenID, RequestHash: []byte("rh"), Nonce: []byte("n"), MonotonicSequence: 1},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := svc.ValidateRequestProof(ctx, connect.NewRequest(tc.proof))
+			if err != nil {
+				t.Fatalf("expected DENY not error: %v", err)
+			}
+			if res.Msg.Decision != ksealv1.RequestProofResult_DECISION_DENY {
+				t.Fatalf("expected DENY for %s, got %v", tc.name, res.Msg.Decision)
+			}
+		})
+	}
+}
+
 func TestVerifyAttestationRejectsConsumedNonce(t *testing.T) {
 	svc, _, tn, app := setupService(t, &attestation.Result{Accepted: true})
 	ctx := context.Background()
@@ -238,5 +286,53 @@ func TestVerifyAttestationRejectsFailedAttestation(t *testing.T) {
 	}
 	if resp.Msg.RejectionReason == "" {
 		t.Fatal("expected rejection reason")
+	}
+}
+
+func TestVerifyAttestationRejectsUnknownApp(t *testing.T) {
+	svc, _, tn, _ := setupService(t, &attestation.Result{Accepted: true})
+	ctx := context.Background()
+	nonce, _, err := svc.nonces.Issue(ctx, tn.Id, "00000000-0000-0000-0000-000000000000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := svc.VerifyAttestation(ctx, connect.NewRequest(&ksealv1.AttestationRequest{
+		TenantId: tn.Id, AppId: "00000000-0000-0000-0000-000000000000", Platform: ksealv1.Platform_PLATFORM_ANDROID, Nonce: nonce,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Msg.Accepted || resp.Msg.RejectionReason == "" {
+		t.Fatalf("expected unknown app rejection, got %+v", resp.Msg)
+	}
+}
+
+type captureVerifier struct{ in attestation.Input }
+
+func (c *captureVerifier) Verify(_ context.Context, in attestation.Input) (*attestation.Result, error) {
+	c.in = in
+	if in.AppID != "com.x" {
+		return &attestation.Result{Accepted: false, Reason: "package mismatch"}, nil
+	}
+	return &attestation.Result{Accepted: true, AppRecognized: true, DeviceIntegrity: true}, nil
+}
+
+func TestVerifyAttestationBindsKnownAppIdentity(t *testing.T) {
+	store := registry.NewMemStore()
+	ctx := context.Background()
+	tn, _ := store.CreateTenant(ctx, registry.CreateTenantInput{Name: "T", Slug: "t-bind"})
+	app, _ := store.CreateApp(ctx, registry.CreateAppInput{TenantID: tn.Id, Name: "A", PackageID: "com.x", Platform: ksealv1.Platform_PLATFORM_ANDROID})
+	cv := &captureVerifier{}
+	svc := NewService(store, NewNonceStore(newRedis(t), time.Minute), attestation.NewVerifier(cv, cv), time.Minute, appconfig.FeatureFlags{})
+	nonceResp, err := svc.GetNonce(ctx, connect.NewRequest(&ksealv1.NonceRequest{TenantId: tn.Id, AppId: app.Id, Platform: ksealv1.Platform_PLATFORM_ANDROID}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := svc.VerifyAttestation(ctx, connect.NewRequest(&ksealv1.AttestationRequest{TenantId: tn.Id, AppId: app.Id, Platform: ksealv1.Platform_PLATFORM_ANDROID, Nonce: nonceResp.Msg.Nonce}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resp.Msg.Accepted || cv.in.AppID != "com.x" {
+		t.Fatalf("expected app-bound acceptance, accepted=%v appID=%q", resp.Msg.Accepted, cv.in.AppID)
 	}
 }

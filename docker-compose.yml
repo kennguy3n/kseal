@@ -46,6 +46,9 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    # Run as the image's redis user directly so it doesn't need setpriv to drop
+    # from root; without this, cap_drop + no-new-privileges blocks startup.
+    user: "999:1000"
     # Match prod eviction semantics: TTL'd nonces/rate-limit keys, no persistence.
     command:
       - redis-server

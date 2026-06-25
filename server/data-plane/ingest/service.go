@@ -18,6 +18,7 @@ import (
 	"github.com/kennguy3n/kseal/server/control-plane/registry"
 	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
 	"github.com/kennguy3n/kseal/server/gen/kseal/v1/ksealv1connect"
+	"github.com/kennguy3n/kseal/server/shared/auth"
 	"github.com/kennguy3n/kseal/server/shared/risk"
 )
 
@@ -98,9 +99,14 @@ func (v *CachedAppValidator) put(key string, e cacheEntry) {
 		return
 	}
 	// Over the cap: drop expired entries first, then evict arbitrary live ones
-	// (map iteration order is randomized) until back under the cap.
+	// (map iteration order is randomized) until back under the cap. The just-
+	// inserted key is skipped in both passes so it survives even if its TTL is
+	// extremely short or the clock jumps forward between insertion and eviction.
 	now := time.Now()
 	for k, c := range v.cache {
+		if k == key {
+			continue
+		}
 		if !now.Before(c.expires) {
 			delete(v.cache, k)
 		}
@@ -166,6 +172,9 @@ func (s *Service) SubmitTelemetry(ctx context.Context, req *connect.Request[ksea
 	if m.TenantId == "" || m.AppId == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("tenant_id and app_id required"))
 	}
+	if err := auth.EnforceTenant(ctx, m.TenantId); err != nil {
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("device credential required"))
+	}
 
 	ctx, span := s.tracer.Start(ctx, "ingest.SubmitTelemetry", trace.WithAttributes(
 		attribute.String("tenant", m.TenantId),
@@ -213,7 +222,13 @@ func (s *Service) SubmitTelemetry(ctx context.Context, req *connect.Request[ksea
 	}
 
 	allowed, _, err := s.quota.Allow(ctx, m.TenantId, len(batch.Events))
-	if err == nil && !allowed {
+	if err != nil {
+		// Fail open: a Redis outage must not block telemetry ingest, but the
+		// error is recorded on the span so operators can see quota enforcement
+		// is degraded (e.g. via distributed tracing / error-rate dashboards).
+		span.RecordError(err)
+		span.SetAttributes(attribute.String("outcome", "quota_error_fail_open"))
+	} else if !allowed {
 		s.reject(ctx, tenantAttr, int64(len(batch.Events)))
 		span.SetAttributes(attribute.String("outcome", "quota_exceeded"))
 		return connect.NewResponse(&ksealv1.SubmitTelemetryResponse{

@@ -28,8 +28,7 @@ type Category struct {
 type Control struct {
 	Objective string // first column ("MASVS objective")
 	Control   string // "kseal control"
-	Phase     string
-	Module    string
+	Module    string // "Module / component"
 	MASTG     string // "MASTG verification"
 }
 
@@ -44,8 +43,8 @@ func (c *Catalog) Find(name string) (*Category, bool) {
 }
 
 // Parse reads a masvs-mapping.md document. Only sections whose heading begins
-// with "MASVS-" are treated as control categories (the phase-coverage summary
-// table and prose are ignored).
+// with "MASVS-" are treated as control categories (the coverage summary table
+// and prose are ignored).
 func Parse(markdown string) (*Catalog, error) {
 	cat := &Catalog{}
 	scanner := bufio.NewScanner(strings.NewReader(markdown))
@@ -96,15 +95,14 @@ func Parse(markdown string) (*Catalog, error) {
 			if isHeaderOrSeparator(cells) {
 				continue
 			}
-			if len(cells) < 5 {
-				return nil, fmt.Errorf("category %q: malformed control row %q (want 5 columns, got %d)", current.Name, trimmed, len(cells))
+			if len(cells) < 4 {
+				return nil, fmt.Errorf("category %q: malformed control row %q (want 4 columns, got %d)", current.Name, trimmed, len(cells))
 			}
 			current.Controls = append(current.Controls, Control{
 				Objective: cells[0],
 				Control:   cells[1],
-				Phase:     cells[2],
-				Module:    cells[3],
-				MASTG:     cells[4],
+				Module:    cells[2],
+				MASTG:     cells[3],
 			})
 		}
 	}

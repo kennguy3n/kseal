@@ -15,30 +15,43 @@ use crate::risk::RiskBitset;
 
 /// Maps a logical module identifier (as used in `PolicyConfig.modules_enabled`)
 /// to the risk bits it produces. Ordering is irrelevant; the union is used.
+///
+/// The identifiers reveal the SDK's detection taxonomy, so they are wrapped in
+/// [`obfstr!`] to keep them out of the artifact's `.rodata` in hardened builds.
+/// `obfstr!` reconstructs the exact original bytes, so the match against the
+/// server-supplied `modules_enabled` names is unchanged. The arms are mutually
+/// exclusive, so the first-match `if` chain is equivalent to the prior `match`.
 fn module_bits(module: &str) -> RiskBitset {
-    match module {
-        "root" => RiskBitset::ROOT,
-        "jailbreak" => RiskBitset::JAILBREAK,
-        "emulator" => RiskBitset::EMULATOR,
-        "simulator" => RiskBitset::SIMULATOR,
-        "debugger" => RiskBitset::DEBUGGER,
-        "hooking" => RiskBitset::HOOKING,
-        "tamper" => RiskBitset::TAMPER,
-        "app_integrity" => RiskBitset::APP_INTEGRITY | RiskBitset::REPACKAGED,
-        "network_mitm" => {
-            RiskBitset::NETWORK_MITM
-                | RiskBitset::PROXY
-                | RiskBitset::USER_CA
-                | RiskBitset::PINNING_FAILURE
-        }
-        "environment" => {
-            RiskBitset::ENVIRONMENT
-                | RiskBitset::EMULATOR
-                | RiskBitset::SIMULATOR
-                | RiskBitset::SECURE_HW_MISSING
-        }
-        "attestation" => RiskBitset::ATTESTATION_FAIL,
-        _ => RiskBitset::empty(),
+    if module == obfstr!("root") {
+        RiskBitset::ROOT
+    } else if module == obfstr!("jailbreak") {
+        RiskBitset::JAILBREAK
+    } else if module == obfstr!("emulator") {
+        RiskBitset::EMULATOR
+    } else if module == obfstr!("simulator") {
+        RiskBitset::SIMULATOR
+    } else if module == obfstr!("debugger") {
+        RiskBitset::DEBUGGER
+    } else if module == obfstr!("hooking") {
+        RiskBitset::HOOKING
+    } else if module == obfstr!("tamper") {
+        RiskBitset::TAMPER
+    } else if module == obfstr!("app_integrity") {
+        RiskBitset::APP_INTEGRITY | RiskBitset::REPACKAGED
+    } else if module == obfstr!("network_mitm") {
+        RiskBitset::NETWORK_MITM
+            | RiskBitset::PROXY
+            | RiskBitset::USER_CA
+            | RiskBitset::PINNING_FAILURE
+    } else if module == obfstr!("environment") {
+        RiskBitset::ENVIRONMENT
+            | RiskBitset::EMULATOR
+            | RiskBitset::SIMULATOR
+            | RiskBitset::SECURE_HW_MISSING
+    } else if module == obfstr!("attestation") {
+        RiskBitset::ATTESTATION_FAIL
+    } else {
+        RiskBitset::empty()
     }
 }
 
@@ -264,6 +277,41 @@ mod tests {
             policy_hash: "h1".to_string(),
             reattest_interval_secs: 0,
         }
+    }
+
+    #[test]
+    fn module_bits_taxonomy_is_stable() {
+        // Locks the module-name -> risk-bit mapping so the obfuscated `if` chain
+        // stays byte-for-byte equivalent to the original `match`.
+        assert_eq!(module_bits("root"), RiskBitset::ROOT);
+        assert_eq!(module_bits("jailbreak"), RiskBitset::JAILBREAK);
+        assert_eq!(module_bits("emulator"), RiskBitset::EMULATOR);
+        assert_eq!(module_bits("simulator"), RiskBitset::SIMULATOR);
+        assert_eq!(module_bits("debugger"), RiskBitset::DEBUGGER);
+        assert_eq!(module_bits("hooking"), RiskBitset::HOOKING);
+        assert_eq!(module_bits("tamper"), RiskBitset::TAMPER);
+        assert_eq!(
+            module_bits("app_integrity"),
+            RiskBitset::APP_INTEGRITY | RiskBitset::REPACKAGED
+        );
+        assert_eq!(
+            module_bits("network_mitm"),
+            RiskBitset::NETWORK_MITM
+                | RiskBitset::PROXY
+                | RiskBitset::USER_CA
+                | RiskBitset::PINNING_FAILURE
+        );
+        assert_eq!(
+            module_bits("environment"),
+            RiskBitset::ENVIRONMENT
+                | RiskBitset::EMULATOR
+                | RiskBitset::SIMULATOR
+                | RiskBitset::SECURE_HW_MISSING
+        );
+        assert_eq!(module_bits("attestation"), RiskBitset::ATTESTATION_FAIL);
+        // Unknown names contribute nothing.
+        assert_eq!(module_bits("unknown"), RiskBitset::empty());
+        assert_eq!(module_bits(""), RiskBitset::empty());
     }
 
     #[test]

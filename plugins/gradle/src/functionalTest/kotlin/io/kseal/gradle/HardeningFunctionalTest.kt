@@ -214,6 +214,58 @@ class HardeningFunctionalTest {
     }
 
     @Test
+    fun `selective virtualization emits private retrace map only at high strength`() {
+        writeFixture(
+            """
+            registry { offline.set(true) }
+            obfuscation { enabled.set(true); strength.set("high") }
+            virtualization { candidates.add("proof_signing_assembly") }
+            """.trimIndent(),
+        )
+        val result = runner("ksealHarden").build()
+
+        assertEquals(TaskOutcome.SUCCESS, result.task(":ksealGenerateVirtualizationArtifacts")?.outcome)
+        val report = File(projectDir, "build/kseal/reports/virtualization.json").readText()
+        assertTrue(report.contains("\"transform\": \"selective-virtualization\""))
+        assertTrue(report.contains("\"status\": \"applied\""))
+        assertTrue(report.contains("\"proof_signing_assembly\""))
+        assertTrue(report.contains("\"round_trip_verified\": true"))
+
+        val retrace = File(projectDir, "build/kseal/private/vm-retrace.map")
+        assertTrue(retrace.isFile, "private encrypted retrace map must be emitted")
+        assertFalse(String(retrace.readBytes()).contains("proof_signing_assembly"), "retrace map must not contain plaintext routine names")
+
+        val manifest = manifestText()
+        assertTrue(manifest.contains("\"selective-virtualization\""), "build proof must record the transform")
+        assertTrue(manifest.contains("\"retrace_map\""), "build proof must record private retrace digest")
+    }
+
+    @Test
+    fun `selective virtualization rejects non-high and forbidden candidates`() {
+        writeFixture(
+            """
+            registry { offline.set(true) }
+            obfuscation { enabled.set(true); strength.set("medium") }
+            virtualization { candidates.add("proof_signing_assembly") }
+            """.trimIndent(),
+        )
+        val nonHigh = runner("ksealGenerateVirtualizationArtifacts").buildAndFail()
+        assertTrue(nonHigh.output.contains("requires obfuscation.strength=high"))
+
+        File(projectDir, "build.gradle.kts").appendText(
+            """
+
+            ksealHarden {
+                obfuscation { enabled.set(true); strength.set("high") }
+                virtualization { candidates.set(listOf("risk_scoring")) }
+            }
+            """.trimIndent(),
+        )
+        val forbidden = runner("ksealGenerateVirtualizationArtifacts", "--rerun-tasks").buildAndFail()
+        assertTrue(forbidden.output.contains("refusing to virtualize 'risk_scoring' (hot path)"))
+    }
+
+    @Test
     fun `a misconfigured obfuscation strength fails with an actionable message`() {
         writeFixture(
             """

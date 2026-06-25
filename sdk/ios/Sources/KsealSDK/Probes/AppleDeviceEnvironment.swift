@@ -1,11 +1,15 @@
 #if canImport(Darwin)
 import Foundation
 import Darwin
+import CKseal
 #if canImport(MachO)
 import MachO
 #endif
 #if canImport(CFNetwork)
 import CFNetwork
+#endif
+#if canImport(CryptoKit)
+import CryptoKit
 #endif
 
 /// Production `DeviceEnvironment` reading the real Apple device using only
@@ -96,6 +100,17 @@ final class AppleDeviceEnvironment: DeviceEnvironment {
         return connected == 0
     }
 
+    func nativeDebuggerPresent() -> Int32 {
+        // Native (Rust) sysctl `P_TRACED` check over the trust-core C ABI.
+        // Returns 1/0/-1; the SDK is fail-safe on the negative sentinel.
+        kseal_native_debugger_present()
+    }
+
+    func nativeHookPresent() -> Int32 {
+        // Native (Rust) dyld-image scan for injected instrumentation.
+        kseal_native_hook_present()
+    }
+
     func proxyHost() -> String? {
         #if canImport(CFNetwork)
         guard let settings = CFNetworkCopySystemProxySettings()?.takeRetainedValue() as? [String: Any] else {
@@ -106,6 +121,18 @@ final class AppleDeviceEnvironment: DeviceEnvironment {
         }
         #endif
         return nil
+    }
+
+    func sha256OfFile(_ path: String) -> String? {
+        #if canImport(CryptoKit)
+        // Memory-map (when safe) so large packaged artifacts are not fully
+        // resident; any read failure degrades to nil ("could not measure").
+        let url = URL(fileURLWithPath: path)
+        guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return nil }
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        #else
+        return nil
+        #endif
     }
 
     var bundleIdentifier: String? {
