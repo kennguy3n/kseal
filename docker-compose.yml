@@ -60,6 +60,7 @@ services:
     ports:
       - "6379:6379"
     networks: [kseal]
+    user: redis
     security_opt:
       - no-new-privileges:true
     cap_drop: ["ALL"]
@@ -187,7 +188,7 @@ services:
     security_opt:
       - no-new-privileges:true
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:80/"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:80/"]
       interval: 10s
       timeout: 5s
       retries: 10

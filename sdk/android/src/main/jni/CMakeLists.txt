@@ -14,7 +14,10 @@ set(KSEAL_FFI_INCLUDE "${KSEAL_RUST_CORE_DIR}/kseal-ffi/include")
 set(KSEAL_FFI_SO "${CMAKE_CURRENT_SOURCE_DIR}/../jniLibs/${ANDROID_ABI}/libkseal_ffi.so")
 
 add_library(kseal_ffi SHARED IMPORTED)
-set_target_properties(kseal_ffi PROPERTIES IMPORTED_LOCATION "${KSEAL_FFI_SO}")
+set_target_properties(kseal_ffi PROPERTIES
+    IMPORTED_LOCATION "${KSEAL_FFI_SO}"
+    IMPORTED_NO_SONAME TRUE
+)
 
 add_library(kseal_jni SHARED kseal_jni.c)
 

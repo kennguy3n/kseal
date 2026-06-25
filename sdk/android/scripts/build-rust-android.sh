@@ -41,8 +41,8 @@ fi
 mkdir -p "$JNILIBS_DIR"
 
 echo "[build-rust-android] cargo-ndk -> $JNILIBS_DIR"
+cd "$RUST_CORE"
 cargo ndk \
-    --manifest-path "$RUST_CORE/Cargo.toml" \
     -t arm64-v8a \
     -t armeabi-v7a \
     -t x86_64 \
