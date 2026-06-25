@@ -190,8 +190,50 @@ print("kseal iOS quickstart — tenant=\(tenantId) app=\(appId) endpoint=\(baseU
 let sdk = try KsealSDK.initialize(tenantId: tenantId, appId: appId, apiKey: apiKey,
                                   options: .init(buildHash: "sha256:dev-build"))
 
+// 1. Core version (Rust trust core)
+print("[core] version=\(sdk.coreVersion)")
+
+// 2. Evaluate local risk (offline, cheap) — runs all RASP probes
 let risk = try sdk.evaluateRisk()
 print("[risk] trustLevel=\(risk.trustLevel) score=\(risk.score) clean=\(risk.isClean) signals=\(risk.signals.count)")
+for signal in risk.signals {
+    print("       signal: \(signal)")
+}
+
+// 3. Evaluate trust decision locally (same mapping the server applies)
+let (localLevel, localDecision) = try sdk.evaluateTrustDecision()
+print("[decision] level=\(localLevel) decision=\(localDecision)")
+
+// 4. Wire the active-response hook (the SDK never enforces; the host decides)
+sdk.onTrustDecision = { level, decision in
+    print("[hook] onTrustDecision: level=\(level) decision=\(decision)")
+}
+
+// 5. Wire the kill-switch hook (fired on server-driven forced degrade)
+sdk.onKillSwitchChanged = { killed in
+    print("[hook] onKillSwitchChanged: killed=\(killed)")
+}
+
+// 6. Telemetry: report a runtime tamper event and a pinning failure
+sdk.reportEvent(.runtimeTamper)
+sdk.reportEvent(.debugger)
+sdk.reportPinningFailure()
+print("[telemetry] queued 3 events (tamper, debugger, pinning-failure)")
+
+// 7. Kill switch state (fail-safe: false unless a valid Ed25519 DISABLE is applied)
+print("[kill-switch] isKilled=\(sdk.isKilled)")
+
+// 8. Config refresh (on-demand; default provider returns nil → no network)
+let configLoaded = sdk.refreshConfig()
+print("[config] loaded=\(configLoaded)")
+
+// 9. Continuous protection (opt-in; no-op without a policy setting reattest_interval_secs)
+let started = sdk.startContinuousProtection()
+print("[continuous] started=\(started) (requires policy with reattest_interval_secs > 0)")
+
+// 10. Simulate app foreground → one re-attestation cycle
+sdk.onAppForeground()
+print("[reattest] onAppForeground cycle triggered")
 
 let client = KsealTrustClient(baseURL: baseURL, tenantId: tenantId, appId: appId)
 let provider: AttestationTokenProvider = DevAttestationTokenProvider()
@@ -222,5 +264,9 @@ do {
     print("        start the server with `make docker-up`, then re-run.")
 }
 
+// 11. Flush buffered telemetry (compresses + sends to the telemetry sink)
 sdk.flushTelemetry()
+print("[telemetry] flushed")
+
+sdk.stopContinuousProtection()
 print("done.")

@@ -3,8 +3,11 @@ package io.kseal.quickstart
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
 import io.kseal.quickstart.databinding.ActivityMainBinding
+import io.kseal.sdk.Decision
+import io.kseal.sdk.EventType
 import io.kseal.sdk.KsealOptions
 import io.kseal.sdk.KsealSDK
+import io.kseal.sdk.TrustLevel
 import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.Executors
@@ -56,11 +59,52 @@ class MainActivity : AppCompatActivity() {
             // 1. Use the lazily-initialized SDK singleton (initialized once, off the
             // main thread on first tap).
 
-            // 2. Evaluate local integrity (offline, cheap).
+            // 2. Core version (Rust trust core)
+            log("[core] version=${sdk.coreVersion}")
+
+            // 3. Evaluate local integrity (offline, cheap) — runs all RASP probes
             val risk = sdk.evaluateRisk()
             log("[risk] trustLevel=${risk.trustLevel} score=${risk.score} clean=${risk.isClean} signals=${risk.signals.size}")
+            for (signal in risk.signals) {
+                log("       signal: $signal")
+            }
 
-            // 3. Trust session over HTTP (host-owned transport).
+            // 4. Evaluate trust decision locally (same mapping the server applies)
+            val (localLevel, localDecision) = sdk.evaluateTrustDecision()
+            log("[decision] level=$localLevel decision=$localDecision")
+
+            // 5. Wire the active-response hook (the SDK never enforces; the host decides)
+            sdk.onTrustDecision = { level, decision ->
+                log("[hook] onTrustDecision: level=$level decision=$decision")
+            }
+
+            // 6. Wire the kill-switch hook (fired on server-driven forced degrade)
+            sdk.onKillSwitchChanged = { killed ->
+                log("[hook] onKillSwitchChanged: killed=$killed")
+            }
+
+            // 7. Telemetry: report events and a pinning failure
+            sdk.reportEvent(EventType.RUNTIME_TAMPER)
+            sdk.reportEvent(EventType.DEBUGGER)
+            sdk.reportPinningFailure()
+            log("[telemetry] queued 3 events (tamper, debugger, pinning-failure)")
+
+            // 8. Kill switch state (fail-safe: false unless a valid Ed25519 DISABLE is applied)
+            log("[kill-switch] isKilled=${sdk.isKilled}")
+
+            // 9. Config refresh (on-demand; default provider returns null → no network)
+            val configLoaded = sdk.refreshConfig()
+            log("[config] loaded=$configLoaded")
+
+            // 10. Continuous protection (opt-in; no-op without a policy setting reattest_interval_secs)
+            val started = sdk.startContinuousProtection()
+            log("[continuous] started=$started (requires policy with reattest_interval_secs > 0)")
+
+            // 11. Simulate app foreground → one re-attestation cycle
+            sdk.onAppForeground()
+            log("[reattest] onAppForeground cycle triggered")
+
+            // 12. Trust session over HTTP (host-owned transport).
             val client = KsealTrustClient(
                 baseUrl = BuildConfig.KSEAL_ENDPOINT,
                 tenantId = BuildConfig.KSEAL_TENANT,
@@ -89,7 +133,7 @@ class MainActivity : AppCompatActivity() {
             }
             log("[trust] accepted token=${session.tokenId.take(8)}…")
 
-            // 4. Bind a protected request to the trust token. setTrustToken takes the
+            // 13. Bind a protected request to the trust token. setTrustToken takes the
             // trust-token id (a UUID): it becomes RequestProof.trustTokenId, which the
             // server resolves as a UUID for session lookup. The proof HMAC key is the
             // SDK's instance key, set at init — not the signed JWT. Mirrors the desktop
@@ -99,6 +143,13 @@ class MainActivity : AppCompatActivity() {
             val proof = sdk.getRequestProof(requestHash)
             val decision = client.validateRequestProof(proof.proofBytes)
             log("[proof] decision=${decision.decision} reason=${decision.reason}")
+
+            // 14. Flush buffered telemetry (compresses + sends to the telemetry sink)
+            sdk.flushTelemetry()
+            log("[telemetry] flushed")
+
+            // 15. Stop continuous protection
+            sdk.stopContinuousProtection()
         } catch (t: Throwable) {
             log("[error] ${t.message}")
         } finally {
