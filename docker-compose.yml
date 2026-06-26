@@ -63,7 +63,6 @@ services:
     ports:
       - "6379:6379"
     networks: [kseal]
-    user: redis
     security_opt:
       - no-new-privileges:true
     cap_drop: ["ALL"]

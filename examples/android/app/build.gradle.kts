@@ -7,6 +7,23 @@ android {
     namespace = "io.kseal.quickstart"
     compileSdk = 34
 
+    signingConfigs {
+        create("release") {
+            storeFile = file(project.findProperty("ksealStoreFile") as String? ?: "release_key.jks")
+            storePassword = project.findProperty("ksealStorePassword") as String? ?: ""
+            keyAlias = project.findProperty("ksealKeyAlias") as String? ?: "key0"
+            keyPassword = project.findProperty("ksealKeyPassword") as String? ?: ""
+        }
+    }
+
+    buildTypes {
+        getByName("release") {
+            isMinifyEnabled = false
+            isDebuggable = false
+            signingConfig = signingConfigs.getByName("release")
+        }
+    }
+
     defaultConfig {
         applicationId = "io.kseal.quickstart"
         minSdk = 24

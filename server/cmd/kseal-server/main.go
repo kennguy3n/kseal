@@ -116,7 +116,13 @@ func run() error {
 	webhookSvc := webhook.NewService(store)
 
 	nonceStore := trust.NewNonceStore(rdb, cfg.NonceTTL)
-	verifier := attestation.NewProductionVerifier()
+	var verifier *attestation.Verifier
+	if cfg.Env == "development" || cfg.Env == "dev" {
+		logger.Warn().Msg("attestation: using dev verifier — NOT FOR PRODUCTION")
+		verifier = attestation.NewDevVerifier()
+	} else {
+		verifier = attestation.NewProductionVerifier()
+	}
 	trustSvc := trust.NewService(store, nonceStore, verifier, cfg.TrustTokenTTL, cfg.FeatureFlags)
 
 	configSvc := cfgsvc.NewService(store, cfgsvc.NewSigner(store), cfg.ConfigTTL)

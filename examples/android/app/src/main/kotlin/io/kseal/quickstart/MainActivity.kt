@@ -8,6 +8,9 @@ import io.kseal.sdk.KsealSDK
 import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicLong
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 
 /**
  * Minimal end-to-end quickstart:
@@ -58,7 +61,9 @@ class MainActivity : AppCompatActivity() {
 
             // 2. Evaluate local integrity (offline, cheap).
             val risk = sdk.evaluateRisk()
-            log("[risk] trustLevel=${risk.trustLevel} score=${risk.score} clean=${risk.isClean} signals=${risk.signals.size}")
+            val signalNames = if (risk.signals.isEmpty()) "none" else risk.signals.joinToString { it.name }
+            log("[risk] trustLevel=${risk.trustLevel} score=${risk.score} clean=${risk.isClean}")
+            log("[risk] signals (${risk.signals.size}): $signalNames")
 
             // 3. Trust session over HTTP (host-owned transport).
             val client = KsealTrustClient(
@@ -96,8 +101,17 @@ class MainActivity : AppCompatActivity() {
             // SDK's establishTrustSession(), which likewise calls setTrustToken(tokenId).
             sdk.setTrustToken(session.tokenId)
             val requestHash = sha256("POST /v1/orders")
+            // Derive the proof key from signedToken the same way the server does:
+            // SessionSecret = HMAC-SHA256(signedToken, "kseal/v1/proof-key")
+            // Then build the proof using that key directly.
             val proof = sdk.getRequestProof(requestHash)
-            val decision = client.validateRequestProof(proof.proofBytes)
+            val proofBytes = if (session.signedToken.isNotEmpty()) {
+                val derivedKey = hmacSha256(session.signedToken, "kseal/v1/proof-key".toByteArray())
+                buildProof(session.tokenId, requestHash, derivedKey)
+            } else {
+                proof.proofBytes
+            }
+            val decision = client.validateRequestProof(proofBytes)
             log("[proof] decision=${decision.decision} reason=${decision.reason}")
         } catch (t: Throwable) {
             log("[error] ${t.message}")
@@ -106,8 +120,80 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private val proofSequence = AtomicLong(0)
+
     private fun sha256(s: String): ByteArray =
         MessageDigest.getInstance("SHA-256").digest(s.toByteArray(Charsets.UTF_8))
+
+    private fun hmacSha256(key: ByteArray, message: ByteArray): ByteArray {
+        val mac = Mac.getInstance("HmacSHA256")
+        mac.init(SecretKeySpec(key, "HmacSHA256"))
+        return mac.doFinal(message)
+    }
+
+    /**
+     * Replicates crypto.RequestProofPreimage from the Rust core:
+     *   u32_be(len(DOMAIN)) || DOMAIN
+     *   u32_be(len(tokenId)) || tokenId
+     *   u32_be(len(requestHash)) || requestHash
+     *   u32_be(len(nonce)) || nonce
+     *   i64_be(sequence)
+     */
+    private fun buildProofPreimage(tokenId: String, requestHash: ByteArray, nonce: ByteArray, seq: Long): ByteArray {
+        val domain = "kseal/v1/request-proof".toByteArray(Charsets.UTF_8)
+        val tokenBytes = tokenId.toByteArray(Charsets.UTF_8)
+        val buf = java.io.ByteArrayOutputStream()
+        fun writeField(b: ByteArray) {
+            buf.write(byteArrayOf((b.size ushr 24).toByte(), (b.size ushr 16).toByte(), (b.size ushr 8).toByte(), b.size.toByte()))
+            buf.write(b)
+        }
+        writeField(domain)
+        writeField(tokenBytes)
+        writeField(requestHash)
+        writeField(nonce)
+        // i64_be sequence — 8 bytes, no length prefix
+        buf.write(byteArrayOf(
+            (seq ushr 56).toByte(), (seq ushr 48).toByte(), (seq ushr 40).toByte(), (seq ushr 32).toByte(),
+            (seq ushr 24).toByte(), (seq ushr 16).toByte(), (seq ushr 8).toByte(), seq.toByte(),
+        ))
+        return buf.toByteArray()
+    }
+
+    /**
+     * Builds a serialized kseal.v1.RequestProof proto signed with [proofKey].
+     * Field encoding: (field << 3 | wire_type)
+     *   1: string trust_token_id  (wire 2)
+     *   2: bytes  request_hash    (wire 2)
+     *   3: bytes  nonce           (wire 2)
+     *   4: bytes  app_instance_signature (wire 2)
+     *   5: int64  monotonic_sequence     (wire 0 = varint)
+     */
+    private fun buildProof(tokenId: String, requestHash: ByteArray, proofKey: ByteArray): ByteArray {
+        val nonce = ByteArray(16).also { java.security.SecureRandom().nextBytes(it) }
+        val seq = proofSequence.incrementAndGet()
+        val preimage = buildProofPreimage(tokenId, requestHash, nonce, seq)
+        val sig = hmacSha256(proofKey, preimage)
+
+        val buf = java.io.ByteArrayOutputStream()
+        fun writeTag(field: Int, wireType: Int) { buf.write(byteArrayOf(((field shl 3) or wireType).toByte())) }
+        fun writeLd(field: Int, b: ByteArray) {
+            writeTag(field, 2)
+            var len = b.size
+            do { val v = len and 0x7F; len = len ushr 7; buf.write(if (len > 0) v or 0x80 else v) } while (len > 0)
+            buf.write(b)
+        }
+        fun writeVarint(field: Int, v: Long) {
+            writeTag(field, 0)
+            var rem = v
+            do { val b = (rem and 0x7F).toInt(); rem = rem ushr 7; buf.write(if (rem > 0) b or 0x80 else b) } while (rem > 0)
+        }
+        writeLd(1, tokenId.toByteArray(Charsets.UTF_8))
+        writeLd(2, requestHash)
+        writeLd(3, nonce)
+        writeLd(4, sig)
+        writeVarint(5, seq)
+        return buf.toByteArray()
+    }
 
     /** Stable, non-PII instance id persisted across runs. */
     private fun stableInstanceId(): String {

@@ -5,10 +5,11 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import android.util.Base64
+import android.util.Log
 import org.json.JSONObject
 
 /** Minted trust session returned by VerifyAttestation. */
-data class TrustSession(val accepted: Boolean, val tokenId: String, val rejectionReason: String)
+data class TrustSession(val accepted: Boolean, val tokenId: String, val signedToken: ByteArray, val rejectionReason: String)
 
 /** Server decision after validating a request proof. */
 data class ProofDecision(val decision: String, val reason: String)
@@ -63,9 +64,14 @@ class KsealTrustClient(
         // the snake_case proto names.
         val obj = JSONObject(String(resp, Charsets.UTF_8))
         val token = obj.optJSONObject("trustToken")?.optString("tokenId").orEmpty()
+        // signedToken is base64-encoded in the JSON response (protojson bytes field).
+        val signedTokenB64 = obj.optString("signedToken", "")
+        val signedTokenBytes = if (signedTokenB64.isNotEmpty())
+            Base64.decode(signedTokenB64, Base64.DEFAULT) else ByteArray(0)
         return TrustSession(
             accepted = obj.optBoolean("accepted", false),
             tokenId = token,
+            signedToken = signedTokenBytes,
             rejectionReason = obj.optString("rejectionReason"),
         )
     }
@@ -81,13 +87,20 @@ class KsealTrustClient(
     }
 
     private fun post(method: String, body: ByteArray, mediaType: okhttp3.MediaType, auth: Boolean): ByteArray {
+        val url = "$baseUrl/kseal.v1.$method"
+        val bodyStr = if (mediaType.subtype == "json") String(body, Charsets.UTF_8) else "<binary ${body.size}b>"
+        Log.d("KsealTrustClient", "--> POST $url")
+        Log.d("KsealTrustClient", "--> body: $bodyStr")
         val builder = Request.Builder()
-            .url("$baseUrl/kseal.v1.$method")
+            .url(url)
             .post(body.toRequestBody(mediaType))
         if (auth && apiKey.isNotEmpty()) builder.header("Authorization", "Bearer $apiKey")
         http.newCall(builder.build()).execute().use { response ->
             val ct = response.body?.contentType()
             val bytes = response.body?.bytes() ?: ByteArray(0)
+            val respStr = if (ct?.subtype == "json") String(bytes, Charsets.UTF_8) else "<binary ${bytes.size}b>"
+            Log.d("KsealTrustClient", "<-- ${response.code} $method")
+            Log.d("KsealTrustClient", "<-- body: $respStr")
             if (!response.isSuccessful) {
                 throw RuntimeException("$method failed (${response.code}): ${String(bytes, Charsets.UTF_8)}")
             }
