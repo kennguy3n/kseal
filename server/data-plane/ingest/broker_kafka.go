@@ -297,17 +297,15 @@ func (b *KafkaBroker) Ack(n int) {
 	if n > len(b.pending) {
 		n = len(b.pending)
 	}
+	// Copy the popped records before reslicing, since copy() below overwrites
+	// the front of the same backing array.
 	recs := make([]*kgo.Record, n)
 	copy(recs, b.pending[:n])
-	// Rebuild the queue without the popped prefix so the backing array (and the
-	// committed records it referenced) can be released.
-	rest := make([]*kgo.Record, len(b.pending)-n)
-	copy(rest, b.pending[n:])
-	b.pending = rest
+	rest := b.pending[n:]
+	copy(b.pending, rest)
+	b.pending = b.pending[:len(rest)]
 	b.pendingMu.Unlock()
-	if len(recs) > 0 {
-		b.client.MarkCommitRecords(recs...)
-	}
+	b.client.MarkCommitRecords(recs...)
 }
 
 // consume runs the consumer-group read loop: poll, decode, hand off (with
@@ -337,15 +335,18 @@ func (b *KafkaBroker) consume(ctx context.Context) {
 				b.client.MarkCommitRecords(rec)
 				continue
 			}
+			// Enqueue the record in pending BEFORE handing it off on the
+			// channel. The receiver (Writer or test) may call Ack immediately
+			// upon receiving the event; if the record is not yet in pending,
+			// Ack pops the wrong record (or nothing), committing the wrong
+			// offset. Appending first guarantees the FIFO order in pending
+			// matches the hand-off order on the channel exactly.
+			b.pendingMu.Lock()
+			b.pending = append(b.pending, rec)
+			b.pendingMu.Unlock()
 			select {
 			case b.out <- e:
 				b.consumed.Add(ctx, 1, metric.WithAttributes(attribute.String("tenant", e.TenantID)))
-				// Do NOT commit here: the offset advances only once the Writer
-				// has persisted this record and calls Ack. Until then it stays
-				// in pending so a crash/outage redelivers it.
-				b.pendingMu.Lock()
-				b.pending = append(b.pending, rec)
-				b.pendingMu.Unlock()
 			case <-ctx.Done():
 				return
 			}

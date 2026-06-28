@@ -34,7 +34,7 @@ func zstdCompress(t *testing.T, b []byte) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer w.Close()
+	defer func() { _ = w.Close() }()
 	return w.EncodeAll(b, nil)
 }
 

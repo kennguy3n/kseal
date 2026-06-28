@@ -63,7 +63,7 @@ func TestWebhookServiceRejectsNonHTTPURL(t *testing.T) {
 	store, tn := newStore(t)
 	svc := NewService(store)
 	ctx := auth.WithTenant(context.Background(), tn.Id)
-	for _, url := range []string{"file:///etc/passwd", "gopher://x", "not-a-url"} {
+	for _, url := range []string{"file:///etc/passwd", "gopher://x", "not-a-url", "http://localhost:8080/hook"} {
 		_, err := svc.RegisterWebhook(ctx, connect.NewRequest(&ksealv1.RegisterWebhookRequest{TenantId: tn.Id, Url: url}))
 		if connect.CodeOf(err) != connect.CodeInvalidArgument {
 			t.Fatalf("Url=%q: expected InvalidArgument, got %v", url, err)

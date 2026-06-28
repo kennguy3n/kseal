@@ -136,14 +136,14 @@ class ContinuousProtectionTest {
     }
 
     @Test
-    fun escalationPullsKillSwitchOnlyWhenRiskElevated() {
-        // Clean → no escalation, kill switch not pulled.
+    fun reattestCycleAlwaysPullsKillSwitch() {
+        // Kill switch is always pulled regardless of risk level.
         val trusted = FakeTrustCore(level = TrustLevel.TRUSTED, decisionValue = Decision.ALLOW)
         val trustedProvider = CountingConfigProvider()
         newSdk(trusted, trustedProvider).runReattestCycle()
-        assertEquals(0, trustedProvider.fetchKillSwitchCount)
+        assertEquals(1, trustedProvider.fetchKillSwitchCount)
 
-        // Elevated → coverage rises: kill switch is pulled and applied.
+        // Elevated risk: kill switch is also pulled and applied.
         val risky = FakeTrustCore(level = TrustLevel.HIGH_RISK, decisionValue = Decision.DENY)
         val riskyProvider = CountingConfigProvider(killSwitch = ByteArray(8))
         newSdk(risky, riskyProvider).runReattestCycle()

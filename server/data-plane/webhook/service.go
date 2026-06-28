@@ -53,7 +53,7 @@ func (s *Service) RegisterWebhook(ctx context.Context, req *connect.Request[ksea
 	if err := requireTenant(ctx, req.Msg.TenantId); err != nil {
 		return nil, err
 	}
-	if err := safehttp.ValidateURL(req.Msg.Url); err != nil {
+	if err := safehttp.ValidateHTTPSURL(req.Msg.Url); err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 	wh, err := s.store.CreateWebhook(ctx, req.Msg.TenantId, req.Msg.Url, req.Msg.EventTypes)

@@ -3,7 +3,7 @@ using System.Text.Json;
 namespace Kseal.Desktop;
 
 /// <summary>Connection settings for the trust-session client.</summary>
-public sealed record TrustSessionConfig(Uri BaseUrl, string TenantId, string AppId, Platform Platform = Platform.Unspecified);
+public sealed record TrustSessionConfig(Uri BaseUrl, string TenantId, string AppId, string ApiKey = "", Platform Platform = Platform.Unspecified);
 
 /// <summary>
 /// <see cref="ITrustSessionClient"/> over the Connect protocol
@@ -110,6 +110,10 @@ public sealed class ConnectTrustSessionClient(TrustSessionConfig config, IHttpTr
             ["Connect-Protocol-Version"] = "1",
             ["Accept"] = contentType,
         };
+        if (!string.IsNullOrEmpty(config.ApiKey))
+        {
+            headers["Authorization"] = $"Bearer {config.ApiKey}";
+        }
         return transport.Post(url, headers, body);
     }
 }

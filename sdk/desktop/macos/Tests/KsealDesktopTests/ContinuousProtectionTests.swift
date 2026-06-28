@@ -113,10 +113,10 @@ final class ContinuousProtectionTests: XCTestCase {
         XCTAssertEqual(decision, .stepUp)
     }
 
-    func testEscalationPullsKillSwitchOnlyWhenRiskElevated() {
+    func testReattestCycleAlwaysPullsKillSwitch() {
         let trustedProvider = CountingConfigProvider()
         makeSDK(FakeTrustCore(level: .trusted, decisionValue: .allow), trustedProvider).runReattestCycle()
-        XCTAssertEqual(trustedProvider.fetchKillSwitchCount, 0)
+        XCTAssertEqual(trustedProvider.fetchKillSwitchCount, 1)
 
         let riskyProvider = CountingConfigProvider(killSwitch: Data(count: 8))
         makeSDK(FakeTrustCore(level: .highRisk, decisionValue: .deny), riskyProvider).runReattestCycle()

@@ -58,6 +58,21 @@ func ValidateURL(raw string) error {
 	return nil
 }
 
+// ValidateHTTPSURL is ValidateURL but additionally requires the https scheme.
+// Use it for tenant-controlled outbound destinations (webhooks, SIEM
+// connectors) where plaintext http would expose the payload and signing secret
+// to network observers.
+func ValidateHTTPSURL(raw string) error {
+	if err := ValidateURL(raw); err != nil {
+		return err
+	}
+	u, _ := url.Parse(raw)
+	if u.Scheme != "https" {
+		return fmt.Errorf("safehttp: url scheme must be https, got %q", u.Scheme)
+	}
+	return nil
+}
+
 // Option customises the Client/NewTransport defaults. The defaults are the
 // hardened ones (direct dial, resolved-IP guard, no proxy); options are purely
 // additive, so the zero set of options preserves the original behaviour.

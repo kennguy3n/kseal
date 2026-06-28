@@ -21,10 +21,11 @@ type ProcedurePolicy struct {
 	PlatformAdminRequired bool
 	RequiredScopes        []string
 	DeviceCredential      DeviceCredentialPolicy
+	FailClosed            bool
 }
 
 func (p ProcedurePolicy) public() bool {
-	return !p.AuthRequired && !p.TenantRequired && !p.PlatformAdminRequired && len(p.RequiredScopes) == 0 && p.DeviceCredential == DeviceCredentialNone
+	return !p.AuthRequired && !p.TenantRequired && !p.PlatformAdminRequired && len(p.RequiredScopes) == 0 && p.DeviceCredential == DeviceCredentialNone && !p.FailClosed
 }
 
 func ProcedurePolicies() map[string]ProcedurePolicy {
@@ -50,9 +51,9 @@ func ProcedurePolicies() map[string]ProcedurePolicy {
 		ksealv1connect.RegistryServiceCreateProtectionProfileProcedure: {AuthRequired: true, TenantRequired: true, RequiredScopes: []string{"policy:write"}},
 		ksealv1connect.RegistryServiceListProtectionProfilesProcedure:  {AuthRequired: true, TenantRequired: true, RequiredScopes: []string{"policy:read"}},
 
-		ksealv1connect.TrustServiceGetNonceProcedure:             {DeviceCredential: DeviceCredentialPublicNonce},
-		ksealv1connect.TrustServiceVerifyAttestationProcedure:    {DeviceCredential: DeviceCredentialPublicNonce},
-		ksealv1connect.TrustServiceValidateRequestProofProcedure: {DeviceCredential: DeviceCredentialTrustToken},
+		ksealv1connect.TrustServiceGetNonceProcedure:             {AuthRequired: true, TenantRequired: true, RequiredScopes: []string{"trust:write"}, FailClosed: true},
+		ksealv1connect.TrustServiceVerifyAttestationProcedure:    {AuthRequired: true, TenantRequired: true, RequiredScopes: []string{"trust:write"}, FailClosed: true},
+		ksealv1connect.TrustServiceValidateRequestProofProcedure: {TenantRequired: true, DeviceCredential: DeviceCredentialTrustToken, FailClosed: true},
 		ksealv1connect.ConfigServiceGetConfigProcedure:           {TenantRequired: true, DeviceCredential: DeviceCredentialAppSecret},
 		ksealv1connect.ConfigServiceGetPolicyProcedure:           {AuthRequired: true, TenantRequired: true, RequiredScopes: []string{"policy:read"}},
 		ksealv1connect.IngestServiceSubmitTelemetryProcedure:     {TenantRequired: true, DeviceCredential: DeviceCredentialTrustToken},

@@ -38,7 +38,7 @@ func TestE2EWebhook(t *testing.T) {
 		app := makeApp(t, store, tenant.Id, "com.kseal.webhook")
 
 		got := make(chan delivery, 4)
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			body, _ := io.ReadAll(r.Body)
 			got <- delivery{
 				body:      body,
@@ -93,7 +93,7 @@ func TestE2EWebhook(t *testing.T) {
 
 		var attempts int32
 		attemptCh := make(chan int, 8)
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			n := atomic.AddInt32(&attempts, 1)
 			attemptCh <- int(n)
 			w.WriteHeader(http.StatusInternalServerError) // always fail

@@ -105,9 +105,16 @@ func TestProxyOptIn(t *testing.T) {
 	}
 
 	c := &http.Client{Transport: tr}
-	_, err := c.Get("http://destination.example.com/path")
-	if !errors.Is(err, sentinel) {
-		t.Fatalf("expected the proxy func to be consulted (sentinel error), got %v", err)
+	resp, err := c.Get("http://destination.example.com/path")
+	if err != nil {
+		if resp != nil {
+			_ = resp.Body.Close()
+		}
+		if !errors.Is(err, sentinel) {
+			t.Fatalf("expected the proxy func to be consulted (sentinel error), got %v", err)
+		}
+	} else {
+		_ = resp.Body.Close()
 	}
 	if seen == nil || seen.Host != "destination.example.com" {
 		t.Fatalf("proxy func saw unexpected request URL: %v", seen)
@@ -147,7 +154,7 @@ func TestProxyDialReachesPrivateProxy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("request through private-address proxy failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("expected 204 from proxy, got %d", resp.StatusCode)
 	}
@@ -228,7 +235,7 @@ func TestClientDoesNotFollowRedirects(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusFound {
 		t.Fatalf("redirect was followed: got status %d, want 302", resp.StatusCode)
 	}

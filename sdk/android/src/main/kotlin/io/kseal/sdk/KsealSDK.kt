@@ -372,11 +372,9 @@ class KsealSDK internal constructor(
         // Baseline re-validation: refresh the signed config. The default
         // provider returns null and falls back to cache (no network).
         refreshConfig()
-        // Escalation: at MEDIUM_RISK or above, also pull + apply the latest
-        // kill switch so a server-driven forced degrade surfaces promptly.
-        if (level.code >= TrustLevel.MEDIUM_RISK.code) {
-            refreshKillSwitch()
-        }
+        // Always pull + apply the latest kill switch so a server-driven
+        // forced degrade surfaces promptly regardless of risk level.
+        refreshKillSwitch()
     }
 
     private fun shutdownScheduler() {

@@ -256,7 +256,7 @@ func (s *ClickHouseAnalyticsStore) Query(ctx context.Context, q Query) ([]Stored
 		span.RecordError(err)
 		return nil, fmt.Errorf("clickhouse: query: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanRows(rows)
 }
 
@@ -313,7 +313,7 @@ func (s *ClickHouseAnalyticsStore) ListEvents(ctx context.Context, q Query, limi
 		span.RecordError(err)
 		return Page{}, fmt.Errorf("clickhouse: list events: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out, err := scanRows(rows)
 	if err != nil {
 		return Page{}, err
@@ -333,7 +333,7 @@ func (s *ClickHouseAnalyticsStore) TenantIDs(ctx context.Context) ([]string, err
 	if err != nil {
 		return nil, fmt.Errorf("clickhouse: tenant ids: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []string
 	for rows.Next() {
 		var t string

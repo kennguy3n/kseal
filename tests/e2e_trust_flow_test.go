@@ -16,6 +16,7 @@ import (
 	"github.com/kennguy3n/kseal/server/data-plane/attestation"
 	"github.com/kennguy3n/kseal/server/data-plane/trust"
 	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
+	"github.com/kennguy3n/kseal/server/shared/auth"
 	appconfig "github.com/kennguy3n/kseal/server/shared/config"
 	kcrypto "github.com/kennguy3n/kseal/server/shared/crypto"
 )
@@ -75,10 +76,9 @@ const unknownTokenID = "00000000-0000-4000-8000-000000000000"
 
 func TestE2ETrustFlow(t *testing.T) {
 	requireHarness(t)
-	ctx := context.Background()
-
 	store := newStore(t)
 	tenant := makeTenant(t, store, "trust")
+	ctx := auth.WithTenant(context.Background(), tenant.Id)
 	app := makeApp(t, store, tenant.Id, "com.kseal.trustflow")
 	makeBuild(t, store, tenant.Id, app.Id)
 	// BLOCK enforcement so a single policy exercises ALLOW / STEP_UP / DENY by

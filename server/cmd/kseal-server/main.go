@@ -1,7 +1,7 @@
 // Command kseal-server is the unified kseal control-plane + data-plane server.
 // It loads config, connects to Postgres and Redis, runs migrations, builds every
 // service, and serves the six Connect APIs plus health and metrics endpoints
-// over h2c.
+// over HTTP/1 and HTTP/2 (h2c).
 package main
 
 import (
@@ -14,9 +14,6 @@ import (
 	"sync"
 	"syscall"
 	"time"
-
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
 
 	"github.com/kennguy3n/kseal/server/gen/kseal/v1/ksealv1connect"
 
@@ -46,7 +43,7 @@ import (
 func main() {
 	if err := run(); err != nil {
 		// Logger may not be up yet; stderr is the reliable sink.
-		os.Stderr.WriteString("fatal: " + err.Error() + "\n")
+		_, _ = os.Stderr.WriteString("fatal: " + err.Error() + "\n")
 		os.Exit(1)
 	}
 }
@@ -58,6 +55,9 @@ func run() error {
 	}
 	logger := middleware.NewLogger(cfg.LogLevel, cfg.Env)
 	logger.Info().Str("env", cfg.Env).Str("addr", cfg.HTTPAddr).Msg("starting kseal-server")
+	if cfg.UsingDevKEK() {
+		logger.Warn().Msg("using insecure development KEK; set KSEAL_KEK before production")
+	}
 
 	tel, err := telemetry.Setup("kseal-server", cfg.Env, telemetry.Options{
 		OTLPEndpoint:    cfg.OTLPEndpoint,
@@ -275,18 +275,34 @@ func run() error {
 		telemetry.Check{Name: "redis", Func: func(ctx context.Context) error { return rdb.Ping(ctx).Err() }},
 	))
 
-	handler := middleware.RequestID(middleware.CORS(cfg.CORSAllowedOrigins, mux))
+	handler := middleware.RequestID(
+		middleware.SecurityHeaders(cfg.TLSCertFile != "",
+			middleware.MaxBodySize(cfg.MaxRequestBodyBytes,
+				middleware.CORS(cfg.CORSAllowedOrigins, mux))))
+	var protocols http.Protocols
+	protocols.SetHTTP1(true)
+	protocols.SetUnencryptedHTTP2(true)
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           h2c.NewHandler(handler, &http2.Server{}),
+		Handler:           handler,
+		Protocols:         &protocols,
 		ReadHeaderTimeout: 10 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	errCh := make(chan error, 1)
 	go func() {
-		logger.Info().Str("addr", cfg.HTTPAddr).Msg("listening")
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			errCh <- err
+		if cfg.TLSCertFile != "" && cfg.TLSKeyFile != "" {
+			logger.Info().Str("addr", cfg.HTTPAddr).Msg("listening (TLS)")
+			if err := srv.ListenAndServeTLS(cfg.TLSCertFile, cfg.TLSKeyFile); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				errCh <- err
+			}
+		} else {
+			logger.Info().Str("addr", cfg.HTTPAddr).Msg("listening")
+			if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				errCh <- err
+			}
 		}
 	}()
 

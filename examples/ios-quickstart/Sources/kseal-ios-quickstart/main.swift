@@ -70,6 +70,7 @@ struct KsealTrustClient {
     let baseURL: URL
     let tenantId: String
     let appId: String
+    let apiKey: String
 
     /// Builds the RPC URL by string. Connect paths contain a '/' (Service/Method);
     /// `appendingPathComponent` is meant for a single segment and percent-encodes
@@ -91,6 +92,7 @@ struct KsealTrustClient {
         var req = URLRequest(url: rpcURL(method))
         req.httpMethod = "POST"
         req.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        if !apiKey.isEmpty { req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization") }
         req.httpBody = body
         let sem = DispatchSemaphore(value: 0)
         var out: Data?; var status = 0; var err: Error?; var respCT: String?
@@ -235,7 +237,7 @@ print("[continuous] started=\(started) (requires policy with reattest_interval_s
 sdk.onAppForeground()
 print("[reattest] onAppForeground cycle triggered")
 
-let client = KsealTrustClient(baseURL: baseURL, tenantId: tenantId, appId: appId)
+let client = KsealTrustClient(baseURL: baseURL, tenantId: tenantId, appId: appId, apiKey: apiKey)
 let provider: AttestationTokenProvider = DevAttestationTokenProvider()
 
 do {

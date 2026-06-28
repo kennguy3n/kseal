@@ -58,7 +58,7 @@ func (s *Service) RegisterConnector(ctx context.Context, req *connect.Request[ks
 	if req.Msg.AuthSecret == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("auth_secret required"))
 	}
-	if err := safehttp.ValidateURL(req.Msg.Endpoint); err != nil {
+	if err := safehttp.ValidateHTTPSURL(req.Msg.Endpoint); err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 	c, err := s.store.CreateConnector(ctx, CreateConnectorInput{

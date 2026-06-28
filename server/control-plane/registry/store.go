@@ -187,6 +187,7 @@ type Store interface {
 	CreateAPIKey(ctx context.Context, tenantID, name string, scopes []string) (plaintext string, rec *APIKeyRecord, err error)
 	ValidateAPIKey(ctx context.Context, plaintext string) (*auth.Principal, error)
 	RevokeAPIKey(ctx context.Context, tenantID, keyID string) error
+	RotateAPIKey(ctx context.Context, tenantID, keyID string) (plaintext string, rec *APIKeyRecord, err error)
 
 	// Signing keys.
 	CreateSigningKey(ctx context.Context, tenantID string) (*SigningKey, error)
@@ -202,8 +203,8 @@ type Store interface {
 
 	// Trust sessions.
 	CreateTrustSession(ctx context.Context, s *TrustSession) error
-	GetTrustSession(ctx context.Context, tokenID string) (*TrustSession, error)
-	ConsumeSequence(ctx context.Context, tokenID string, seq int64) error
+	GetTrustSession(ctx context.Context, tenantID, tokenID string) (*TrustSession, error)
+	ConsumeSequence(ctx context.Context, tenantID, tokenID string, seq int64) error
 	RevokeTrustSession(ctx context.Context, tenantID, tokenID string) error
 	// RecordFailedAttestation persists a non-minting attestation outcome
 	// (status 'failed') so the dashboard can report attestation failures. It is

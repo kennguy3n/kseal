@@ -68,8 +68,8 @@ func (l *RedisRateLimiter) Allow(ctx context.Context, key string) (bool, error) 
 // AllowN consumes cost tokens for key.
 func (l *RedisRateLimiter) AllowN(ctx context.Context, key string, cost int) (bool, error) {
 	now := float64(time.Now().UnixNano()) / 1e9
-	tokensKey := fmt.Sprintf("%s:{%s}:tokens", l.prefix, key)
-	tsKey := fmt.Sprintf("%s:{%s}:ts", l.prefix, key)
+	tokensKey := l.prefix + ":{" + key + "}:tokens"
+	tsKey := l.prefix + ":{" + key + "}:ts"
 	res, err := tokenBucketScript.Run(ctx, l.client,
 		[]string{tokensKey, tsKey},
 		l.rate, l.capacity, now, cost).Int()
