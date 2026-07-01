@@ -14,6 +14,7 @@ package risk
 
 import (
 	"math"
+	"strings"
 
 	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
 )
@@ -241,6 +242,7 @@ func Level(score uint32, thresholds map[string]uint32) ksealv1.TrustLevel {
 }
 
 func levelByName(name string) ksealv1.TrustLevel {
+	name = strings.ToUpper(name)
 	switch name {
 	case "TRUSTED", "TRUST_LEVEL_TRUSTED":
 		return ksealv1.TrustLevel_TRUST_LEVEL_TRUSTED

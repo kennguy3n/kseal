@@ -5,6 +5,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import android.util.Base64
+import android.util.Log
 import org.json.JSONObject
 
 /** Minted trust session returned by VerifyAttestation. */
@@ -47,6 +48,7 @@ class KsealTrustClient(
         buildHash: String,
         instanceId: String,
         attestationToken: ByteArray,
+        riskBits: Long = 0,
     ): TrustSession {
         val body = JSONObject()
             .put("tenant_id", tenantId)
@@ -55,8 +57,10 @@ class KsealTrustClient(
             .put("nonce", b64(nonce))
             .put("build_hash", buildHash)
             .put("instance_id", instanceId)
+            .put("risk_bitset", riskBits.toString())
             .put("platform_attestation_token", b64(attestationToken))
             .toString()
+        Log.d("KsealTrustClient", "VerifyAttestation body: $body")
         val resp = post("TrustService/VerifyAttestation", body.toByteArray(), json, auth = false)
         // Connect serializes proto messages as JSON with camelCase field names
         // (protojson default), so read trustToken/tokenId/rejectionReason — not

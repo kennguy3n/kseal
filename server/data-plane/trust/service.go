@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -275,6 +276,7 @@ func (s *Service) VerifyAttestation(ctx context.Context, req *connect.Request[ks
 	fused = s.applyFleetGuard(m.TenantId, m.AppId, m.BuildHash, s.edgeRegion(req.Header()), fused, span)
 	score := risk.Score(fused, parseWeights(policy))
 	level := risk.Level(score, thresholds)
+	log.Printf("[VerifyAttestation] riskBitset=%d fused=%x score=%d level=%v thresholds=%q policy=%v", m.RiskBitset, fused, score, level, thresholds, policy)
 	nextChecks := risk.NextChecks(level)
 	scope := capabilityScope(level)
 
@@ -398,6 +400,7 @@ func (s *Service) ValidateRequestProof(ctx context.Context, req *connect.Request
 	} else if perr != nil && !errors.Is(perr, registry.ErrNotFound) {
 		span.RecordError(perr)
 	}
+	log.Printf("[ValidateRequestProof] riskLevel=%v mode=%v decision=%v", sess.RiskLevel, mode, risk.Decision(ksealv1.TrustLevel(sess.RiskLevel), mode))
 	decision := risk.Decision(ksealv1.TrustLevel(sess.RiskLevel), mode)
 	s.recordCanaryHealth(sess.TenantID, sess.AppID, sess.InstanceID, decision)
 	return connect.NewResponse(&ksealv1.RequestProofResult{

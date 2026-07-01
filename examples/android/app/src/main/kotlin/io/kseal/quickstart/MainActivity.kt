@@ -85,6 +85,7 @@ class MainActivity : AppCompatActivity() {
                 buildHash = "sha256:dev-build",
                 instanceId = stableInstanceId(),
                 attestationToken = token,
+                riskBits = risk.riskBits,
             )
 
             if (!session.accepted) {
