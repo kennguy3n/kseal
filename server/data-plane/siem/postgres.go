@@ -111,7 +111,7 @@ func (s *PostgresConnectorStore) ListConnectors(ctx context.Context, tenantID st
 		}
 		defer rows.Close()
 		for rows.Next() {
-			c, _, err := scanConnector(rows)
+			c, err := scanConnector(rows)
 			if err != nil {
 				return err
 			}
@@ -203,7 +203,7 @@ func (s *PostgresConnectorStore) create(ctx context.Context, in CreateConnectorI
 			id, in.TenantID, int32(in.Kind), in.Endpoint, secretRef(id), sealed, int32(in.Format),
 			allow, in.SentinelDcrImmutableID, in.SentinelStreamName,
 			in.ElasticIndex, in.SplunkIndex, in.SplunkSourcetype)
-		c, _, err = scanConnector(row)
+		c, err = scanConnector(row)
 		return err
 	})
 	if err != nil {
@@ -217,7 +217,7 @@ type scannable interface {
 	Scan(dest ...any) error
 }
 
-func scanConnector(row scannable) (*ksealv1Connector, []byte, error) {
+func scanConnector(row scannable) (*ksealv1Connector, error) {
 	c := &ksealv1Connector{}
 	var kind, format int32
 	if err := row.Scan(
@@ -225,11 +225,11 @@ func scanConnector(row scannable) (*ksealv1Connector, []byte, error) {
 		&c.FieldAllowList, &c.IsActive, &c.SentinelDcrImmutableId, &c.SentinelStreamName,
 		&c.ElasticIndex, &c.SplunkIndex, &c.SplunkSourcetype, &c.CreatedAt,
 	); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	c.Kind = ksealKind(kind)
 	c.Format = ksealFormat(format)
-	return c, nil, nil
+	return c, nil
 }
 
 func scanConnectorWithSecret(row scannable) (*ksealv1Connector, []byte, error) {

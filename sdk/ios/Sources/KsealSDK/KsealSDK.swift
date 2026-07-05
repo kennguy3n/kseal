@@ -298,10 +298,9 @@ public final class KsealSDK {
     }
 
     /// One re-attestation cycle: re-run probes, recompute and surface the trust
-    /// decision, re-validate the signed config, and — as coverage rises with
-    /// risk (mirroring the server's NextChecks escalation) — pull the latest
-    /// kill switch when the level reaches `.mediumRisk`. Internal so tests can
-    /// drive it directly without the timer.
+    /// decision, re-validate the signed config, and always pull the latest kill
+    /// switch so a server-driven forced degrade surfaces promptly regardless of
+    /// risk level. Internal so tests can drive it directly without the timer.
     func runReattestCycle() {
         guard let assessment = try? evaluateRisk() else { return }
         // One core read yields a consistent (level, decision) pair even if a
@@ -313,11 +312,9 @@ public final class KsealSDK {
         // Baseline re-validation: refresh the signed config (default provider
         // returns nil and falls back to cache — no network).
         refreshConfig()
-        // Escalation: at .mediumRisk or above, also pull + apply the latest kill
-        // switch so a server-driven forced degrade surfaces promptly.
-        if level.rawValue >= TrustLevel.mediumRisk.rawValue {
-            _ = refreshKillSwitch()
-        }
+        // Always pull + apply the latest kill switch so a server-driven
+        // forced degrade surfaces promptly regardless of risk level.
+        _ = refreshKillSwitch()
     }
 
     // MARK: - Internals

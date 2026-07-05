@@ -158,7 +158,7 @@ func TestAppAttestAcceptsGenuineKey(t *testing.T) {
 
 	// Attested per-app key in the Secure Enclave.
 	leafKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	leafPoint := elliptic.Marshal(elliptic.P256(), leafKey.PublicKey.X, leafKey.PublicKey.Y)
+	leafPoint := elliptic.Marshal(elliptic.P256(), leafKey.PublicKey.X, leafKey.PublicKey.Y) //nolint:staticcheck // SA1019: test helper, elliptic.Marshal is fine for test fixtures
 	credID := sha256.Sum256(leafPoint)
 
 	appID := "TEAMID.com.x"

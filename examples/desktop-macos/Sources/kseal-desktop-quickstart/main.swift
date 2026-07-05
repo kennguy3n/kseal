@@ -15,6 +15,7 @@ import KsealDesktop
 // Config via env so the sample is copy-paste runnable; sensible local defaults.
 let tenantId = ProcessInfo.processInfo.environment["KSEAL_TENANT"] ?? "acme"
 let appId = ProcessInfo.processInfo.environment["KSEAL_APP"] ?? "com.acme.app"
+let apiKey = ProcessInfo.processInfo.environment["KSEAL_API_KEY"] ?? ""
 let baseURLString = ProcessInfo.processInfo.environment["KSEAL_ENDPOINT"] ?? "http://localhost:8080"
 
 guard let baseURL = URL(string: baseURLString) else {
@@ -42,7 +43,7 @@ let assessment = try kseal.evaluateRisk()
 print("[risk] trustLevel=\(assessment.trustLevel) score=\(assessment.score) confidence=\(assessment.confidence) clean=\(assessment.isClean)")
 
 // 3. Establish a trust session (the SDK's only network call).
-let client = ConnectTrustSessionClient(config: .init(baseURL: baseURL, tenantId: tenantId, appId: appId))
+let client = ConnectTrustSessionClient(config: .init(baseURL: baseURL, tenantId: tenantId, appId: appId, apiKey: apiKey))
 do {
     let session = try kseal.establishTrustSession(using: client)
     if session.accepted {

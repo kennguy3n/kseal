@@ -69,7 +69,7 @@ make docker-down        # use `make docker-clean` to also drop the volume
 | Service | Plane | Auth | Notes |
 |---|---|---|---|
 | `RegistryService` | Control | **Scoped API key** (`Authorization: Bearer ksk_…`) | Tenants, apps, builds, policies, webhooks; tenant APIs require tenant binding and scopes, while tenant create/list require platform-admin credentials |
-| `TrustService` | Device | Public nonce/attestation entrypoints, then trust-token proof | `GetNonce` → `VerifyAttestation` require a known app; `ValidateRequestProof` requires the issued trust token |
+| `TrustService` | Device | Scoped API key for `GetNonce`/`VerifyAttestation`; trust-token proof for `ValidateRequestProof` | `GetNonce` → `VerifyAttestation` require a known app and API key; `ValidateRequestProof` requires the issued trust token |
 | `ConfigService` | Device / control | Device credential for `GetConfig`; scoped API key for `GetPolicy` | Signed, cacheable policy config |
 | `IngestService` | Device | Trust-token/device credential | zstd-compressed telemetry batches; request-body `tenant_id` is a claim, not authority |
 | `QueryService` | Control | Scoped API key (`query:read`) | Dashboard overview, event listing, trust stats |
@@ -157,12 +157,13 @@ curl -s -o /dev/null -w '%{http_code}\n' \
   -H "Content-Type: application/json" -d '{}'      # => 401
 ```
 
-Start the public pre-attestation trust flow (device plane — nonce/attestation
-are public entrypoints, but the tenant/app must already exist):
+Start the pre-attestation trust flow (device plane — `GetNonce` and
+`VerifyAttestation` require a scoped API key; the tenant/app must already exist):
 
 ```bash
 curl -fsS localhost:8080/kseal.v1.TrustService/GetNonce \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ksk_…" \
   -d '{"tenant_id":"<tenant-uuid>","app_id":"<app-uuid>"}'
 ```
 

@@ -152,6 +152,8 @@ func (s *Service) resolvePolicy(ctx context.Context, m *ksealv1.ConfigRequest) (
 		return active, false, nil
 	}
 	cand, err := s.store.GetPolicy(ctx, m.TenantId, policyID)
+	// Fail-safe: a canary lookup error degrades to the active policy rather
+	// than failing the config response (same pattern as resolveKillSwitch).
 	if err != nil || cand == nil {
 		return active, false, nil
 	}

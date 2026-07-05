@@ -65,10 +65,9 @@ Expected output (ids will differ):
 ## Option B — curl against a live server
 
 `VerifyAttestation` needs a real Play Integrity / App Attest token, so the curl
-script focuses on the calls you can drive over HTTP: health, `GetNonce`, and the
-authenticated `QueryService` reads (where trust-token validation shows up as
-trust-session stats). It prints the request-body shapes for the attestation and
-proof RPCs for reference.
+script focuses on the calls you can drive over HTTP: health, `GetNonce`
+(authenticated), and the `QueryService` reads. It prints the request-body shapes
+for the attestation and proof RPCs for reference.
 
 ```bash
 cd examples/backend-quickstart

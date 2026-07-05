@@ -55,13 +55,15 @@ case "${KSEAL_OBFUSCATE_STRINGS:-0}" in
 esac
 
 echo "[build-rust-android] cargo-ndk -> $JNILIBS_DIR"
-cd "$RUST_CORE"
-cargo ndk \
+# Run from the Rust workspace root so cargo-ndk finds Cargo.toml. cargo-ndk does
+# not support --manifest-path (it delegates to cargo, which changes the target
+# directory resolution), so we cd into $RUST_CORE instead.
+(cd "$RUST_CORE" && cargo ndk \
     -t arm64-v8a \
     -t armeabi-v7a \
     -t x86_64 \
     -o "$JNILIBS_DIR" \
-    build --release -p kseal-ffi ${FEATURE_ARGS[@]+"${FEATURE_ARGS[@]}"}
+    build --release -p kseal-ffi ${FEATURE_ARGS[@]+"${FEATURE_ARGS[@]}"})
 
 echo "[build-rust-android] done. ABIs:"
 ls -1 "$JNILIBS_DIR"

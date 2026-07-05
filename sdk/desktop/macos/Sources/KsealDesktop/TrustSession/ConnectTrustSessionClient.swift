@@ -6,13 +6,16 @@ public struct TrustSessionConfig: Sendable {
     public var baseURL: URL
     public var tenantId: String
     public var appId: String
+    /// Scoped API key sent as `Authorization: Bearer <key>` on every trust RPC.
+    public var apiKey: String
     /// Reported platform discriminant (see `Platform`).
     public var platform: Platform
 
-    public init(baseURL: URL, tenantId: String, appId: String, platform: Platform = .desktopMac) {
+    public init(baseURL: URL, tenantId: String, appId: String, apiKey: String = "", platform: Platform = .desktopMac) {
         self.baseURL = baseURL
         self.tenantId = tenantId
         self.appId = appId
+        self.apiKey = apiKey
         self.platform = platform
     }
 }
@@ -112,11 +115,14 @@ public final class ConnectTrustSessionClient: TrustSessionClient {
         let url = config.baseURL
             .appendingPathComponent(Self.trustService)
             .appendingPathComponent(method)
-        let headers = [
+        var headers = [
             "Content-Type": contentType,
             "Connect-Protocol-Version": "1",
             "Accept": contentType,
         ]
+        if !config.apiKey.isEmpty {
+            headers["Authorization"] = "Bearer \(config.apiKey)"
+        }
         return try transport.post(url: url, headers: headers, body: body)
     }
 }

@@ -169,7 +169,7 @@ func (e *Env) Seed(ctx context.Context) (SeedResult, error) {
 	if _, err := e.store.ActivatePolicy(ctx, tenant.Id, policy.Id); err != nil {
 		return SeedResult{}, fmt.Errorf("activate policy: %w", err)
 	}
-	apiKey, _, err := e.store.CreateAPIKey(ctx, tenant.Id, "quickstart-admin", []string{"control:read", "control:write"})
+	apiKey, _, err := e.store.CreateAPIKey(ctx, tenant.Id, "quickstart-admin", []string{"control:read", "control:write", "trust:write", "query:read"})
 	if err != nil {
 		return SeedResult{}, fmt.Errorf("create api key: %w", err)
 	}
@@ -197,6 +197,7 @@ type FlowResult struct {
 // RunTrustFlow drives GetNonce -> VerifyAttestation -> ValidateRequestProof for
 // one device profile and returns the resulting decisions.
 func (e *Env) RunTrustFlow(ctx context.Context, seed SeedResult, v Verdict) (FlowResult, error) {
+	ctx = auth.WithTenant(ctx, seed.TenantID)
 	nonceResp, err := e.trustSvc.GetNonce(ctx, connect.NewRequest(&ksealv1.NonceRequest{
 		TenantId: seed.TenantID, AppId: seed.AppID, Platform: ksealv1.Platform_PLATFORM_ANDROID,
 	}))

@@ -304,21 +304,21 @@ func runStoreSuite(t *testing.T, store Store) {
 		if err := store.CreateTrustSession(ctx, sess); err != nil {
 			t.Fatal(err)
 		}
-		if err := store.ConsumeSequence(ctx, sess.TokenID, 1); err != nil {
+		if err := store.ConsumeSequence(ctx, sess.TenantID, sess.TokenID, 1); err != nil {
 			t.Fatal(err)
 		}
-		if err := store.ConsumeSequence(ctx, sess.TokenID, 2); err != nil {
+		if err := store.ConsumeSequence(ctx, sess.TenantID, sess.TokenID, 2); err != nil {
 			t.Fatal(err)
 		}
 		// Replays / non-monotonic sequences are rejected.
-		if err := store.ConsumeSequence(ctx, sess.TokenID, 2); !errors.Is(err, ErrReplay) {
+		if err := store.ConsumeSequence(ctx, sess.TenantID, sess.TokenID, 2); !errors.Is(err, ErrReplay) {
 			t.Fatalf("expected replay, got %v", err)
 		}
-		if err := store.ConsumeSequence(ctx, sess.TokenID, 1); !errors.Is(err, ErrReplay) {
+		if err := store.ConsumeSequence(ctx, sess.TenantID, sess.TokenID, 1); !errors.Is(err, ErrReplay) {
 			t.Fatalf("expected replay on lower seq, got %v", err)
 		}
 		// Unknown/inactive sessions are reported as not-found, distinct from replay.
-		if err := store.ConsumeSequence(ctx, uuid.NewString(), 1); !errors.Is(err, ErrNotFound) {
+		if err := store.ConsumeSequence(ctx, a.Id, uuid.NewString(), 1); !errors.Is(err, ErrNotFound) {
 			t.Fatalf("expected not-found for unknown token, got %v", err)
 		}
 	})
@@ -344,7 +344,7 @@ func runStoreSuite(t *testing.T, store Store) {
 			go func() {
 				defer wg.Done()
 				<-start
-				if err := store.ConsumeSequence(ctx, sess.TokenID, 1); err == nil {
+				if err := store.ConsumeSequence(ctx, sess.TenantID, sess.TokenID, 1); err == nil {
 					mu.Lock()
 					wins++
 					mu.Unlock()

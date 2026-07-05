@@ -133,14 +133,36 @@ pub(crate) fn hook_present() -> i32 {
     }
 }
 
+/// `P_TRACED` flag from `<sys/proc.h>` — not exported by the `libc` crate.
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+const P_TRACED: i32 = 0x10;
+
+/// Minimal `#[repr(C)]` mirror of `struct kinfo_proc` — only the prefix up to
+/// `kp_proc.p_flag` is needed; the rest is opaque padding. The `libc` crate
+/// does not export this type on Darwin.
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+#[repr(C)]
+struct KinfoProc {
+    // struct extern_proc kp_proc:
+    //   union { struct proc *p_forw, *p_back; } p_un — 16 bytes on 64-bit
+    p_un: [u8; 16],
+    //   struct vmspace *p_vmspace — 8 bytes
+    p_vmspace: *mut libc::c_void,
+    //   struct sigacts *p_sigacts — 8 bytes
+    p_sigacts: *mut libc::c_void,
+    //   int p_flag
+    p_flag: i32,
+    // remaining fields are opaque
+}
+
 /// Darwin (macOS / iOS): test the `P_TRACED` flag via `sysctl(KERN_PROC)`.
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 pub(crate) fn debugger_present() -> i32 {
     // Safety: `info` is fully owned and sized; `sysctl` writes at most
     // `size` bytes into it and reports the real length back.
     unsafe {
-        let mut info: libc::kinfo_proc = std::mem::zeroed();
-        let mut size = std::mem::size_of::<libc::kinfo_proc>();
+        let mut info: KinfoProc = std::mem::zeroed();
+        let mut size = std::mem::size_of::<KinfoProc>();
         let mut mib: [libc::c_int; 4] = [
             libc::CTL_KERN,
             libc::KERN_PROC,
@@ -158,7 +180,7 @@ pub(crate) fn debugger_present() -> i32 {
         if rc != 0 {
             return UNAVAILABLE;
         }
-        if (info.kp_proc.p_flag & libc::P_TRACED) != 0 {
+        if (info.p_flag & P_TRACED) != 0 {
             PRESENT
         } else {
             CLEAN

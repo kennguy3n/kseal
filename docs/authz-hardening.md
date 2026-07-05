@@ -16,4 +16,4 @@ Tenant provisioning and tenant enumeration are platform-admin operations. `Creat
 
 ## Device-plane compatibility
 
-Public pre-attestation calls remain limited to nonce issuance and attestation verification, and both require a known app record. Config and telemetry calls must run under a validated tenant/device credential context; a request body `tenant_id` is treated as a claim, not authority. SDKs that previously called config or telemetry without a credential need to roll out app/trust-token credentials before enabling those flows.
+Pre-attestation calls (`GetNonce`, `VerifyAttestation`) require a scoped API key (`trust:write`) and a known app record. `ValidateRequestProof` requires a tenant-scoped context and the issued trust token. Config and telemetry calls must run under a validated tenant/device credential context; a request body `tenant_id` is treated as a claim, not authority. SDKs that previously called config or telemetry without a credential need to roll out app/trust-token credentials before enabling those flows.

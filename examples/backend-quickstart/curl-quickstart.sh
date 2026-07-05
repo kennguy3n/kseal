@@ -37,9 +37,10 @@ echo "== 1. Health =="
 curl -fsS "${ENDPOINT}/healthz"; echo
 curl -fsS "${ENDPOINT}/readyz"; echo
 
-echo "== 2. GetNonce (device-plane challenge; no auth) =="
+echo "== 2. GetNonce (device-plane challenge; API key required) =="
 rpc TrustService/GetNonce \
-  "{\"tenant_id\":\"${KSEAL_TENANT}\",\"app_id\":\"${KSEAL_APP}\",\"platform\":\"PLATFORM_ANDROID\"}"
+  "{\"tenant_id\":\"${KSEAL_TENANT}\",\"app_id\":\"${KSEAL_APP}\",\"platform\":\"PLATFORM_ANDROID\"}" \
+  -H "Authorization: Bearer ${KSEAL_API_KEY}"
 
 echo "== 3. QueryService reads (authenticated with the API key) =="
 echo "-- GetTenantOverview --"
@@ -62,6 +63,7 @@ or camelCase on input, and ALWAYS emits camelCase in responses (and int64 as a
 quoted string), e.g. GetNonce above returns {"nonce":"...","expiresAt":"..."}.
 
 POST /kseal.v1.TrustService/VerifyAttestation
+# Requires API key:  -H "Authorization: Bearer <key>"
 {
   "tenant_id": "<tenant>",
   "app_id": "<app>",
@@ -74,6 +76,7 @@ POST /kseal.v1.TrustService/VerifyAttestation
 # -> { "accepted": true, "trustToken": { "tokenId": "...", "riskLevel": "TRUST_LEVEL_TRUSTED", ... }, "signedToken": "<base64 Ed25519 JWT>" }
 
 POST /kseal.v1.TrustService/ValidateRequestProof
+# Requires API key:  -H "Authorization: Bearer <key>"
 {
   "trust_token_id": "<token_id>",
   "request_hash": "<base64 sha256 of the canonical request>",

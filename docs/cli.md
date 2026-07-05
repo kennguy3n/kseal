@@ -72,10 +72,12 @@ platform-admin operations. `CreateTenant` requires `platform:tenant:write`;
 as a platform admin, so a tenant API key cannot satisfy platform scopes
 accidentally.
 
-**Device-plane compatibility**: Public pre-attestation calls remain limited to
-nonce issuance and attestation verification, and both require a known app record.
-Config and telemetry calls must run under a validated tenant/device credential
-context; a request body `tenant_id` is treated as a claim, not authority.
+**Device-plane compatibility**: Pre-attestation calls (`GetNonce`,
+`VerifyAttestation`) require a scoped API key (`trust:write`) and a known app
+record. `ValidateRequestProof` requires a tenant-scoped context and the issued
+trust token. Config and telemetry calls must run under a validated
+tenant/device credential context; a request body `tenant_id` is treated as a
+claim, not authority.
 
 See `docs/authz-hardening.md` for the full authorization hardening model.
 

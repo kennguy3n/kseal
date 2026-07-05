@@ -37,7 +37,7 @@ class KsealTrustClient(
             .put("app_id", appId)
             .put("platform", "PLATFORM_ANDROID")
             .toString()
-        val resp = post("TrustService/GetNonce", body.toByteArray(), json, auth = false)
+        val resp = post("TrustService/GetNonce", body.toByteArray(), json, auth = true)
         val nonce = JSONObject(String(resp, Charsets.UTF_8)).getString("nonce")
         return Base64.decode(nonce, Base64.DEFAULT)
     }
@@ -60,8 +60,7 @@ class KsealTrustClient(
             .put("risk_bitset", riskBits.toString())
             .put("platform_attestation_token", b64(attestationToken))
             .toString()
-        Log.d("KsealTrustClient", "VerifyAttestation body: $body")
-        val resp = post("TrustService/VerifyAttestation", body.toByteArray(), json, auth = false)
+        val resp = post("TrustService/VerifyAttestation", body.toByteArray(), json, auth = true)
         // Connect serializes proto messages as JSON with camelCase field names
         // (protojson default), so read trustToken/tokenId/rejectionReason — not
         // the snake_case proto names.
@@ -85,7 +84,7 @@ class KsealTrustClient(
      * re-encode the signed structure. The response is a binary RequestProofResult.
      */
     fun validateRequestProof(proofBytes: ByteArray): ProofDecision {
-        val resp = post("TrustService/ValidateRequestProof", proofBytes, proto, auth = false)
+        val resp = post("TrustService/ValidateRequestProof", proofBytes, proto, auth = true)
         return parseDecision(resp)
     }
 

@@ -4,6 +4,7 @@
 package config
 
 import (
+	"bytes"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -21,6 +22,17 @@ type Config struct {
 	RedisDB     int
 	LogLevel    string
 	Env         string
+
+	// TLSCertFile and TLSKeyFile enable HTTPS when both are set. Sourced from
+	// KSEAL_TLS_CERT_FILE and KSEAL_TLS_KEY_FILE. When either is empty the
+	// server falls back to plaintext HTTP (h2c), which is appropriate for
+	// development behind a TLS-terminating reverse proxy.
+	TLSCertFile string
+	TLSKeyFile  string
+
+	// MaxRequestBodyBytes caps the size of a single request body (default
+	// 1 MiB). Sourced from KSEAL_MAX_BODY_BYTES.
+	MaxRequestBodyBytes int64
 
 	// KEK is the 32-byte key-encryption key used to protect signing-key private
 	// material at rest. Supplied base64-encoded via KSEAL_KEK. In non-prod
@@ -160,6 +172,8 @@ func Load() (*Config, error) {
 		RedisCAFile:          os.Getenv("KSEAL_REDIS_CA_FILE"),
 		RedisPassword:        os.Getenv("KSEAL_REDIS_PASSWORD"),
 		OTLPEndpoint:         strings.TrimSpace(os.Getenv("KSEAL_OTLP_ENDPOINT")),
+		TLSCertFile:          strings.TrimSpace(os.Getenv("KSEAL_TLS_CERT_FILE")),
+		TLSKeyFile:           strings.TrimSpace(os.Getenv("KSEAL_TLS_KEY_FILE")),
 	}
 
 	var err error
@@ -206,6 +220,10 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
+	if c.MaxRequestBodyBytes, err = int64Default("KSEAL_MAX_BODY_BYTES", 1<<20); err != nil {
+		return nil, err
+	}
+
 	c.FeatureFlags, err = parseFeatureFlags(os.Getenv("KSEAL_FEATURE_FLAGS"))
 	if err != nil {
 		return nil, err
@@ -241,6 +259,9 @@ func (c *Config) validate() error {
 	if c.RateLimitBurst <= 0 || c.RateLimitPerSecond <= 0 {
 		return errors.New("rate limit settings must be positive")
 	}
+	if (c.TLSCertFile == "") != (c.TLSKeyFile == "") {
+		return errors.New("KSEAL_TLS_CERT_FILE and KSEAL_TLS_KEY_FILE must both be set or both be empty")
+	}
 	return nil
 }
 
@@ -264,6 +285,12 @@ func loadKEK(isProd bool) ([]byte, error) {
 	// Deterministic development KEK. Never used when KSEAL_ENV is prod-like.
 	dev := []byte("kseal-dev-insecure-kek-32bytes!!")
 	return dev[:32], nil
+}
+
+// UsingDevKEK reports whether the KEK was derived from the hardcoded
+// development fallback rather than supplied via KSEAL_KEK.
+func (c *Config) UsingDevKEK() bool {
+	return c.KEK != nil && bytes.Equal(c.KEK, []byte("kseal-dev-insecure-kek-32bytes!!")[:32])
 }
 
 // loadDataPlane parses the default-off data-plane backend selection. Unknown
@@ -374,6 +401,18 @@ func floatDefault(key string, def float64) (float64, error) {
 		return 0, fmt.Errorf("%s: %w", key, err)
 	}
 	return f, nil
+}
+
+func int64Default(key string, def int64) (int64, error) {
+	v := os.Getenv(key)
+	if v == "" {
+		return def, nil
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("%s: %w", key, err)
+	}
+	return n, nil
 }
 
 func splitNonEmpty(s string) []string {

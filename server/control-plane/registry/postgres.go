@@ -161,7 +161,8 @@ func (s *PostgresStore) ListTenants(ctx context.Context, page Page) ([]*ksealv1.
 	if err := rows.Err(); err != nil {
 		return nil, "", err
 	}
-	return paginate(out, size, offset)
+	items, next := paginate(out, size, offset)
+	return items, next, nil
 }
 
 func (s *PostgresStore) UpdateTenant(ctx context.Context, in UpdateTenantInput) (*ksealv1.Tenant, error) {
@@ -260,7 +261,8 @@ func (s *PostgresStore) ListApps(ctx context.Context, tenantID string, page Page
 	if err != nil {
 		return nil, "", wrapPgErr(err)
 	}
-	return paginate(out, size, offset)
+	items, next := paginate(out, size, offset)
+	return items, next, nil
 }
 
 func (s *PostgresStore) SearchApps(ctx context.Context, tenantID, query string, page Page) ([]*ksealv1.App, string, error) {
@@ -304,7 +306,8 @@ func (s *PostgresStore) SearchApps(ctx context.Context, tenantID, query string, 
 	if err != nil {
 		return nil, "", wrapPgErr(err)
 	}
-	return paginate(out, size, offset)
+	items, next := paginate(out, size, offset)
+	return items, next, nil
 }
 
 // ---- Builds ----
@@ -376,7 +379,8 @@ func (s *PostgresStore) ListBuilds(ctx context.Context, tenantID, appID string, 
 	if err != nil {
 		return nil, "", wrapPgErr(err)
 	}
-	return paginate(out, size, offset)
+	items, next := paginate(out, size, offset)
+	return items, next, nil
 }
 
 // ---- Policies ----
@@ -645,6 +649,39 @@ func (s *PostgresStore) RevokeAPIKey(ctx context.Context, tenantID, keyID string
 	})
 }
 
+func (s *PostgresStore) RotateAPIKey(ctx context.Context, tenantID, keyID string) (string, *APIKeyRecord, error) {
+	gen, err := auth.GenerateAPIKey()
+	if err != nil {
+		return "", nil, err
+	}
+	rec := &APIKeyRecord{}
+	err = s.db.WithTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
+		var name string
+		var scopes []string
+		if err := tx.QueryRow(ctx,
+			`SELECT name, scopes FROM api_keys WHERE tenant_id = $1 AND key_id = $2 AND status = 'active'`,
+			tenantID, keyID).Scan(&name, &scopes); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx,
+			`UPDATE api_keys SET status = 'revoked', revoked_at = now() WHERE tenant_id = $1 AND key_id = $2`,
+			tenantID, keyID); err != nil {
+			return err
+		}
+		return tx.QueryRow(ctx, `
+			INSERT INTO api_keys (tenant_id, key_id, name, secret_hash, scopes)
+			VALUES ($1, $2, $3, $4, $5)
+			RETURNING id, tenant_id, key_id, name, scopes, status,
+			          EXTRACT(EPOCH FROM created_at)::bigint`,
+			tenantID, gen.KeyID, name, gen.Hash, scopes).Scan(
+			&rec.ID, &rec.TenantID, &rec.KeyID, &rec.Name, &rec.Scopes, &rec.Status, &rec.CreatedAt)
+	})
+	if err != nil {
+		return "", nil, wrapPgErr(err)
+	}
+	return gen.Plaintext, rec, nil
+}
+
 // ---- Signing keys ----
 
 func (s *PostgresStore) CreateSigningKey(ctx context.Context, tenantID string) (*SigningKey, error) {
@@ -882,14 +919,14 @@ func (s *PostgresStore) CreateTrustSession(ctx context.Context, sess *TrustSessi
 	}))
 }
 
-func (s *PostgresStore) GetTrustSession(ctx context.Context, tokenID string) (*TrustSession, error) {
+func (s *PostgresStore) GetTrustSession(ctx context.Context, tenantID, tokenID string) (*TrustSession, error) {
 	sess := &TrustSession{}
-	err := s.db.WithAdminTx(ctx, func(tx pgx.Tx) error {
+	err := s.db.WithTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `
 			SELECT token_id, tenant_id, app_id, build_hash, instance_id, policy_hash, risk_level,
 			       capability_scope, session_secret, last_sequence, status,
 			       EXTRACT(EPOCH FROM issued_at)::bigint, EXTRACT(EPOCH FROM expires_at)::bigint
-			FROM trust_sessions WHERE token_id = $1`, tokenID).Scan(
+			FROM trust_sessions WHERE tenant_id = $1 AND token_id = $2`, tenantID, tokenID).Scan(
 			&sess.TokenID, &sess.TenantID, &sess.AppID, &sess.BuildHash, &sess.InstanceID, &sess.PolicyHash,
 			&sess.RiskLevel, &sess.CapabilityScope, &sess.SessionSecret, &sess.LastSequence, &sess.Status,
 			&sess.IssuedAt, &sess.ExpiresAt)
@@ -903,21 +940,21 @@ func (s *PostgresStore) GetTrustSession(ctx context.Context, tokenID string) (*T
 // ConsumeSequence atomically enforces a strictly-increasing per-token sequence,
 // returning ErrReplay if seq does not advance. This is the anti-replay guard for
 // request proofs.
-func (s *PostgresStore) ConsumeSequence(ctx context.Context, tokenID string, seq int64) error {
-	return wrapPgErr(s.db.WithAdminTx(ctx, func(tx pgx.Tx) error {
+func (s *PostgresStore) ConsumeSequence(ctx context.Context, tenantID, tokenID string, seq int64) error {
+	return wrapPgErr(s.db.WithTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
 		// Distinguish a missing/inactive session (ErrNotFound) from a genuine
 		// replay (ErrReplay) so the contract matches MemStore.
 		var lastSeq int64
 		if err := tx.QueryRow(ctx,
-			`SELECT last_sequence FROM trust_sessions WHERE token_id = $1 AND status = 'active' FOR UPDATE`,
-			tokenID).Scan(&lastSeq); err != nil {
+			`SELECT last_sequence FROM trust_sessions WHERE tenant_id = $1 AND token_id = $2 AND status = 'active' FOR UPDATE`,
+			tenantID, tokenID).Scan(&lastSeq); err != nil {
 			return err // pgx.ErrNoRows -> ErrNotFound via wrapPgErr
 		}
 		if seq <= lastSeq {
 			return ErrReplay
 		}
 		if _, err := tx.Exec(ctx,
-			`UPDATE trust_sessions SET last_sequence = $2 WHERE token_id = $1`, tokenID, seq); err != nil {
+			`UPDATE trust_sessions SET last_sequence = $3 WHERE tenant_id = $1 AND token_id = $2`, tenantID, tokenID, seq); err != nil {
 			return err
 		}
 		return nil

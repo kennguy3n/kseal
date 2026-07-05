@@ -14,6 +14,7 @@ import (
 	"github.com/kennguy3n/kseal/server/control-plane/registry"
 	"github.com/kennguy3n/kseal/server/data-plane/attestation"
 	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
+	"github.com/kennguy3n/kseal/server/shared/auth"
 	appconfig "github.com/kennguy3n/kseal/server/shared/config"
 	"github.com/kennguy3n/kseal/server/shared/crypto"
 )
@@ -117,6 +118,7 @@ func setupServiceWithFlags(t *testing.T, res *attestation.Result, flags appconfi
 func TestTrustFlowEndToEnd(t *testing.T) {
 	svc, _, tn, app := setupService(t, &attestation.Result{Accepted: true, AppRecognized: true, DeviceIntegrity: true})
 	ctx := context.Background()
+	tenantCtx := auth.WithTenant(ctx, tn.Id)
 
 	nonceResp, err := svc.GetNonce(ctx, connect.NewRequest(&ksealv1.NonceRequest{TenantId: tn.Id, AppId: app.Id, Platform: ksealv1.Platform_PLATFORM_ANDROID}))
 	if err != nil {
@@ -145,7 +147,7 @@ func TestTrustFlowEndToEnd(t *testing.T) {
 		return p
 	}
 
-	r1, err := svc.ValidateRequestProof(ctx, connect.NewRequest(proof(1)))
+	r1, err := svc.ValidateRequestProof(tenantCtx, connect.NewRequest(proof(1)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +156,7 @@ func TestTrustFlowEndToEnd(t *testing.T) {
 	}
 
 	// Replay of sequence 1 -> deny.
-	rReplay, err := svc.ValidateRequestProof(ctx, connect.NewRequest(proof(1)))
+	rReplay, err := svc.ValidateRequestProof(tenantCtx, connect.NewRequest(proof(1)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +167,7 @@ func TestTrustFlowEndToEnd(t *testing.T) {
 	// Bad signature -> deny.
 	bad := proof(2)
 	bad.AppInstanceSignature = []byte("garbage")
-	rBad, _ := svc.ValidateRequestProof(ctx, connect.NewRequest(bad))
+	rBad, _ := svc.ValidateRequestProof(tenantCtx, connect.NewRequest(bad))
 	if rBad.Msg.Decision != ksealv1.RequestProofResult_DECISION_DENY {
 		t.Fatal("bad signature not denied")
 	}
@@ -178,7 +180,7 @@ type failingSessionStore struct {
 	registry.Store
 }
 
-func (failingSessionStore) GetTrustSession(context.Context, string) (*registry.TrustSession, error) {
+func (failingSessionStore) GetTrustSession(context.Context, string, string) (*registry.TrustSession, error) {
 	return nil, errors.New("simulated 22P02 invalid_text_representation")
 }
 

@@ -26,6 +26,7 @@ import (
 	"github.com/kennguy3n/kseal/server/data-plane/guardrails"
 	ksealv1 "github.com/kennguy3n/kseal/server/gen/kseal/v1"
 	"github.com/kennguy3n/kseal/server/gen/kseal/v1/ksealv1connect"
+	"github.com/kennguy3n/kseal/server/shared/auth"
 	appconfig "github.com/kennguy3n/kseal/server/shared/config"
 	"github.com/kennguy3n/kseal/server/shared/crypto"
 	"github.com/kennguy3n/kseal/server/shared/risk"
@@ -365,7 +366,11 @@ func (s *Service) ValidateRequestProof(ctx context.Context, req *connect.Request
 	if _, perr := uuid.Parse(m.TrustTokenId); perr != nil {
 		return deny("unknown trust token"), nil
 	}
-	sess, err := s.store.GetTrustSession(ctx, m.TrustTokenId)
+	tenantID, terr := auth.TenantFrom(ctx)
+	if terr != nil || tenantID == "" {
+		return deny("tenant credential required"), nil
+	}
+	sess, err := s.store.GetTrustSession(ctx, tenantID, m.TrustTokenId)
 	if errors.Is(err, registry.ErrNotFound) {
 		return deny("unknown trust token"), nil
 	}
@@ -384,7 +389,7 @@ func (s *Service) ValidateRequestProof(ctx context.Context, req *connect.Request
 		return deny("invalid proof signature"), nil
 	}
 
-	if err := s.store.ConsumeSequence(ctx, m.TrustTokenId, m.MonotonicSequence); err != nil {
+	if err := s.store.ConsumeSequence(ctx, tenantID, m.TrustTokenId, m.MonotonicSequence); err != nil {
 		if errors.Is(err, registry.ErrReplay) {
 			return deny("sequence replay"), nil
 		}

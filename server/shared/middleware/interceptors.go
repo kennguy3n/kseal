@@ -134,7 +134,7 @@ func isNilResponse(resp connect.AnyResponse) bool {
 	}
 	v := reflect.ValueOf(resp)
 	switch v.Kind() {
-	case reflect.Ptr, reflect.Interface, reflect.Map, reflect.Slice, reflect.Chan, reflect.Func:
+	case reflect.Pointer, reflect.Interface, reflect.Map, reflect.Slice, reflect.Chan, reflect.Func:
 		return v.IsNil()
 	default:
 		return false
@@ -215,7 +215,9 @@ func (i *Interceptors) authn() connect.UnaryInterceptorFunc {
 	}
 }
 
-// rateLimit enforces a per-tenant token bucket. It fails open on limiter errors.
+// rateLimit enforces a per-tenant token bucket. It fails open on limiter errors
+// for non-security-critical endpoints but fails closed when the procedure's
+// policy has FailClosed set.
 func (i *Interceptors) rateLimit() connect.UnaryInterceptorFunc {
 	return func(next connect.UnaryFunc) connect.UnaryFunc {
 		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
@@ -228,6 +230,17 @@ func (i *Interceptors) rateLimit() connect.UnaryInterceptorFunc {
 			}
 			allowed, lerr := i.Limiter.Allow(ctx, tenant)
 			if lerr != nil {
+				policies := i.Policies
+				if policies == nil {
+					policies = ProcedurePolicies()
+				}
+				policy, perr := policyFor(req.Spec().Procedure, policies)
+				if perr == nil && policy.FailClosed {
+					if i.Metrics != nil {
+						i.Metrics.RateLimited.WithLabelValues(tenant).Inc()
+					}
+					return nil, connect.NewError(connect.CodeResourceExhausted, errors.New("rate limiter unavailable"))
+				}
 				i.Logger.Warn().Err(lerr).Str("tenant", tenant).Msg("rate limiter degraded; failing open")
 			} else if !allowed {
 				if i.Metrics != nil {

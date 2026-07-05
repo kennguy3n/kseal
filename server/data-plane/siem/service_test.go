@@ -95,7 +95,7 @@ func TestServiceRejectsMissingSecret(t *testing.T) {
 func TestServiceRejectsNonHTTPEndpoint(t *testing.T) {
 	svc := newSvc(t)
 	ctx := auth.WithTenant(context.Background(), "t-1")
-	for _, ep := range []string{"file:///etc/passwd", "ftp://splunk", "splunk.example"} {
+	for _, ep := range []string{"file:///etc/passwd", "ftp://splunk", "splunk.example", "http://splunk.example:8088"} {
 		req := registerReq()
 		req.Msg.Endpoint = ep
 		_, err := svc.RegisterConnector(ctx, req)

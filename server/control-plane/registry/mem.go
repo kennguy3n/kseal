@@ -100,7 +100,7 @@ func (m *MemStore) GetTenant(_ context.Context, id string) (*ksealv1.Tenant, err
 func (m *MemStore) ListTenants(_ context.Context, page Page) ([]*ksealv1.Tenant, string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	var all []*ksealv1.Tenant
+	all := make([]*ksealv1.Tenant, 0, len(m.tenants))
 	for _, t := range m.tenants {
 		all = append(all, cloneTenant(t))
 	}
@@ -466,6 +466,27 @@ func (m *MemStore) RevokeAPIKey(_ context.Context, tenantID, keyID string) error
 	return nil
 }
 
+func (m *MemStore) RotateAPIKey(_ context.Context, tenantID, keyID string) (string, *APIKeyRecord, error) {
+	gen, err := auth.GenerateAPIKey()
+	if err != nil {
+		return "", nil, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	old, ok := m.apiKeys[keyID]
+	if !ok || old.rec.TenantID != tenantID || old.rec.Status != "active" {
+		return "", nil, ErrNotFound
+	}
+	old.rec.Status = "revoked"
+	rec := &APIKeyRecord{
+		ID: newID(), TenantID: tenantID, KeyID: gen.KeyID,
+		Name: old.rec.Name, Scopes: append([]string(nil), old.rec.Scopes...),
+		Status: "active", CreatedAt: nowUnix(),
+	}
+	m.apiKeys[gen.KeyID] = &memAPIKey{rec: rec, secretHash: gen.Hash}
+	return gen.Plaintext, rec, nil
+}
+
 // ---- Signing keys ----
 
 func (m *MemStore) CreateSigningKey(_ context.Context, tenantID string) (*SigningKey, error) {
@@ -590,11 +611,11 @@ func (m *MemStore) CreateTrustSession(_ context.Context, sess *TrustSession) err
 	return nil
 }
 
-func (m *MemStore) GetTrustSession(_ context.Context, tokenID string) (*TrustSession, error) {
+func (m *MemStore) GetTrustSession(_ context.Context, tenantID, tokenID string) (*TrustSession, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	s, ok := m.sessions[tokenID]
-	if !ok {
+	if !ok || s.TenantID != tenantID {
 		return nil, ErrNotFound
 	}
 	cp := *s
@@ -603,11 +624,11 @@ func (m *MemStore) GetTrustSession(_ context.Context, tokenID string) (*TrustSes
 	return &cp, nil
 }
 
-func (m *MemStore) ConsumeSequence(_ context.Context, tokenID string, seq int64) error {
+func (m *MemStore) ConsumeSequence(_ context.Context, tenantID, tokenID string, seq int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	s, ok := m.sessions[tokenID]
-	if !ok || s.Status != "active" {
+	if !ok || s.TenantID != tenantID || s.Status != "active" {
 		return ErrNotFound
 	}
 	if seq <= s.LastSequence {

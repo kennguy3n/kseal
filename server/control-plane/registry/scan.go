@@ -67,11 +67,11 @@ func intsToEventTypes(vals []int32) []ksealv1.EventType {
 
 // paginate trims an over-fetched page (size+1) and computes the next offset
 // token. Returning the (size+1)th row signals more pages remain.
-func paginate[T any](items []T, size, offset int) ([]T, string, error) {
+func paginate[T any](items []T, size, offset int) ([]T, string) {
 	if len(items) > size {
-		return items[:size], encodeOffset(offset + size), nil
+		return items[:size], encodeOffset(offset + size)
 	}
-	return items, "", nil
+	return items, ""
 }
 
 // HashPolicy computes a stable content hash over the policy-defining fields. The
